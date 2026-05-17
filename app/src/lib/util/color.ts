@@ -1,0 +1,68 @@
+export function textColorFor(bg: string): string {
+	const h = bg.replace("#", "");
+	const r = parseInt(h.substring(0, 2), 16);
+	const g = parseInt(h.substring(2, 4), 16);
+	const b = parseInt(h.substring(4, 6), 16);
+	return r * 0.299 + g * 0.587 + b * 0.114 > 150 ? "#000" : "#fff";
+}
+
+export function hexToHsl(hex: string): { h: number; s: number; l: number } {
+	const h = hex.replace("#", "");
+	const r = parseInt(h.substring(0, 2), 16) / 255;
+	const g = parseInt(h.substring(2, 4), 16) / 255;
+	const b = parseInt(h.substring(4, 6), 16) / 255;
+	const max = Math.max(r, g, b),
+		min = Math.min(r, g, b);
+	let hue = 0,
+		sat = 0;
+	const lit = (max + min) / 2;
+	if (max !== min) {
+		const d = max - min;
+		sat = lit > 0.5 ? d / (2 - max - min) : d / (max + min);
+		if (max === r) hue = ((g - b) / d + (g < b ? 6 : 0)) / 6;
+		else if (max === g) hue = ((b - r) / d + 2) / 6;
+		else hue = ((r - g) / d + 4) / 6;
+	}
+	return {
+		h: Math.round(hue * 360),
+		s: Math.round(sat * 100),
+		l: Math.round(lit * 100),
+	};
+}
+
+export function hslToHex(h: number, s: number, l: number): string {
+	s /= 100;
+	l /= 100;
+	const a = s * Math.min(l, 1 - l);
+	const f = (n: number) => {
+		const k = (n + h / 30) % 12;
+		const color = l - a * Math.max(Math.min(k - 3, 9 - k, 1), -1);
+		return Math.round(255 * color)
+			.toString(16)
+			.padStart(2, "0");
+	};
+	return `#${f(0)}${f(8)}${f(4)}`;
+}
+
+export function hslToRgb(h: number, s: number, l: number): [number, number, number] {
+	const a = s * Math.min(l, 1 - l);
+	const f = (n: number) => {
+		const k = (n + h / 30) % 12;
+		return Math.round(255 * (l - a * Math.max(Math.min(k - 3, 9 - k, 1), -1)));
+	};
+	return [f(0), f(8), f(4)];
+}
+
+export function hexToRgba(hex: string): [number, number, number, number] {
+	const h = hex.replace("#", "");
+	return [
+		parseInt(h.substring(0, 2), 16),
+		parseInt(h.substring(2, 4), 16),
+		parseInt(h.substring(4, 6), 16),
+		200,
+	];
+}
+
+export function rgbCss([r, g, b]: [number, number, number]): string {
+	return `rgb(${r}, ${g}, ${b})`;
+}

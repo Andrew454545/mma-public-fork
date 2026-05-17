@@ -1,0 +1,6 @@
+dist/
+node_modules/
+public/opensv/
+src-tauri/target/
+test/fixtures/
+public/borders.json

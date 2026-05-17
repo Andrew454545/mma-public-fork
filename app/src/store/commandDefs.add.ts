@@ -1,0 +1,220 @@
+import {
+	mdiUndo,
+	mdiRedo,
+	mdiFileImportOutline,
+	mdiFileExportOutline,
+	mdiContentSave,
+	mdiSelectRemove,
+	mdiSetCenter,
+	mdiSetAll,
+	mdiSelectInverse,
+	mdiCodeJson,
+	mdiFileDelimitedOutline,
+	mdiCheckDecagram,
+	mdiDatabaseArrowUp,
+	mdiMapMarkerCheck,
+	mdiHistory,
+	mdiEye,
+	mdiTagRemove,
+} from "@mdi/js";
+import { registerCommand } from "./commands.add";
+import {
+	undo,
+	redo,
+	selectEverything,
+	selectUntagged,
+	selectUnpanned,
+	selectInverse,
+	selectIntersection,
+	selectUnion,
+	resetSelections,
+	commitMap,
+	getCurrentMap,
+	getUndoRedoState,
+	deleteSelectedTags,
+	getSelections,
+} from "./useMapStore";
+
+registerCommand({
+	id: "save",
+	label: "Commit map",
+	icon: mdiContentSave,
+	group: "Map",
+	defaultBinding: "Mod+s",
+	execute: () => commitMap(),
+	enabled: () => getCurrentMap() !== null,
+});
+
+registerCommand({
+	id: "import",
+	label: "Import file",
+	icon: mdiFileImportOutline,
+	group: "Map",
+	execute: () => document.dispatchEvent(new CustomEvent("open-import")),
+	enabled: () => getCurrentMap() !== null,
+});
+
+registerCommand({
+	id: "undo",
+	label: "Undo",
+	icon: mdiUndo,
+	group: "Map",
+	defaultBinding: "Mod+z",
+	execute: undo,
+	enabled: () => getUndoRedoState().canUndo,
+});
+
+registerCommand({
+	id: "redo",
+	label: "Redo",
+	icon: mdiRedo,
+	group: "Map",
+	defaultBinding: "Mod+y",
+	execute: redo,
+	enabled: () => getUndoRedoState().canRedo,
+});
+
+registerCommand({
+	id: "selectAll",
+	label: "Select everything",
+	group: "Selections",
+	defaultBinding: "Mod+a",
+	execute: selectEverything,
+});
+
+registerCommand({
+	id: "select-untagged",
+	label: "Select untagged locations",
+	group: "Selections",
+	execute: selectUntagged,
+});
+
+registerCommand({
+	id: "select-unpanned",
+	label: "Select unpanned locations",
+	group: "Selections",
+	execute: selectUnpanned,
+});
+
+registerCommand({
+	id: "select-panoid",
+	label: "Select Pano ID locations",
+	group: "Selections",
+	execute: () => {},
+});
+
+registerCommand({
+	id: "select-no-panoid",
+	label: "Select non-Pano ID locations",
+	group: "Selections",
+	execute: () => {},
+});
+
+registerCommand({
+	id: "invert-selection",
+	label: "Invert selection",
+	icon: mdiSelectInverse,
+	group: "Selections",
+	execute: () => selectInverse(),
+});
+
+registerCommand({
+	id: "intersect-selections",
+	label: "Intersect (AND) selections",
+	icon: mdiSetCenter,
+	group: "Selections",
+	execute: () => selectIntersection(),
+});
+
+registerCommand({
+	id: "union-selections",
+	label: "Union (OR) selections",
+	icon: mdiSetAll,
+	group: "Selections",
+	execute: () => selectUnion(),
+});
+
+registerCommand({
+	id: "load-geojson",
+	label: "Load shapes from GeoJSON as selection",
+	icon: mdiCodeJson,
+	group: "Selections",
+	execute: () => {},
+});
+
+registerCommand({
+	id: "deselectAll",
+	label: "Deselect everything",
+	icon: mdiSelectRemove,
+	group: "Selections",
+	defaultBinding: "Mod+d",
+	execute: resetSelections,
+});
+
+registerCommand({
+	id: "bulk-validate",
+	label: "Validate locations",
+	icon: mdiCheckDecagram,
+	group: "Bulk Operations",
+	execute: () => document.dispatchEvent(new CustomEvent("open-bulk-op", { detail: "validate" })),
+});
+
+registerCommand({
+	id: "bulk-enrich",
+	label: "Enrich all locations with metadata",
+	icon: mdiDatabaseArrowUp,
+	group: "Bulk Operations",
+	execute: () => document.dispatchEvent(new CustomEvent("open-bulk-op", { detail: "enrich" })),
+});
+
+registerCommand({
+	id: "bulk-pin-pano",
+	label: "Pin all locations to pano ID",
+	icon: mdiMapMarkerCheck,
+	group: "Bulk Operations",
+	execute: () => document.dispatchEvent(new CustomEvent("open-bulk-op", { detail: "pinPano" })),
+});
+
+registerCommand({
+	id: "delete-selected-tags",
+	label: "Delete selected tags",
+	icon: mdiTagRemove,
+	group: "Tags",
+	execute: deleteSelectedTags,
+	enabled: () => getSelections().some((s) => s.props.type === "Tag"),
+});
+
+registerCommand({
+	id: "tag-download-csv",
+	label: "Download tag counts as CSV",
+	icon: mdiFileDelimitedOutline,
+	group: "Tags",
+	execute: () => {},
+});
+
+registerCommand({
+	id: "export",
+	label: "Export",
+	icon: mdiFileExportOutline,
+	group: "Map",
+	execute: () => document.dispatchEvent(new CustomEvent("open-export")),
+	enabled: () => getCurrentMap() !== null,
+});
+
+registerCommand({
+	id: "open-history",
+	label: "Open version history",
+	icon: mdiHistory,
+	group: "Map",
+	execute: () => document.dispatchEvent(new CustomEvent("open-history")),
+	enabled: () => getCurrentMap() !== null,
+});
+
+registerCommand({
+	id: "open-seen",
+	label: "Open seen locations",
+	icon: mdiEye,
+	group: "Map",
+	execute: () => document.dispatchEvent(new CustomEvent("open-seen")),
+	enabled: () => getCurrentMap() !== null,
+});

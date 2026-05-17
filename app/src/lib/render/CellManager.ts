@@ -1,0 +1,397 @@
+export interface CellDelta {
+	added: CellRenderEntry[];
+	updated: CellPatchEntry[];
+	removed: CellRemoval[];
+	colorPatches: CellColorPatch[];
+	fullReset?: boolean;
+}
+
+export interface CellRenderEntry {
+	cell: string;
+	id: number;
+	lng: number;
+	lat: number;
+	heading: number;
+	r: number;
+	g: number;
+	b: number;
+	a: number;
+}
+
+export interface CellPatchEntry {
+	cell: string;
+	cellIndex: number;
+	lng?: number;
+	lat?: number;
+	heading?: number;
+}
+
+export interface CellRemoval {
+	cell: string;
+	cellIndex: number;
+	id: number;
+}
+
+export interface CellColorPatch {
+	cell: string;
+	cellIndex: number;
+	r: number;
+	g: number;
+	b: number;
+	a: number;
+}
+
+const MIN_CAPACITY = 256;
+
+export class CellBuffer {
+	ids: number[] = [];
+	idToIndex = new Map<number, number>();
+	positions: Float32Array;
+	colors: Uint8Array;
+	angles: Float32Array;
+	count = 0;
+	capacity: number;
+	positionVersion = 0;
+	colorVersion = 0;
+
+	constructor(capacity = MIN_CAPACITY) {
+		this.capacity = capacity;
+		this.positions = new Float32Array(capacity * 2);
+		this.colors = new Uint8Array(capacity * 4);
+		this.angles = new Float32Array(capacity);
+	}
+
+	append(entry: CellRenderEntry) {
+		this.ensureCapacity(this.count + 1);
+		const i = this.count;
+		this.positions[i * 2] = entry.lng;
+		this.positions[i * 2 + 1] = entry.lat;
+		this.colors[i * 4] = entry.r;
+		this.colors[i * 4 + 1] = entry.g;
+		this.colors[i * 4 + 2] = entry.b;
+		this.colors[i * 4 + 3] = entry.a;
+		this.angles[i] = entry.heading;
+		this.ids[i] = entry.id;
+		this.idToIndex.set(entry.id, i);
+		this.count++;
+		this.positionVersion++;
+		this.colorVersion++;
+	}
+
+	swapRemove(index: number) {
+		const last = this.count - 1;
+		if (last < 0) return;
+		const removedId = this.ids[index];
+
+		if (index !== last) {
+			this.positions[index * 2] = this.positions[last * 2];
+			this.positions[index * 2 + 1] = this.positions[last * 2 + 1];
+			this.colors[index * 4] = this.colors[last * 4];
+			this.colors[index * 4 + 1] = this.colors[last * 4 + 1];
+			this.colors[index * 4 + 2] = this.colors[last * 4 + 2];
+			this.colors[index * 4 + 3] = this.colors[last * 4 + 3];
+			this.angles[index] = this.angles[last];
+
+			const movedId = this.ids[last];
+			this.ids[index] = movedId;
+			this.idToIndex.set(movedId, index);
+		}
+
+		this.idToIndex.delete(removedId);
+		this.count--;
+		this.positionVersion++;
+		this.colorVersion++;
+	}
+
+	patchPosition(index: number, lng?: number, lat?: number, heading?: number) {
+		if (index < 0 || index >= this.count) return;
+		if (lng != null) this.positions[index * 2] = lng;
+		if (lat != null) this.positions[index * 2 + 1] = lat;
+		if (heading != null) this.angles[index] = heading;
+		this.positionVersion++;
+	}
+
+	patchColor(index: number, r: number, g: number, b: number, a: number) {
+		if (index < 0 || index >= this.count) return;
+		this.colors[index * 4] = r;
+		this.colors[index * 4 + 1] = g;
+		this.colors[index * 4 + 2] = b;
+		this.colors[index * 4 + 3] = a;
+		this.colorVersion++;
+	}
+
+	private ensureCapacity(needed: number) {
+		if (needed <= this.capacity) return;
+		const newCap = Math.max(needed, this.capacity * 2, MIN_CAPACITY);
+		const newPos = new Float32Array(newCap * 2);
+		const newCol = new Uint8Array(newCap * 4);
+		const newAng = new Float32Array(newCap);
+		newPos.set(this.positions.subarray(0, this.count * 2));
+		newCol.set(this.colors.subarray(0, this.count * 4));
+		newAng.set(this.angles.subarray(0, this.count));
+		this.positions = newPos;
+		this.colors = newCol;
+		this.angles = newAng;
+		this.capacity = newCap;
+	}
+}
+
+export class CellManager {
+	cells = new Map<string, CellBuffer>();
+	totalCount = 0;
+	version = 0;
+
+	initFromBinary(buf: ArrayBuffer) {
+		this.cells.clear();
+		this.totalCount = 0;
+		this.selOverlayCount = 0;
+		this.selOverlayIds = [];
+		this.selOverlayVersion++;
+
+		const dv = new DataView(buf);
+		if (buf.byteLength < 4) return;
+		const cellCount = dv.getUint32(0, true);
+		let offset = 4;
+
+		for (let c = 0; c < cellCount; c++) {
+			const gh0 = dv.getUint8(offset);
+			const cellKey = String.fromCharCode(gh0);
+			const count = dv.getUint32(offset + 1, true);
+			offset += 5;
+
+			const cb = new CellBuffer(count);
+			cb.count = count;
+
+			const idBytes = count * 4;
+			const posBytes = count * 2 * 4;
+			const colBytes = count * 4;
+			const angBytes = count * 4;
+
+			const idBuf = new Uint32Array(buf.slice(offset, offset + idBytes));
+			offset += idBytes;
+			cb.ids = Array.from(idBuf);
+			cb.idToIndex.clear();
+			for (let i = 0; i < count; i++) cb.idToIndex.set(cb.ids[i], i);
+
+			cb.positions = new Float32Array(buf.slice(offset, offset + posBytes));
+			offset += posBytes;
+			cb.colors = new Uint8Array(buf.slice(offset, offset + colBytes));
+			offset += colBytes;
+			cb.angles = new Float32Array(buf.slice(offset, offset + angBytes));
+			offset += angBytes;
+
+			cb.capacity = count;
+
+			this.cells.set(cellKey, cb);
+			this.totalCount += count;
+		}
+
+		// Selection overlay: [u32 count][f32[] positions][u8[] colors][f32[] angles][u32[] ids]
+		if (offset + 4 <= buf.byteLength) {
+			const selCount = dv.getUint32(offset, true);
+			offset += 4;
+			if (selCount > 0) {
+				const selPosBytes = selCount * 2 * 4;
+				const selColBytes = selCount * 4;
+				const selAngBytes = selCount * 4;
+				const selIdBytes = selCount * 4;
+				this.selOverlayPositions = new Float32Array(buf.slice(offset, offset + selPosBytes));
+				offset += selPosBytes;
+				this.selOverlayColors = new Uint8Array(buf.slice(offset, offset + selColBytes));
+				offset += selColBytes;
+				this.selOverlayAngles = new Float32Array(buf.slice(offset, offset + selAngBytes));
+				offset += selAngBytes;
+				const selIds = new Uint32Array(buf.slice(offset, offset + selIdBytes));
+				this.selOverlayIds = Array.from(selIds);
+				this.selOverlayCount = selCount;
+			}
+		}
+
+		this.version++;
+	}
+
+	applyDelta(delta: CellDelta): Set<string> {
+		const affected = new Set<string>();
+
+		for (const rem of delta.removed) {
+			const cb = this.cells.get(rem.cell);
+			if (cb) {
+				cb.swapRemove(rem.cellIndex);
+				this.totalCount--;
+				affected.add(rem.cell);
+			}
+		}
+
+		for (const entry of delta.added) {
+			let cb = this.cells.get(entry.cell);
+			if (!cb) {
+				cb = new CellBuffer();
+				this.cells.set(entry.cell, cb);
+			}
+			cb.append(entry);
+			this.totalCount++;
+			affected.add(entry.cell);
+		}
+
+		for (const patch of delta.updated) {
+			const cb = this.cells.get(patch.cell);
+			if (cb) {
+				cb.patchPosition(
+					patch.cellIndex,
+					patch.lng ?? undefined,
+					patch.lat ?? undefined,
+					patch.heading ?? undefined,
+				);
+				affected.add(patch.cell);
+			}
+		}
+
+		for (const cp of delta.colorPatches) {
+			const cb = this.cells.get(cp.cell);
+			if (cb) {
+				cb.patchColor(cp.cellIndex, cp.r, cp.g, cp.b, cp.a);
+				affected.add(cp.cell);
+			}
+		}
+
+		this.version++;
+		return affected;
+	}
+
+	resolvePickFromCell(cellKey: string, cellIndex: number): number | null {
+		const cb = this.cells.get(cellKey);
+		if (!cb || cellIndex < 0 || cellIndex >= cb.count) return null;
+		return cb.ids[cellIndex] ?? null;
+	}
+
+	selOverlayPositions = new Float32Array(0);
+	selOverlayColors = new Uint8Array(0);
+	selOverlayAngles = new Float32Array(0);
+	selOverlayIds: number[] = [];
+	selOverlayCount = 0;
+	selOverlayVersion = 0;
+
+	buildSelectionOverlay(colorPatches: CellColorPatch[], _angles?: boolean) {
+		this.selOverlayCount = colorPatches.length;
+		if (colorPatches.length === 0) {
+			this.selOverlayIds = [];
+			this.selOverlayVersion++;
+			return;
+		}
+		const n = colorPatches.length;
+		this.selOverlayPositions = new Float32Array(n * 2);
+		this.selOverlayColors = new Uint8Array(n * 4);
+		this.selOverlayAngles = new Float32Array(n);
+		this.selOverlayIds = new Array(n);
+		for (let i = 0; i < n; i++) {
+			const cp = colorPatches[i];
+			const cb = this.cells.get(cp.cell);
+			if (!cb || cp.cellIndex >= cb.count) continue;
+			this.selOverlayPositions[i * 2] = cb.positions[cp.cellIndex * 2];
+			this.selOverlayPositions[i * 2 + 1] = cb.positions[cp.cellIndex * 2 + 1];
+			this.selOverlayColors[i * 4] = cp.r;
+			this.selOverlayColors[i * 4 + 1] = cp.g;
+			this.selOverlayColors[i * 4 + 2] = cp.b;
+			this.selOverlayColors[i * 4 + 3] = cp.a;
+			this.selOverlayAngles[i] = cb.angles[cp.cellIndex];
+			this.selOverlayIds[i] = cb.ids[cp.cellIndex];
+		}
+		this.selOverlayVersion++;
+	}
+
+	applySelectionBitmasks(
+		selColors: [number, number, number][],
+		cellEntries: { cellChar: string; locCount: number; masks: Uint8Array[] }[],
+	): Set<number> {
+		const numSels = selColors.length;
+		let totalSelected = 0;
+		const selectedIds = new Set<number>();
+
+		// Count total selected for overlay allocation
+		for (const entry of cellEntries) {
+			const cb = this.cells.get(entry.cellChar);
+			const n = cb ? Math.min(entry.locCount, cb.count) : 0;
+			for (let li = 0; li < n; li++) {
+				const byteIdx = li >> 3;
+				const bitIdx = li & 7;
+				for (let si = 0; si < numSels; si++) {
+					if (entry.masks[si][byteIdx] & (1 << bitIdx)) {
+						totalSelected++;
+						break;
+					}
+				}
+			}
+		}
+
+		this.selOverlayPositions = new Float32Array(totalSelected * 2);
+		this.selOverlayColors = new Uint8Array(totalSelected * 4);
+		this.selOverlayAngles = new Float32Array(totalSelected);
+		this.selOverlayIds = new Array(totalSelected);
+		let oi = 0;
+
+		for (const entry of cellEntries) {
+			const cb = this.cells.get(entry.cellChar);
+			if (!cb) continue;
+			const n = Math.min(entry.locCount, cb.count);
+
+			// Reset all colors in this cell to default
+			for (let li = 0; li < n; li++) {
+				const c4 = li * 4;
+				cb.colors[c4] = 42;
+				cb.colors[c4 + 1] = 42;
+				cb.colors[c4 + 2] = 42;
+				cb.colors[c4 + 3] = 255;
+			}
+
+			// Apply selections — last match wins, set main to alpha=0, add to overlay
+			for (let li = 0; li < n; li++) {
+				const byteIdx = li >> 3;
+				const bitIdx = li & 7;
+				let winSel = -1;
+				for (let si = numSels - 1; si >= 0; si--) {
+					if (entry.masks[si][byteIdx] & (1 << bitIdx)) {
+						winSel = si;
+						break;
+					}
+				}
+				if (winSel >= 0) {
+					const locId = cb.ids[li];
+					if (locId != null) selectedIds.add(locId);
+
+					// Hide in main layer
+					const c4 = li * 4;
+					cb.colors[c4] = 0;
+					cb.colors[c4 + 1] = 0;
+					cb.colors[c4 + 2] = 0;
+					cb.colors[c4 + 3] = 0;
+
+					// Add to overlay
+					const [r, g, b] = selColors[winSel];
+					this.selOverlayPositions[oi * 2] = cb.positions[li * 2];
+					this.selOverlayPositions[oi * 2 + 1] = cb.positions[li * 2 + 1];
+					this.selOverlayColors[oi * 4] = r;
+					this.selOverlayColors[oi * 4 + 1] = g;
+					this.selOverlayColors[oi * 4 + 2] = b;
+					this.selOverlayColors[oi * 4 + 3] = 255;
+					this.selOverlayAngles[oi] = cb.angles[li];
+					this.selOverlayIds[oi] = locId!;
+					oi++;
+				}
+			}
+			cb.colorVersion++;
+		}
+
+		this.selOverlayCount = oi;
+		this.selOverlayVersion++;
+		this.version++;
+		return selectedIds;
+	}
+
+	clear() {
+		this.cells.clear();
+		this.totalCount = 0;
+		this.selOverlayCount = 0;
+		this.selOverlayVersion++;
+		this.version++;
+	}
+}

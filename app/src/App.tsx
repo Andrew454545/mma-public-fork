@@ -1,0 +1,84 @@
+import { useState, useEffect } from "react";
+import { getCurrentWindow } from "@tauri-apps/api/window";
+import { useCurrentMap, openMap, closeMap, getCurrentMapId } from "@/store/useMapStore";
+import { MapList, BulkActions } from "@/components/map-list/MapList";
+import { MapEditor } from "@/components/editor/MapEditor";
+import { StatsForNerds } from "@/components/dialogs/StatsForNerds.add";
+import { SettingsPage } from "@/components/dialogs/SettingsPage.add";
+import { PluginMarketplace } from "@/components/dialogs/PluginMarketplace.add";
+import { useHotkey } from "@/lib/hooks/useHotkey";
+import { useBinding } from "@/lib/util/hotkeys.add";
+import { useSetting } from "@/store/settings.add";
+import { Icon } from "@/components/primitives/Icon";
+import { mdiCog, mdiPuzzle } from "@mdi/js";
+import { ToastContainer } from "@/components/primitives/Toast.add";
+import "@/plugins";
+
+const isEditorWindow = getCurrentWindow().label.startsWith("map-");
+
+export default function App() {
+	const map = useCurrentMap();
+	const [showStats, setShowStats] = useState(false);
+	const [showSettings, setShowSettings] = useState(false);
+	const [showPlugins, setShowPlugins] = useState(false);
+	const customCss = useSetting("customCss");
+
+	useHotkey(useBinding("toggleStats"), () => setShowStats((s) => !s));
+
+	useEffect(() => {
+		if (isEditorWindow && !map) {
+			getCurrentWindow().destroy();
+			return;
+		}
+	}, [map]);
+
+	useEffect(() => {
+		const onPopState = (e: PopStateEvent) => {
+			const targetId = e.state?.mapId ?? null;
+			if (targetId && targetId !== getCurrentMapId()) {
+				openMap(targetId, false);
+			} else if (!targetId && getCurrentMapId()) {
+				closeMap(false);
+			}
+		};
+		window.addEventListener("popstate", onPopState);
+		return () => window.removeEventListener("popstate", onPopState);
+	}, []);
+
+	useEffect(() => {
+		let el = document.getElementById("mma-custom-css") as HTMLStyleElement | null;
+		if (!el) {
+			el = document.createElement("style");
+			el.id = "mma-custom-css";
+			document.head.appendChild(el);
+		}
+		el.textContent = customCss;
+		return () => {
+			el!.textContent = "";
+		};
+	}, [customCss]);
+
+	return (
+		<>
+			{map ? <MapEditor /> : <MapList />}
+			{!showSettings && !showPlugins && (
+				<div
+					className="bottom-bar"
+					style={{ position: "fixed", bottom: 12, right: 12, zIndex: 5, display: "flex", gap: 4 }}
+				>
+					{!map && <BulkActions />}
+					<button className="settings-gear" onClick={() => setShowPlugins(true)} title="Plugins">
+						<Icon path={mdiPuzzle} />
+					</button>
+					<button className="settings-gear" onClick={() => setShowSettings(true)} title="Settings">
+						<Icon path={mdiCog} />
+					</button>
+				</div>
+			)}
+			{showStats && <StatsForNerds onClose={() => setShowStats(false)} />}
+			<SettingsPage open={showSettings} onOpenChange={setShowSettings} />
+			<PluginMarketplace open={showPlugins} onOpenChange={setShowPlugins} />
+			<ToastContainer />
+		</>
+	);
+}

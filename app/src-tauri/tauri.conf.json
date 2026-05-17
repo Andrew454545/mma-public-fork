@@ -1,0 +1,48 @@
+{
+	"$schema": "https://schema.tauri.app/config/2",
+	"productName": "Map Making App",
+	"version": "0.3.1",
+	"identifier": "app.map-making.local",
+	"build": {
+		"frontendDist": "../dist",
+		"devUrl": "http://localhost:5173",
+		"beforeDevCommand": "npm run dev",
+		"beforeBuildCommand": "npm run build"
+	},
+	"app": {
+		"windows": [
+			{
+				"title": "Map Making App",
+				"width": 1400,
+				"height": 900,
+				"resizable": true,
+				"fullscreen": false,
+				"visible": true,
+				"zoomHotkeysEnabled": true,
+				"backgroundColor": "#252521"
+			}
+		],
+		"security": {
+			"csp": null
+		}
+	},
+	"plugins": {
+		"updater": {
+			"endpoints": [
+				"https://github.com/ccmdi/mma/releases/latest/download/latest.json"
+			],
+			"pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEFGODZEODg4QjQ2MzhBQjkKUldTNWltTzBpTmlHcjhxRWpqN2t3TGpkeVVxSjNodFU2Qng3eDBoL004aHJQTHUrT0Fjd2NkOTYK"
+		}
+	},
+	"bundle": {
+		"active": true,
+		"targets": "all",
+		"icon": [
+			"icons/32x32.png",
+			"icons/128x128.png",
+			"icons/128x128@2x.png",
+			"icons/icon.icns",
+			"icons/icon.ico"
+		]
+	}
+}

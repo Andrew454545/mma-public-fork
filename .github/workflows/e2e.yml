@@ -1,0 +1,49 @@
+name: E2E Tests
+
+on:
+  workflow_dispatch:
+  # push:
+    branches: [master]
+
+jobs:
+  e2e:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: app/src-tauri
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - name: Install npm dependencies
+        working-directory: app
+        run: npm ci
+
+      - name: Build frontend + Tauri binary for e2e
+        working-directory: app
+        run: |
+          npm run build:e2e
+          cd src-tauri && cargo build --features e2e
+
+      - name: Install tauri-driver
+        run: cargo install tauri-driver
+
+      - name: Run e2e tests
+        working-directory: app
+        run: |
+          Start-Process -NoNewWindow -FilePath "tauri-driver" -ArgumentList "--port","4444"
+          Start-Sleep -Seconds 2
+          npm run test:e2e
+        env:
+          MMA_TEST_DB: "1"

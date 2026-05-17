@@ -1,0 +1,43 @@
+import { describe, it, expect } from "vitest";
+import { worldToTile, boundsToTiles, tileKey } from "@/lib/geo/photometa";
+
+describe("worldToTile", () => {
+	it("returns integer tile coordinates", () => {
+		const t = worldToTile(128, 128);
+		expect(Number.isInteger(t.x)).toBe(true);
+		expect(Number.isInteger(t.y)).toBe(true);
+	});
+
+	it("origin maps to tile 0,0 area", () => {
+		const t = worldToTile(0.001, 0.001);
+		expect(t.x).toBe(0);
+		expect(t.y).toBe(0);
+	});
+});
+
+describe("boundsToTiles", () => {
+	it("returns at least one tile for a small area", () => {
+		const tiles = boundsToTiles(-74.01, 40.71, -74.0, 40.72);
+		expect(tiles.length).toBeGreaterThanOrEqual(1);
+	});
+
+	it("returns more tiles for a larger area", () => {
+		const small = boundsToTiles(-74.01, 40.71, -74.0, 40.72);
+		const large = boundsToTiles(-74.05, 40.7, -73.95, 40.75);
+		expect(large.length).toBeGreaterThan(small.length);
+	});
+
+	it("each tile has x and y", () => {
+		const tiles = boundsToTiles(-74.01, 40.71, -74.0, 40.72);
+		for (const t of tiles) {
+			expect(typeof t.x).toBe("number");
+			expect(typeof t.y).toBe("number");
+		}
+	});
+});
+
+describe("tileKey", () => {
+	it("produces comma-separated string", () => {
+		expect(tileKey({ x: 10, y: 20 })).toBe("10,20");
+	});
+});

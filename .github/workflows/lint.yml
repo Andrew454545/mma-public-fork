@@ -1,0 +1,45 @@
+name: Lint & Type Check
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  lint:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: app/src-tauri
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - name: Install npm dependencies
+        working-directory: app
+        run: npm ci
+
+      - name: ESLint
+        working-directory: app
+        run: npx eslint src/
+
+      - name: TypeScript
+        working-directory: app
+        run: npx tsc --noEmit -p tsconfig.app.json
+
+      - name: Clippy
+        working-directory: app/src-tauri
+        run: cargo clippy -- -D warnings

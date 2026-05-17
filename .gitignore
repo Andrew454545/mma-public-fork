@@ -1,0 +1,39 @@
+node_modules/
+dist/
+app/src-tauri/target/
+*.Zone.Identifier
+editor.html
+editor_files/
+mma_files/
+mma.html
+package.json
+package-lock.json
+
+# IDE / editor
+.idea/
+.vscode/
+
+# WSL dotfiles
+.bash_profile
+.bashrc
+.zshrc
+.zprofile
+.profile
+.gitconfig
+.ripgreprc
+
+# Claude / MCP
+.claude/
+.mcp.json
+
+# Misc
+.gitmodules
+app/public/icon-1024.png
+app/src-tauri/icons/android/
+app/src-tauri/icons/ios/
+
+test-*
+lint.json
+docs/*
+CLAUDE.md
+mma-source/*

@@ -1,0 +1,1289 @@
+import { useEffect, useSyncExternalStore } from "react";
+import type { MapData, MapMeta, Location, Tag, WorkArea, ExtraFieldDef } from "@/types";
+import { emit as tauriEmit, listen } from "@tauri-apps/api/event";
+import { invoke } from "@tauri-apps/api/core";
+import * as storage from "@/lib/storage/storage";
+import * as vcs from "@/lib/storage/vcs";
+import { emit as emitEvent } from "@/lib/events";
+import { log } from "@/lib/util/log";
+import { ENRICHMENT_FIELD_DEFS } from "@/lib/data/fieldDefs.add";
+import { debugSpan } from "@/lib/util/debug";
+import type { CellDelta } from "@/lib/render/CellManager";
+
+type DeltaHandler = (delta: CellDelta) => void;
+let deltaHandlers: DeltaHandler[] = [];
+export function onRenderDelta(fn: DeltaHandler) {
+	deltaHandlers.push(fn);
+	return () => {
+		deltaHandlers = deltaHandlers.filter((h) => h !== fn);
+	};
+}
+export function emitRenderDelta(delta: CellDelta) {
+	for (const h of deltaHandlers) h(delta);
+}
+
+type SelectionBitmaskHandler = (
+	selColors: [number, number, number][],
+	cellEntries: { cellChar: string; locCount: number; masks: Uint8Array[] }[],
+	setIds: (ids: Set<number>) => void,
+) => void;
+let selBitmaskHandlers: SelectionBitmaskHandler[] = [];
+export function onSelectionBitmasks(fn: SelectionBitmaskHandler) {
+	selBitmaskHandlers.push(fn);
+	return () => {
+		selBitmaskHandlers = selBitmaskHandlers.filter((h) => h !== fn);
+	};
+}
+function emitSelectionBitmasks(
+	selColors: [number, number, number][],
+	cellEntries: { cellChar: string; locCount: number; masks: Uint8Array[] }[],
+) {
+	const setIds = (ids: Set<number>) => {
+		selectedLocationIds = ids;
+	};
+	for (const h of selBitmaskHandlers) h(selColors, cellEntries, setIds);
+}
+
+import {
+	type Selection,
+	type SelectionProps,
+	type PolygonGeometry,
+	addSelection as addSel,
+	removeSelection as removeSel,
+	intersectSelections,
+	unionSelections,
+	invertSelections,
+	toggleManualSelection as toggleManual,
+	setPolygonName as renamePolygonSel,
+	setSelectionColor as setSelColor,
+	reorderSelections,
+	composeSelections as composeSels,
+	composeWithChild as composeWithChildSel,
+	decomposeChild as decomposeChildSel,
+	removeFromComposite as removeFromCompositeSel,
+	composeSiblings as composeSiblingsSel,
+} from "./selections";
+
+type Listener = () => void;
+
+let listeners: Listener[] = [];
+function subscribe(fn: Listener) {
+	listeners.push(fn);
+	return () => {
+		listeners = listeners.filter((l) => l !== fn);
+	};
+}
+function notify() {
+	listeners.forEach((fn) => fn());
+}
+
+// --- Map list state ---
+let mapListVersion = 0;
+function getMapListSnapshot() {
+	return mapListVersion;
+}
+
+let cachedMapList: MapMeta[] = [];
+export function useMapList() {
+	useSyncExternalStore(subscribe, getMapListSnapshot);
+	return cachedMapList;
+}
+
+async function reloadMapList() {
+	cachedMapList = await storage.listMaps();
+	mapListVersion++;
+	notify();
+}
+
+export async function invalidateMapList() {
+	await reloadMapList();
+	tauriEmit("map-list-changed");
+}
+
+// --- Extra field index (incremental cache of known extra keys) ---
+interface ExtraFieldInfo {
+	count: number;
+	numericCount: number;
+}
+let extraFieldIndex = new Map<string, ExtraFieldInfo>();
+
+function indexExtrasFromLocations(locs: Location[]) {
+	for (const loc of locs) {
+		if (!loc.extra) continue;
+		for (const [k, v] of Object.entries(loc.extra)) {
+			const info = extraFieldIndex.get(k) ?? { count: 0, numericCount: 0 };
+			info.count++;
+			if (typeof v === "number") info.numericCount++;
+			extraFieldIndex.set(k, info);
+		}
+	}
+}
+
+function indexExtraPatch(patch: Record<string, unknown>) {
+	for (const [k, v] of Object.entries(patch)) {
+		const info = extraFieldIndex.get(k) ?? { count: 0, numericCount: 0 };
+		info.count++;
+		if (typeof v === "number") info.numericCount++;
+		extraFieldIndex.set(k, info);
+	}
+}
+
+export function getExtraFieldIndex(): ReadonlyMap<string, { count: number; numericCount: number }> {
+	return extraFieldIndex;
+}
+
+export function useExtraFieldIndex(): ReadonlyMap<string, { count: number; numericCount: number }> {
+	useSyncExternalStore(subscribe, getMapSnapshot);
+	return extraFieldIndex;
+}
+
+// --- Current map state ---
+let currentMapId: string | null = null;
+let currentMap: MapData | null = null;
+/** Persisted bitmasks per selection key. Updated incrementally on each
+ *  mutation (delta refresh) when the column store is available. */
+let selections: Selection[] = [];
+let selectionVersion = 0;
+let selectedLocationIds = new Set<number>();
+let activeLocationId: number | null = null;
+let review: { locations: number[]; index: number } | null = null;
+let workArea: WorkArea = "overview";
+let activePluginId: string | null = null;
+let mapVersion = 0;
+let tagCounts: Record<number, number> = {};
+
+export function useTagCounts(): Record<number, number> {
+	useSyncExternalStore(subscribe, getMapSnapshot);
+	return tagCounts;
+}
+
+async function computeCommitDiff(): Promise<{ added: number; removed: number; modified: number }> {
+	const [added, removed, modified]: [number, number, number] = await invoke("store_commit_diff");
+	return { added, removed, modified };
+}
+
+function getMapSnapshot() {
+	return mapVersion;
+}
+
+export function refreshAfterMutation() {
+	if (!currentMap) {
+		selections = [];
+		selectionVersion++;
+		selectedLocationIds = new Set();
+		mapVersion++;
+		notify();
+		return;
+	}
+	mapVersion++;
+	notify();
+	if (selections.length > 0) {
+		applySelectionUpdate((_, sels) => sels);
+	}
+	// NOTE: callers that remove locations must clear activeLocationId
+	// synchronously BEFORE calling this (see removeLocations). Undo/redo
+	// uses fullReset which re-fetches everything. Do NOT add an async
+	// store_has_location check here — it races with pending invoke()s.
+}
+
+export function useCurrentMap() {
+	useSyncExternalStore(subscribe, getMapSnapshot);
+	return currentMap;
+}
+
+/** Reactive map version counter. Bumps on every mutation. Use as a
+ *  React effect dep when you want to react to changes to currentMap or
+ *  its locations without depending on reference equality of the inner
+ *  `locations: Location[]` array (which is now mutated in place on add). */
+export function useMapVersion(): number {
+	useSyncExternalStore(subscribe, getMapSnapshot);
+	return mapVersion;
+}
+
+export function useSelectedLocationIds() {
+	useSyncExternalStore(subscribe, getMapSnapshot);
+	return selectedLocationIds;
+}
+
+let cachedActiveLocation: Location | null = null;
+
+export function useActiveLocation(): Location | null {
+	useSyncExternalStore(subscribe, getMapSnapshot);
+	return cachedActiveLocation;
+}
+
+export function useWorkArea() {
+	useSyncExternalStore(subscribe, getMapSnapshot);
+	return workArea;
+}
+
+export function useReview() {
+	useSyncExternalStore(subscribe, getMapSnapshot);
+	return review;
+}
+
+let cachedCommitDiff = { added: 0, removed: 0, modified: 0 };
+
+export function useCommitDiff() {
+	const version = useSyncExternalStore(subscribe, getMapSnapshot);
+	useEffect(() => {
+		computeCommitDiff().then((d) => {
+			if (
+				d.added !== cachedCommitDiff.added ||
+				d.removed !== cachedCommitDiff.removed ||
+				d.modified !== cachedCommitDiff.modified
+			) {
+				cachedCommitDiff = d;
+				mapVersion++;
+				notify();
+			}
+		});
+	}, [version]);
+	return cachedCommitDiff;
+}
+
+// --- Autosave ---
+let autosaveTimer: ReturnType<typeof setTimeout> | null = null;
+let inflightSave: Promise<void> | null = null;
+const AUTOSAVE_DELAY_MS = 2000;
+
+export async function getDirtyCount(): Promise<number> {
+	const result: { locationCount: number; version: number; dirtyCount: number } =
+		await invoke("store_get_summary");
+	return result.dirtyCount;
+}
+
+export function scheduleSave() {
+	if (autosaveTimer) clearTimeout(autosaveTimer);
+	autosaveTimer = setTimeout(() => {
+		autosaveTimer = null;
+		doSave();
+	}, AUTOSAVE_DELAY_MS);
+}
+
+async function doSave(): Promise<void> {
+	if (!currentMapId || !currentMap) return;
+	const span = debugSpan("doSave");
+	const t0 = performance.now();
+	inflightSave = storage
+		.saveDirty()
+		.then(() => {
+			log.debug(`[save] saveDirty=${(performance.now() - t0).toFixed(0)}ms`);
+			invalidateMapList();
+		})
+		.catch((err) => {
+			scheduleSave();
+			log.error("Autosave failed, will retry:", err);
+		})
+		.finally(() => {
+			inflightSave = null;
+			span.end();
+		});
+	await inflightSave;
+}
+
+export async function flushSave(): Promise<void> {
+	if (autosaveTimer) clearTimeout(autosaveTimer);
+	autosaveTimer = null;
+	if (inflightSave) await inflightSave;
+	await doSave();
+}
+
+// --- Init (called once at startup) ---
+export async function initStore() {
+	cachedMapList = await storage.listMaps();
+	notify();
+	listen("map-list-changed", () => reloadMapList());
+}
+
+// --- Actions ---
+export async function openMap(id: string, pushHistory = true) {
+	if (autosaveTimer) {
+		clearTimeout(autosaveTimer);
+		autosaveTimer = null;
+	}
+	if (inflightSave) await inflightSave;
+	const totalSpan = debugSpan("openMap:total");
+	currentMapId = id;
+	const t0 = performance.now();
+	currentMap = await storage.getMap(id);
+	log.debug(`[openMap] getMap=${(performance.now() - t0).toFixed(0)}ms`);
+	extraFieldIndex = new Map();
+
+	if (currentMap) {
+		const t1 = performance.now();
+		try {
+			await invoke("store_open_map", { mapId: id });
+			log.debug(`[openMap] store_open_map=${(performance.now() - t1).toFixed(0)}ms`);
+			tagCounts = await invoke<Record<number, number>>("store_tag_counts");
+		} catch (e) {
+			log.error("[openMap] store_open_map failed:", e);
+			currentMap = null;
+			currentMapId = null;
+			notify();
+			return;
+		}
+		storage.touchMapOpened(id);
+	}
+
+	selections = [];
+	selectedLocationIds = new Set();
+	activeLocationId = null;
+	review = null;
+	workArea = "overview";
+	undoRedoState = { canUndo: false, canRedo: false };
+
+	mapVersion++;
+	notify();
+	totalSpan.end();
+	if (pushHistory) history.pushState({ mapId: id }, "", `#map/${id}`);
+	emitEvent("map:open", currentMap);
+}
+
+export async function closeMap(pushHistory = true) {
+	await flushSave();
+	emitEvent("map:close");
+	currentMapId = null;
+	currentMap = null;
+
+	selections = [];
+	selectedLocationIds = new Set();
+	activeLocationId = null;
+	review = null;
+	workArea = "overview";
+
+	await invoke("store_close_map");
+	emitRenderDelta({ added: [], updated: [], removed: [], colorPatches: [], fullReset: true });
+	undoRedoState = { canUndo: false, canRedo: false };
+	tagCounts = {};
+	mapVersion++;
+	notify();
+	if (pushHistory) history.pushState({ mapId: null }, "", "#");
+}
+
+export function getCurrentMapId() {
+	return currentMapId;
+}
+
+export function getCurrentMap() {
+	return currentMap;
+}
+
+export function getActiveLocation(): Location | null {
+	return cachedActiveLocation;
+}
+
+export async function fetchAllLocations(): Promise<Location[]> {
+	const path: string = await invoke("store_get_all_locations");
+	const res = await fetch("http://mma-buf.localhost/" + path.replace(/\\/g, "/"));
+	return res.json();
+}
+
+export async function fetchLocation(id: number): Promise<Location | null> {
+	return invoke("store_get_location", { id });
+}
+
+export async function fetchLocationsByIds(ids: number[]): Promise<Location[]> {
+	return invoke("store_get_locations_by_ids", { ids });
+}
+
+export function getSelections() {
+	return selections;
+}
+
+export function getSelectedLocationIds() {
+	return selectedLocationIds;
+}
+
+export async function createMap(name: string, folder: string | null = null) {
+	await storage.createMap(name, folder);
+	await invalidateMapList();
+}
+
+export async function deleteMap(id: string) {
+	// TODO: if this map is open in another window, that window won't know it was deleted
+	await storage.deleteMap(id);
+	if (currentMapId === id) await closeMap();
+	await invalidateMapList();
+}
+
+export async function renameFolder(from: string, to: string) {
+	await storage.renameFolder(from, to);
+	await invalidateMapList();
+}
+
+export async function moveMapToFolder(mapId: string, folder: string | null) {
+	const idx = cachedMapList.findIndex((m) => m.id === mapId);
+	if (idx !== -1) {
+		cachedMapList = cachedMapList.map((m) => (m.id === mapId ? { ...m, folder } : m));
+		mapListVersion++;
+		notify();
+	}
+	await storage.moveMapToFolder(mapId, folder);
+	tauriEmit("map-list-changed");
+}
+
+export async function deleteFolder(name: string) {
+	await storage.deleteFolder(name);
+	await invalidateMapList();
+}
+
+export async function getAllMaps(): Promise<MapData[]> {
+	const metas = await storage.listMaps();
+	const maps: MapData[] = [];
+	for (const meta of metas) {
+		const map = await storage.getMap(meta.id);
+		if (map) maps.push(map);
+	}
+	return maps;
+}
+
+export async function renameMap(id: string, name: string) {
+	await storage.updateMapMeta(id, { name });
+	if (currentMap && currentMapId === id) currentMap.meta.name = name;
+	refreshAfterMutation();
+	await invalidateMapList();
+}
+
+export async function updateMapLabels(id: string, labels: string[]) {
+	await storage.updateMapLabels(id, labels);
+	if (currentMap && currentMapId === id) currentMap.meta.labels = labels;
+	await invalidateMapList();
+}
+
+export async function updateMapMeta(patch: Partial<MapMeta>) {
+	if (!currentMapId || !currentMap) return;
+	await storage.updateMapMeta(currentMapId, patch);
+	if (patch.name !== undefined) currentMap.meta.name = patch.name;
+	if (patch.description !== undefined) currentMap.meta.description = patch.description;
+	if (patch.folder !== undefined) currentMap.meta.folder = patch.folder;
+	if (patch.settings !== undefined) currentMap.meta.settings = patch.settings;
+	if (patch.scoreBounds !== undefined) currentMap.meta.scoreBounds = patch.scoreBounds;
+	if (patch.extra !== undefined) currentMap.meta.extra = patch.extra;
+	refreshAfterMutation();
+	await invalidateMapList();
+}
+
+export async function updateMapExtraFields(fields: Record<string, ExtraFieldDef>) {
+	if (!currentMapId || !currentMap) return;
+	const current = currentMap.meta.extra ?? {};
+	const merged = { ...current, fields: { ...current.fields, ...fields } };
+	currentMap = { ...currentMap, meta: { ...currentMap.meta, extra: merged } };
+	mapVersion++;
+	notify();
+	await storage.updateMapMeta(currentMapId, { extra: merged } as Partial<MapMeta>);
+}
+
+export async function setMapExtraFields(fields: Record<string, ExtraFieldDef>) {
+	if (!currentMapId || !currentMap) return;
+	const current = currentMap.meta.extra ?? {};
+	const replaced = { ...current, fields };
+	currentMap = { ...currentMap, meta: { ...currentMap.meta, extra: replaced } };
+	mapVersion++;
+	notify();
+	await storage.updateMapMeta(currentMapId, { extra: replaced } as Partial<MapMeta>);
+}
+
+function autoRegisterFieldDefs(extraKeys: string[]) {
+	if (!currentMap) return;
+	const existing = currentMap.meta.extra?.fields ?? {};
+	const newDefs: Record<string, ExtraFieldDef> = {};
+	for (const key of extraKeys) {
+		if (!existing[key] && ENRICHMENT_FIELD_DEFS[key]) {
+			newDefs[key] = ENRICHMENT_FIELD_DEFS[key];
+		}
+	}
+	if (Object.keys(newDefs).length > 0) {
+		updateMapExtraFields(newDefs);
+	}
+}
+
+export function addLocationCount(delta: number) {
+	if (!currentMap) return;
+	currentMap = {
+		...currentMap,
+		meta: { ...currentMap.meta, locationCount: currentMap.meta.locationCount + delta },
+	};
+}
+
+interface MutationResultJS {
+	locationCount: number;
+	canUndo: boolean;
+	canRedo: boolean;
+	delta: CellDelta;
+	tagCounts: Record<number, number>;
+}
+
+function syncMutationResult(r: MutationResultJS) {
+	if (!currentMap) return;
+	const needsNotify =
+		currentMap.meta.locationCount !== r.locationCount ||
+		undoRedoState.canUndo !== r.canUndo ||
+		undoRedoState.canRedo !== r.canRedo;
+	currentMap = {
+		...currentMap,
+		meta: { ...currentMap.meta, locationCount: r.locationCount },
+	};
+	undoRedoState = { canUndo: r.canUndo, canRedo: r.canRedo };
+	tagCounts = r.tagCounts;
+	if (needsNotify) {
+		mapVersion++;
+		notify();
+	}
+}
+
+async function mutate(cmd: string, args: Record<string, unknown>): Promise<MutationResultJS> {
+	const r: MutationResultJS = await invoke(cmd, args);
+	emitRenderDelta(r.delta);
+	syncMutationResult(r);
+	refreshAfterMutation();
+	return r;
+}
+
+export async function addLocations(locs: Location[], opts?: { hideInDelta?: boolean }) {
+	if (!currentMap || locs.length === 0) return;
+	indexExtrasFromLocations(locs);
+	const extraKeys = new Set<string>();
+	for (const l of locs) if (l.extra) for (const k of Object.keys(l.extra)) extraKeys.add(k);
+	if (extraKeys.size > 0) autoRegisterFieldDefs([...extraKeys]);
+	const t0 = performance.now();
+	let r: MutationResultJS & { version: number };
+	try {
+		r = await invoke<MutationResultJS & { version: number }>("store_add_locations", {
+			locations: locs,
+		});
+	} catch (e) {
+		log.error("[add] store_add_locations failed:", e);
+		return;
+	}
+	const t1 = performance.now();
+	for (let i = 0; i < r.delta.added.length && i < locs.length; i++) {
+		locs[i].id = r.delta.added[i].id;
+	}
+	if (opts?.hideInDelta) {
+		for (const entry of r.delta.added) {
+			entry.a = 0;
+		}
+	}
+	emitRenderDelta(r.delta);
+	log.debug(
+		`[add] ipc_roundtrip=${(t1 - t0).toFixed(0)}ms delta: +${r.delta.added.length} -${r.delta.removed.length}`,
+	);
+	syncMutationResult(r);
+	refreshAfterMutation();
+	scheduleSave();
+	emitEvent("location:add", locs);
+}
+
+export async function duplicateLocation(locId: number): Promise<number | null> {
+	if (!currentMap) return null;
+	const loc: Location | null = await invoke("store_get_location", { id: locId });
+	if (!loc) return null;
+	const now = new Date().toISOString();
+	const clone: Location = { ...loc, id: 0, createdAt: now, modifiedAt: now };
+	await addLocations([clone]);
+	return clone.id;
+}
+
+export function removeLocations(ids: Set<number>) {
+	if (!currentMap || ids.size === 0) return;
+	const t0 = performance.now();
+	invoke<MutationResultJS & { version: number }>("store_remove_locations", { ids: [...ids] })
+		.then((r) => {
+			log.debug(
+				`[delete] ipc_roundtrip=${(performance.now() - t0).toFixed(0)}ms ids=${ids.size} delta: +${r.delta.added.length} -${r.delta.removed.length}`,
+			);
+			emitRenderDelta(r.delta);
+			syncMutationResult(r);
+			if (selections.length > 0) {
+				applySelectionUpdate((_, sels) => sels);
+			}
+		})
+		.catch((e) => log.error("[delete] store_remove_locations failed:", e));
+	if (activeLocationId && ids.has(activeLocationId)) {
+		activeLocationId = null;
+		cachedActiveLocation = null;
+		workArea = "overview";
+	}
+	mapVersion++;
+	notify();
+	scheduleSave();
+	emitEvent("location:remove", [...ids]);
+}
+
+function buildUpdates(
+	items: { id: number; patch: Partial<Location> }[],
+): [number, Record<string, unknown>][] {
+	return items.map(({ id, patch }) => {
+		const p: Record<string, unknown> = {};
+		for (const [k, v] of Object.entries(patch)) {
+			if (k !== "id") p[k] = v;
+		}
+		return [id, p];
+	});
+}
+
+export function updateLocation(locId: number, patch: Partial<Location>) {
+	if (!currentMap) return;
+	const updates = buildUpdates([{ id: locId, patch }]);
+	mutate("store_update_locations", { updates })
+		.then(() => {
+			if (activeLocationId === locId) {
+				invoke("store_get_location", { id: locId })
+					.then((loc: unknown) => {
+						cachedActiveLocation = (loc as Location) ?? null;
+						mapVersion++;
+						notify();
+					})
+					.catch((e) => log.error("[update] store_get_location refresh failed:", e));
+			}
+		})
+		.catch((e) => log.error("[update] store_update_locations failed:", e));
+	scheduleSave();
+	emitEvent("location:update", { id: locId, ...patch });
+}
+
+export function batchUpdateLocations(updates: { id: number; patch: Partial<Location> }[]) {
+	if (!currentMap || updates.length === 0) return Promise.resolve();
+	const p = mutate("store_update_locations", { updates: buildUpdates(updates) }).catch((e) =>
+		log.error("[batchUpdate] store_update_locations failed:", e),
+	);
+	scheduleSave();
+	return p;
+}
+
+export function patchLocationExtra(
+	locId: number,
+	extraPatch: Record<string, unknown>,
+	replace = false,
+) {
+	if (!currentMap) return;
+	indexExtraPatch(extraPatch);
+	autoRegisterFieldDefs(Object.keys(extraPatch));
+	const send = (extra: Record<string, unknown>) => {
+		mutate("store_update_locations", { updates: [[locId, { extra }]], recordUndo: false }).then(
+			() => {
+				if (activeLocationId === locId) {
+					invoke("store_get_location", { id: locId }).then((loc: unknown) => {
+						cachedActiveLocation = (loc as Location) ?? null;
+						mapVersion++;
+						notify();
+					});
+				}
+			},
+		);
+		scheduleSave();
+	};
+	if (replace) {
+		send(extraPatch);
+	} else {
+		invoke<Location>("store_get_location", { id: locId }).then((loc) => {
+			send({ ...(loc?.extra || {}), ...extraPatch });
+		});
+	}
+}
+
+// --- Selections ---
+
+export function useSelections() {
+	useSyncExternalStore(subscribe, getMapSnapshot);
+	return selections;
+}
+
+export function useSelectionVersion() {
+	useSyncExternalStore(subscribe, getMapSnapshot);
+	return selectionVersion;
+}
+
+async function applySelectionUpdate(updater: (m: MapData, sels: Selection[]) => Selection[]) {
+	if (!currentMap) return;
+	const t0 = performance.now();
+	selections = updater(currentMap, selections);
+	const sels = selections.map((s) => {
+		let color = s.color;
+		if (s.props.type === "Tag" && currentMap) {
+			const tag = currentMap.meta.tags[s.props.tagId];
+			if (tag) {
+				const r = parseInt(tag.color.slice(1, 3), 16);
+				const g = parseInt(tag.color.slice(3, 5), 16);
+				const b = parseInt(tag.color.slice(5, 7), 16);
+				color = [r, g, b] as [number, number, number];
+			}
+		}
+		return { props: s.props, color };
+	});
+	const t1 = performance.now();
+	let result: { counts: number[]; patchFile: string | null; selectedCount: number };
+	try {
+		result = await invoke("store_sync_selections", { sels });
+	} catch (e) {
+		log.error("[selection] store_sync_selections failed:", e);
+		return;
+	}
+	const t2 = performance.now();
+	for (let i = 0; i < selections.length; i++) {
+		selections[i] = { ...selections[i], count: result.counts[i] ?? 0 };
+	}
+	if (result.patchFile) {
+		const clean = result.patchFile.replace(/\\/g, "/");
+		const resp = await fetch(`http://mma-buf.localhost/${clean}`);
+		const buf = await resp.arrayBuffer();
+		const dv = new DataView(buf);
+		let off = 0;
+		const numSels = dv.getUint8(off);
+		off += 1;
+		const selColors: [number, number, number][] = [];
+		for (let i = 0; i < numSels; i++) {
+			selColors.push([dv.getUint8(off), dv.getUint8(off + 1), dv.getUint8(off + 2)]);
+			off += 3;
+		}
+		const numCells = dv.getUint8(off);
+		off += 1;
+
+		const cellEntries: { cellChar: string; locCount: number; masks: Uint8Array[] }[] = [];
+		for (let ci = 0; ci < numCells; ci++) {
+			const cellChar = String.fromCharCode(dv.getUint8(off));
+			off += 1;
+			const locCount = dv.getUint32(off, true);
+			off += 4;
+			const maskBytes = Math.ceil(locCount / 8);
+			const masks: Uint8Array[] = [];
+			for (let si = 0; si < numSels; si++) {
+				masks.push(new Uint8Array(buf, off, maskBytes));
+				off += maskBytes;
+			}
+			cellEntries.push({ cellChar, locCount, masks });
+		}
+
+		emitSelectionBitmasks(selColors, cellEntries);
+	}
+	const t3 = performance.now();
+	log.debug(
+		`[selection] total=${(t3 - t0).toFixed(0)}ms ipc=${(t2 - t1).toFixed(0)}ms apply=${(t3 - t2).toFixed(0)}ms selected=${result.selectedCount}`,
+	);
+	selectionVersion++;
+	mapVersion++;
+	notify();
+	emitEvent("selection:change", selections);
+}
+
+export function addSelection(props: SelectionProps) {
+	return applySelectionUpdate((m, sels) => addSel(m, sels, props));
+}
+
+export function removeSelection(key: string) {
+	return applySelectionUpdate((_m, sels) => removeSel(sels, key));
+}
+
+export function resetSelections() {
+	return applySelectionUpdate(() => []);
+}
+
+export function selectIntersection(keys: string[] | null = null) {
+	return applySelectionUpdate((m, sels) => intersectSelections(m, sels, keys));
+}
+
+export function selectUnion(keys: string[] | null = null) {
+	return applySelectionUpdate((m, sels) => unionSelections(m, sels, keys));
+}
+
+export function selectInverse(keys: string[] | null = null) {
+	return applySelectionUpdate((m, sels) => invertSelections(m, sels, keys));
+}
+
+export function toggleManualSelection(locationId: number) {
+	return applySelectionUpdate((m, sels) => toggleManual(m, sels, locationId));
+}
+
+export function selectEverything() {
+	return addSelection({ type: "Everything" });
+}
+
+export function selectUntagged() {
+	return addSelection({ type: "Untagged" });
+}
+
+export function selectUnpanned() {
+	return addSelection({ type: "Unpanned" });
+}
+
+export function selectPanoIds() {
+	return addSelection({ type: "PanoIds" });
+}
+
+export function selectNotPanoIds() {
+	return addSelection({ type: "NotPanoIds" });
+}
+
+export function selectDuplicates(distance: number) {
+	return addSelection({ type: "Duplicates", distance });
+}
+
+export function selectTag(tagId: number) {
+	return addSelection({ type: "Tag", tagId });
+}
+
+export function selectPolygon(polygon: PolygonGeometry, includeInformational = false) {
+	return addSelection({ type: "Polygon", polygon, includeInformational });
+}
+
+export function selectFilter(
+	field: string,
+	op: import("./selections").FilterOp,
+	value: unknown,
+	value2?: unknown,
+) {
+	return addSelection({ type: "Filter", field, op, value, value2 });
+}
+
+export function setPolygonName(key: string, name: string) {
+	return applySelectionUpdate((_m, sels) => renamePolygonSel(sels, key, name));
+}
+
+// TODO: debounce — color picker fires this on every drag tick, triggering a full
+// store_sync_selections IPC each time. Laggy on large maps.
+export function setSelectionColor(key: string, color: [number, number, number]) {
+	applySelectionUpdate((_m, sels) => setSelColor(sels, key, color));
+}
+
+export function reorderSelection(fromKey: string, toKey: string, position: "before" | "after") {
+	applySelectionUpdate((_m, sels) => reorderSelections(sels, fromKey, toKey, position));
+}
+
+export function composeSelections(
+	dragKey: string,
+	dropKey: string,
+	mode: "intersection" | "union",
+	dragParent: string | null,
+	dropParent: string | null,
+) {
+	applySelectionUpdate((m, sels) => {
+		if (dragParent && dropParent && dragParent === dropParent) {
+			return composeSiblingsSel(m, sels, dragParent, dragKey, dropKey, mode);
+		}
+		const updated = dragParent ? decomposeChildSel(m, sels, dragParent, dragKey) : sels;
+		if (dropParent) {
+			return composeWithChildSel(m, updated, dragKey, dropParent, dropKey, mode);
+		}
+		return composeSels(m, updated, dragKey, dropKey, mode);
+	});
+}
+
+export function decomposeChild(parentKey: string, childKey: string) {
+	applySelectionUpdate((m, sels) => decomposeChildSel(m, sels, parentKey, childKey));
+}
+
+export function removeChildFromSelection(parentKey: string, childKey: string) {
+	applySelectionUpdate((m, sels) => removeFromCompositeSel(m, sels, parentKey, childKey));
+}
+
+export function toggleTagSelection(tagId: number) {
+	if (!currentMap) return;
+	const key = `tag:${tagId}`;
+	const exists = selections.some((s) => s.key === key);
+	if (exists) removeSelection(key);
+	else selectTag(tagId);
+}
+
+export function useSelectedTagIds() {
+	useSyncExternalStore(subscribe, getMapSnapshot);
+	const ids = new Set<number>();
+	for (const s of selections) if (s.props.type === "Tag") ids.add(s.props.tagId);
+	return ids;
+}
+
+export async function setActiveLocation(id: number | null) {
+	const t0 = performance.now();
+	activeLocationId = id;
+	invoke("store_set_active", { id }).catch((e) =>
+		log.error("[setActive] store_set_active failed:", e),
+	);
+	if (id) {
+		const loc: Location | null = await invoke("store_get_location", { id });
+		log.debug(`[setActive] store_get_location ipc=${(performance.now() - t0).toFixed(0)}ms`);
+		cachedActiveLocation = loc;
+		workArea = "location";
+	} else {
+		cachedActiveLocation = null;
+		workArea = activePluginId ? "plugin" : "overview";
+	}
+	mapVersion++;
+	notify();
+	log.debug(`[setActive] total=${(performance.now() - t0).toFixed(0)}ms`);
+}
+
+export function setWorkArea(area: WorkArea) {
+	workArea = area;
+	if (area !== "location") activeLocationId = null;
+	if (area !== "plugin") activePluginId = null;
+	mapVersion++;
+	notify();
+}
+
+// --- Plugin mode ---
+
+export function useActivePluginId() {
+	useSyncExternalStore(subscribe, getMapSnapshot);
+	return activePluginId;
+}
+
+export function getWorkArea() {
+	return workArea;
+}
+
+export function getActivePluginId() {
+	return activePluginId;
+}
+
+export function setPluginMode(pluginId: string) {
+	workArea = "plugin";
+	activePluginId = pluginId;
+	activeLocationId = null;
+	mapVersion++;
+	notify();
+}
+
+export function exitPluginMode() {
+	workArea = "overview";
+	activePluginId = null;
+	mapVersion++;
+	notify();
+}
+
+// --- Tag CRUD ---
+
+function persistTags() {
+	if (currentMapId && currentMap) storage.saveTags(currentMapId, currentMap.meta.tags);
+}
+
+function reconcileTags() {
+	if (!currentMap) return;
+	const tags = currentMap.meta.tags;
+	let patched = false;
+	const newTags = { ...tags };
+	for (const idStr of Object.keys(tagCounts)) {
+		const id = Number(idStr);
+		if (tagCounts[id] > 0) {
+			if (!tags[id]) {
+				newTags[id] = {
+					id,
+					name: `Tag ${id}`,
+					color: `hsl(${(id * 137) % 360}, 60%, 50%)`,
+					visible: true,
+				};
+				patched = true;
+			} else if (!tags[id].visible) {
+				newTags[id] = { ...tags[id], visible: true };
+				patched = true;
+			}
+		}
+	}
+	if (patched) {
+		currentMap = { ...currentMap, meta: { ...currentMap.meta, tags: newTags } };
+		persistTags();
+	}
+}
+
+export async function addTag(tag: Tag) {
+	if (!currentMapId || !currentMap) return;
+	currentMap = {
+		...currentMap,
+		meta: { ...currentMap.meta, tags: { ...currentMap.meta.tags, [tag.id]: tag } },
+	};
+	mapVersion++;
+	notify();
+	persistTags();
+}
+
+export async function updateTag(tagId: number, patch: Partial<Tag>) {
+	if (!currentMapId || !currentMap) return;
+	const existing = currentMap.meta.tags[tagId];
+	if (existing) {
+		currentMap = {
+			...currentMap,
+			meta: {
+				...currentMap.meta,
+				tags: { ...currentMap.meta.tags, [tagId]: { ...existing, ...patch } },
+			},
+		};
+	}
+	mapVersion++;
+	notify();
+	persistTags();
+}
+
+export async function deleteTag(tagId: number) {
+	if (!currentMapId || !currentMap) return;
+	const existing = currentMap.meta.tags[tagId];
+	if (!existing) return;
+	currentMap = {
+		...currentMap,
+		meta: { ...currentMap.meta, tags: { ...currentMap.meta.tags, [tagId]: { ...existing, visible: false } } },
+	};
+	persistTags();
+	refreshAfterMutation();
+}
+
+export async function deleteSelectedTags() {
+	if (!currentMap) return;
+	const tagIds = selections.filter((s) => s.props.type === "Tag").map((s) => (s.props as { type: "Tag"; tagId: number }).tagId);
+	if (tagIds.length === 0) return;
+	for (const tagId of tagIds) {
+		await removeTagFromAll(tagId);
+		const existing: Tag | undefined = currentMap.meta.tags[tagId];
+		if (existing) {
+			currentMap = {
+				...currentMap,
+				meta: { ...currentMap.meta, tags: { ...currentMap.meta.tags, [tagId]: { ...existing, visible: false } } },
+			};
+		}
+	}
+	persistTags();
+	refreshAfterMutation();
+}
+
+export async function reorderTags(orderedIds: number[]) {
+	if (!currentMapId || !currentMap) return;
+	const newTags = { ...currentMap.meta.tags };
+	for (let i = 0; i < orderedIds.length; i++) {
+		const id = orderedIds[i];
+		if (newTags[id]) newTags[id] = { ...newTags[id], order: i };
+	}
+	currentMap = { ...currentMap, meta: { ...currentMap.meta, tags: newTags } };
+	mapVersion++;
+	notify();
+	persistTags();
+}
+
+export async function bulkAddTag(tagId: number) {
+	if (!currentMap || selectedLocationIds.size === 0) return;
+	const ids = [...selectedLocationIds];
+	const locs: Location[] = await invoke("store_get_locations_by_ids", { ids });
+	const updates = locs
+		.filter((l) => !l.tags.includes(tagId))
+		.map((l) => [l.id, { tags: [...l.tags, tagId] }]);
+	if (updates.length === 0) return;
+	await mutate("store_update_locations", { updates });
+	scheduleSave();
+}
+
+export async function bulkRemoveTag(tagId: number, locationIds: number[]) {
+	if (!currentMap || locationIds.length === 0) return;
+	const locs: Location[] = await invoke("store_get_locations_by_ids", { ids: locationIds });
+	const updates = locs
+		.filter((l) => l.tags.includes(tagId))
+		.map((l) => [l.id, { tags: l.tags.filter((t: number) => t !== tagId) }]);
+	if (updates.length === 0) return;
+	await mutate("store_update_locations", { updates });
+	scheduleSave();
+}
+
+export async function removeTagFromAll(tagId: number) {
+	if (!currentMap) return;
+	const allWithTag: number[] = await invoke("store_resolve_selection", {
+		props: { type: "Tag", tagId },
+	});
+	if (allWithTag.length > 0) await bulkRemoveTag(tagId, allWithTag);
+}
+
+export async function removeTagFromSelection(tagId: number) {
+	if (!currentMap || selectedLocationIds.size === 0) return;
+	const ids = [...selectedLocationIds];
+	await bulkRemoveTag(tagId, ids);
+}
+
+export async function renameTagInSelection(tagId: number, newName: string) {
+	if (!currentMap || selectedLocationIds.size === 0) return;
+	const oldTag = currentMap.meta.tags[tagId];
+	if (!oldTag) return;
+
+	const existingTag = Object.values(currentMap.meta.tags).find(
+		(t) => t.name.toLowerCase() === newName.toLowerCase() && t.id !== tagId,
+	);
+	const newTagId = existingTag?.id ?? (await invoke<number>("store_alloc_tag_id"));
+	if (!existingTag) {
+		await addTag({
+			id: newTagId,
+			name: newName,
+			color: oldTag.color,
+			visible: true,
+			order: oldTag.order,
+		});
+	}
+
+	const locs: Location[] = await invoke("store_get_locations_by_ids", {
+		ids: [...selectedLocationIds],
+	});
+	const updates = locs
+		.filter((l) => l.tags.includes(tagId))
+		.map((l) => [l.id, { tags: [...l.tags.filter((t: number) => t !== tagId), newTagId] }]);
+	if (updates.length > 0) {
+		await mutate("store_update_locations", { updates });
+		scheduleSave();
+	}
+}
+
+// --- Review ---
+
+export async function beginReview(locationIds: number[]) {
+	if (!currentMap || locationIds.length === 0) return;
+	const existing: Location[] = await invoke("store_get_locations_by_ids", { ids: locationIds });
+	const valid = existing.map((l) => l.id);
+	if (valid.length === 0) return;
+	review = { locations: valid, index: 0 };
+	workArea = "location";
+	await setActiveLocation(valid[0]);
+}
+
+export function cancelReview() {
+	if (!review) return;
+	review = null;
+	activeLocationId = null;
+	cachedActiveLocation = null;
+	workArea = "overview";
+	mapVersion++;
+	notify();
+}
+
+export async function reviewNext() {
+	if (!review) return;
+	for (let i = review.index + 1; i < review.locations.length; i++) {
+		review = { ...review, index: i };
+		await setActiveLocation(review.locations[i]);
+		if (cachedActiveLocation) return;
+	}
+	review = null;
+	await setActiveLocation(null);
+}
+
+export async function reviewPrev() {
+	if (!review) return;
+	for (let i = review.index - 1; i >= 0; i--) {
+		review = { ...review, index: i };
+		await setActiveLocation(review.locations[i]);
+		if (cachedActiveLocation) return;
+	}
+	review = null;
+	await setActiveLocation(null);
+}
+
+export async function reviewDelete() {
+	if (!review || !currentMap) return;
+	const currentLocId = review.locations[review.index];
+	const r: MutationResultJS & { version: number } = await invoke("store_remove_locations", {
+		ids: [currentLocId],
+	});
+	emitRenderDelta(r.delta);
+	syncMutationResult(r);
+	const remaining = review.locations.filter((id) => id !== currentLocId);
+	if (remaining.length === 0 || review.index >= remaining.length) {
+		review = null;
+		await setActiveLocation(null);
+	} else {
+		review = { locations: remaining, index: review.index };
+		await setActiveLocation(remaining[review.index]);
+	}
+	if (selections.length > 0) {
+		applySelectionUpdate((_, sels) => sels);
+	}
+	scheduleSave();
+}
+
+// --- Undo/redo ---
+
+async function undoRedo(cmd: "store_undo" | "store_redo") {
+	if (!currentMap) return;
+	try {
+		const r = await mutate(cmd, {});
+		reconcileTags();
+		if (activeLocationId && r.delta.removed.some((e) => e.id === activeLocationId)) {
+			activeLocationId = null;
+			cachedActiveLocation = null;
+			workArea = "overview";
+		}
+		scheduleSave();
+	} catch (e) {
+		log.debug(`[${cmd}] nothing or failed:`, e);
+	}
+}
+
+export function undo() {
+	return undoRedo("store_undo");
+}
+export function redo() {
+	return undoRedo("store_redo");
+}
+
+let undoRedoState = { canUndo: false, canRedo: false };
+
+export function getUndoRedoState() {
+	return undoRedoState;
+}
+
+export function useUndoRedo() {
+	useSyncExternalStore(subscribe, getMapSnapshot);
+	return undoRedoState;
+}
+
+// --- Version control ---
+
+function formatDiffMessage(diff: {
+	added: number;
+	removed: number;
+	modified: number;
+}): string | undefined {
+	const parts: string[] = [];
+	if (diff.added > 0) parts.push(`+${diff.added}`);
+	if (diff.removed > 0) parts.push(`-${diff.removed}`);
+	if (diff.modified > 0) parts.push(`~${diff.modified}`);
+	return parts.length > 0 ? parts.join(" ") : undefined;
+}
+
+export async function commitMap(message?: string): Promise<string> {
+	if (!currentMapId) throw new Error("No map open");
+	const t0 = performance.now();
+	await invoke("store_bake_and_save");
+	log.debug(`[commit] bake_and_save=${(performance.now() - t0).toFixed(0)}ms`);
+	const t1 = performance.now();
+	const diff = await computeCommitDiff();
+	log.debug(`[commit] computeCommitDiff=${(performance.now() - t1).toFixed(0)}ms`);
+	const t2 = performance.now();
+	const autoMessage = message ?? formatDiffMessage(diff);
+	const id = await vcs.createCommit(currentMapId, autoMessage, diff);
+	log.debug(`[commit] createCommit=${(performance.now() - t2).toFixed(0)}ms`);
+	const t3 = performance.now();
+	await invoke("store_reset_undo");
+	log.debug(
+		`[commit] reset_undo=${(performance.now() - t3).toFixed(0)}ms total=${(performance.now() - t0).toFixed(0)}ms`,
+	);
+	undoRedoState = { canUndo: false, canRedo: false };
+	cachedCommitDiff = { added: 0, removed: 0, modified: 0 };
+	mapVersion++;
+	notify();
+	return id;
+}
+
+export async function checkoutCommit(commitId: string) {
+	if (!currentMapId) return;
+	await flushSave();
+	try {
+		await invoke("store_close_map");
+		await vcs.checkout(currentMapId, commitId);
+		await invoke("store_open_map", { mapId: currentMapId });
+		await invoke("store_reset_undo");
+		const msg = `Revert to ${vcs.shortHash(commitId)}`;
+		await vcs.createCommit(currentMapId, msg);
+	} catch (e) {
+		log.error("[checkout] restore failed:", e);
+		throw e;
+	}
+	currentMap = await storage.getMap(currentMapId);
+	selections = [];
+	selectedLocationIds = new Set();
+	activeLocationId = null;
+	undoRedoState = { canUndo: false, canRedo: false };
+
+	emitRenderDelta({ added: [], updated: [], removed: [], colorPatches: [], fullReset: true });
+	refreshAfterMutation();
+	await invalidateMapList();
+}

@@ -1,0 +1,44 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
+let loaded = false;
+let loading: Promise<void> | null = null;
+
+// Force preserveDrawingBuffer so we can capture thumbnails from the pano canvas.
+const origGetContext = HTMLCanvasElement.prototype.getContext;
+HTMLCanvasElement.prototype.getContext = function (
+	this: HTMLCanvasElement,
+	type: string,
+	attrs?: any,
+) {
+	if (type === "webgl" || type === "webgl2") {
+		attrs = { ...attrs, preserveDrawingBuffer: true };
+	}
+	return origGetContext.call(this, type, attrs);
+} as typeof origGetContext;
+
+export function loadOpenSV(): Promise<void> {
+	if (loaded) return Promise.resolve();
+	if (loading) return loading;
+	loading = (async () => {
+		const res = await fetch("/opensv/opensv.js");
+		let src = await res.text();
+		src = src.replace(/https:\/\/lh[3-6]\.ggpht\.com\/jsapi2\/a\/b\/c\//g, "/svtile/");
+		const blob = new Blob([src], { type: "application/javascript" });
+		const url = URL.createObjectURL(blob);
+		await new Promise<void>((resolve, reject) => {
+			const script = document.createElement("script");
+			script.src = url;
+			script.onload = () => {
+				URL.revokeObjectURL(url);
+				loaded = true;
+				resolve();
+			};
+			script.onerror = reject;
+			document.head.appendChild(script);
+		});
+	})();
+	return loading;
+}
+
+export function getGoogle(): typeof google {
+	return (window as any).google;
+}

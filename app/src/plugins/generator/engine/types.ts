@@ -1,0 +1,111 @@
+export interface GeneratorSettings {
+	defaultTarget: number;
+	radius: number;
+	rejectUnofficial: boolean;
+	rejectGen1: boolean;
+	rejectOfficial: boolean;
+	rejectNoDescription: boolean;
+	rejectDescription: boolean;
+	rejectDateless: boolean;
+	adjustHeading: boolean;
+	headingReference: "link" | "forward" | "backward";
+	headingDeviation: number;
+	adjustPitch: boolean;
+	pitchDeviation: number;
+	fromDate: string;
+	toDate: string;
+	checkAllDates: boolean;
+	checkLinks: boolean;
+	linksDepth: number;
+	onlyOneInTimeframe: boolean;
+	oneCountryAtATime: boolean;
+	numGenerators: number;
+	findGeneration: boolean;
+	generation: 1 | 23 | 4;
+	getIntersection: boolean;
+	pinpointSearch: boolean;
+	pinpointAngle: number;
+	selectMonths: boolean;
+	fromMonth: string;
+	toMonth: string;
+	fromYear: string;
+	toYear: string;
+	findRegions: boolean;
+	regionRadius: number;
+	randomInTimeline: boolean;
+}
+
+const now = new Date();
+const pad = (n: number) => (n < 10 ? "0" : "") + n;
+
+export const DEFAULT_SETTINGS: GeneratorSettings = {
+	defaultTarget: 10,
+	radius: 500,
+	rejectUnofficial: true,
+	rejectGen1: false,
+	rejectOfficial: false,
+	rejectNoDescription: true,
+	rejectDescription: false,
+	rejectDateless: true,
+	adjustHeading: true,
+	headingReference: "link",
+	headingDeviation: 0,
+	adjustPitch: false,
+	pitchDeviation: 10,
+	fromDate: "2009-01",
+	toDate: `${now.getFullYear()}-${pad(now.getMonth() + 1)}`,
+	checkAllDates: false,
+	checkLinks: false,
+	linksDepth: 2,
+	onlyOneInTimeframe: false,
+	oneCountryAtATime: false,
+	numGenerators: 1,
+	findGeneration: false,
+	generation: 1,
+	getIntersection: false,
+	pinpointSearch: false,
+	pinpointAngle: 145,
+	selectMonths: false,
+	fromMonth: "01",
+	toMonth: "12",
+	fromYear: "2007",
+	toYear: String(now.getFullYear()),
+	findRegions: false,
+	regionRadius: 100,
+	randomInTimeline: false,
+};
+
+export interface GeneratorRegionMeta {
+	target: number;
+	found: GeneratedLocation[];
+	checkedPanos: Set<string>;
+	isProcessing: boolean;
+}
+
+export interface GeneratorRegion {
+	id: string;
+	name: string;
+	code?: string;
+	feature: GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon>;
+	found: GeneratedLocation[];
+	target: number;
+	checkedPanos: Set<string>;
+	isProcessing: boolean;
+}
+
+export interface GeneratedLocation {
+	panoId: string;
+	lat: number;
+	lng: number;
+	heading: number;
+	pitch: number;
+	imageDate: string | null;
+}
+
+export interface GenerationCallbacks {
+	onLocationsFound: (locs: GeneratedLocation[]) => void;
+	onProgress: (regionId: string, found: number, target: number) => void;
+	onRegionComplete: (regionId: string) => void;
+	onError?: (error: Error) => void;
+	onDone: () => void;
+}

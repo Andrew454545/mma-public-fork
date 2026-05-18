@@ -502,7 +502,7 @@ describe("applySelectionBitmasks", () => {
 		expect(selectedIds.has(50)).toBe(false);
 	});
 
-	it("multiple selections: last wins for color, all contribute to selectedIds", () => {
+	it("multiple selections: overlapping loc appears once per selection, last drawn on top", () => {
 		mgr.applyDelta({
 			added: [entry("s", 10, 1, 1), entry("s", 20, 2, 2), entry("s", 30, 3, 3)],
 			updated: [],
@@ -512,7 +512,7 @@ describe("applySelectionBitmasks", () => {
 
 		// Selection 0 (red): indices 0,1
 		// Selection 1 (blue): indices 1,2
-		// Overlap at index 1 — last wins (blue)
+		// Overlap at index 1 — appears in both, blue drawn later
 		const mask0 = new Uint8Array([0b011]);
 		const mask1 = new Uint8Array([0b110]);
 		const selectedIds = mgr.applySelectionBitmasks(
@@ -527,12 +527,17 @@ describe("applySelectionBitmasks", () => {
 		expect(selectedIds.has(20)).toBe(true);
 		expect(selectedIds.has(30)).toBe(true);
 
-		// Check overlay colors: index 1 (id=20) should have blue (last wins)
-		// The overlay entries are ordered by cell traversal, so find id=20
-		const idx20 = mgr.selOverlayIds.indexOf(20);
-		expect(idx20).toBeGreaterThanOrEqual(0);
-		expect(mgr.selOverlayColors[idx20 * 4]).toBe(0); // r
-		expect(mgr.selOverlayColors[idx20 * 4 + 2]).toBe(255); // b
+		// id=20 appears twice (once per selection), total overlay count = 4
+		expect(mgr.selOverlayCount).toBe(4);
+		const indices20 = mgr.selOverlayIds
+			.slice(0, mgr.selOverlayCount)
+			.reduce<number[]>((acc, id, i) => (id === 20 ? [...acc, i] : acc), []);
+		expect(indices20.length).toBe(2);
+		// First occurrence is red (sel 0), second is blue (sel 1)
+		expect(mgr.selOverlayColors[indices20[0] * 4]).toBe(255);
+		expect(mgr.selOverlayColors[indices20[0] * 4 + 2]).toBe(0);
+		expect(mgr.selOverlayColors[indices20[1] * 4]).toBe(0);
+		expect(mgr.selOverlayColors[indices20[1] * 4 + 2]).toBe(255);
 	});
 
 	it("selected entries get alpha=0 in main layer (hidden)", () => {

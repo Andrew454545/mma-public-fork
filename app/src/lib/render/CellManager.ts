@@ -304,10 +304,10 @@ export class CellManager {
 		cellEntries: { cellChar: string; locCount: number; masks: Uint8Array[] }[],
 	): Set<number> {
 		const numSels = selColors.length;
-		let totalSelected = 0;
+		let totalEntries = 0;
 		const selectedIds = new Set<number>();
 
-		// Count total selected for overlay allocation
+		// Count total overlay entries — one per (location, selection) membership
 		for (const entry of cellEntries) {
 			const cb = this.cells.get(entry.cellChar);
 			const n = cb ? Math.min(entry.locCount, cb.count) : 0;
@@ -316,25 +316,23 @@ export class CellManager {
 				const bitIdx = li & 7;
 				for (let si = 0; si < numSels; si++) {
 					if (entry.masks[si][byteIdx] & (1 << bitIdx)) {
-						totalSelected++;
-						break;
+						totalEntries++;
 					}
 				}
 			}
 		}
 
-		this.selOverlayPositions = new Float32Array(totalSelected * 2);
-		this.selOverlayColors = new Uint8Array(totalSelected * 4);
-		this.selOverlayAngles = new Float32Array(totalSelected);
-		this.selOverlayIds = new Array(totalSelected);
+		this.selOverlayPositions = new Float32Array(totalEntries * 2);
+		this.selOverlayColors = new Uint8Array(totalEntries * 4);
+		this.selOverlayAngles = new Float32Array(totalEntries);
+		this.selOverlayIds = new Array(totalEntries);
 		let oi = 0;
 
+		// Reset all colors to default, then hide selected locations
 		for (const entry of cellEntries) {
 			const cb = this.cells.get(entry.cellChar);
 			if (!cb) continue;
 			const n = Math.min(entry.locCount, cb.count);
-
-			// Reset all colors in this cell to default
 			for (let li = 0; li < n; li++) {
 				const c4 = li * 4;
 				cb.colors[c4] = 42;
@@ -342,31 +340,30 @@ export class CellManager {
 				cb.colors[c4 + 2] = 42;
 				cb.colors[c4 + 3] = 255;
 			}
+		}
 
-			// Apply selections — last match wins, set main to alpha=0, add to overlay
-			for (let li = 0; li < n; li++) {
-				const byteIdx = li >> 3;
-				const bitIdx = li & 7;
-				let winSel = -1;
-				for (let si = numSels - 1; si >= 0; si--) {
-					if (entry.masks[si][byteIdx] & (1 << bitIdx)) {
-						winSel = si;
-						break;
-					}
-				}
-				if (winSel >= 0) {
+		// Append per-selection in order — later selections overdraw earlier ones
+		for (let si = 0; si < numSels; si++) {
+			const [r, g, b] = selColors[si];
+			for (const entry of cellEntries) {
+				const cb = this.cells.get(entry.cellChar);
+				if (!cb) continue;
+				const n = Math.min(entry.locCount, cb.count);
+
+				for (let li = 0; li < n; li++) {
+					const byteIdx = li >> 3;
+					const bitIdx = li & 7;
+					if (!(entry.masks[si][byteIdx] & (1 << bitIdx))) continue;
+
 					const locId = cb.ids[li];
 					if (locId != null) selectedIds.add(locId);
 
-					// Hide in main layer
 					const c4 = li * 4;
 					cb.colors[c4] = 0;
 					cb.colors[c4 + 1] = 0;
 					cb.colors[c4 + 2] = 0;
 					cb.colors[c4 + 3] = 0;
 
-					// Add to overlay
-					const [r, g, b] = selColors[winSel];
 					this.selOverlayPositions[oi * 2] = cb.positions[li * 2];
 					this.selOverlayPositions[oi * 2 + 1] = cb.positions[li * 2 + 1];
 					this.selOverlayColors[oi * 4] = r;
@@ -378,7 +375,11 @@ export class CellManager {
 					oi++;
 				}
 			}
-			cb.colorVersion++;
+		}
+
+		for (const entry of cellEntries) {
+			const cb = this.cells.get(entry.cellChar);
+			if (cb) cb.colorVersion++;
 		}
 
 		this.selOverlayCount = oi;

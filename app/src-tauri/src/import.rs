@@ -832,7 +832,6 @@ fn add_parsed_to_store(
             store.overlay_add(loc.clone());
             for &tag in &loc.tags { *store.tag_counts.entry(tag).or_default() += 1; }
         }
-        store.alive_count += parsed.locations.len();
         store.push_undo(crate::location_store::EditEntry {
             created: parsed.locations.clone(),
             removed: Vec::new(),

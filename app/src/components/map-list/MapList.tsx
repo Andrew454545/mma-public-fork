@@ -630,7 +630,7 @@ function loadSortMode(): SortMode {
 
 function applyFilter(listEl: HTMLElement | null, query: string) {
 	if (!listEl) return;
-	const span = debugSpan("MapList:filter");
+	// const span = debugSpan("MapList:filter");
 	const entries = listEl.querySelectorAll<HTMLElement>("[data-filter-name]");
 	const folders = listEl.querySelectorAll<HTMLElement>("[data-filter-folder]");
 	if (!query) {
@@ -647,7 +647,7 @@ function applyFilter(listEl: HTMLElement | null, query: string) {
 			el.hidden = !hasVisible;
 		}
 	}
-	span.end(`${entries.length} entries`);
+	// span.end(`${entries.length} entries`);
 }
 
 export function MapList() {

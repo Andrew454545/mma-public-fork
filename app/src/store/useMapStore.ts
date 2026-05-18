@@ -1021,10 +1021,11 @@ export function updateTags(patches: { id: number; patch: Partial<Tag> }[]) {
 	persistTags();
 }
 
-export function deleteTags(tagIds: number[]) {
+export async function deleteTags(tagIds: number[]) {
 	if (!currentMapId || !currentMap || tagIds.length === 0) return;
 	const newTags = { ...currentMap.meta.tags };
 	for (const tagId of tagIds) {
+		await removeTagFromAll(tagId);
 		const existing = newTags[tagId];
 		if (existing) newTags[tagId] = { ...existing, visible: false };
 		removeSelection(`tag:${tagId}`);
@@ -1037,20 +1038,7 @@ export function deleteTags(tagIds: number[]) {
 export async function deleteSelectedTags() {
 	if (!currentMapId || !currentMap) return;
 	const tagIds = selections.filter((s) => s.props.type === "Tag").map((s) => (s.props as { type: "Tag"; tagId: number }).tagId);
-	if (tagIds.length === 0) return;
-	for (const tagId of tagIds) {
-		await removeTagFromAll(tagId);
-		const existing: Tag | undefined = currentMap.meta.tags[tagId];
-		if (existing) {
-			currentMap = {
-				...currentMap,
-				meta: { ...currentMap.meta, tags: { ...currentMap.meta.tags, [tagId]: { ...existing, visible: false } } },
-			};
-		}
-		removeSelection(`tag:${tagId}`);
-	}
-	persistTags();
-	refreshAfterMutation();
+	await deleteTags(tagIds);
 }
 
 export async function reorderTags(orderedIds: number[]) {

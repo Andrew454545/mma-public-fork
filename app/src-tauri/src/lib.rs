@@ -24,8 +24,9 @@ fn read_file(path: String) -> Result<String, String> {
 }
 
 #[tauri::command]
-fn get_db_uri() -> String {
-    format!("sqlite:{}", fast_io::db_filename())
+fn get_db_uri(app: tauri::AppHandle) -> Result<String, String> {
+    let path = fast_io::db_path(&app)?;
+    Ok(format!("sqlite:{}", path.to_string_lossy()))
 }
 
 #[tauri::command]
@@ -327,9 +328,6 @@ pub fn run() {
         kind: MigrationKind::Up,
     }];
 
-    let db_uri = format!("sqlite:{}", fast_io::db_filename());
-    log::info!("[MMA] db_uri: {}", db_uri);
-
     let builder = tauri::Builder::default()
         .register_uri_scheme_protocol("mma-buf", |_ctx, req| {
             let raw = req.uri().path().replace("%20", " ").replace("%3A", ":");
@@ -431,11 +429,6 @@ pub fn run() {
             geocoder::reverse_geocode,
         ])
         .plugin(
-            tauri_plugin_sql::Builder::default()
-                .add_migrations(&db_uri, migrations)
-                .build(),
-        )
-        .plugin(
             tauri_plugin_log::Builder::default()
                 .level(if cfg!(debug_assertions) { log::LevelFilter::Debug } else { log::LevelFilter::Info })
                 .max_file_size(2_000_000)
@@ -450,6 +443,14 @@ pub fn run() {
         )
         .plugin(tauri_plugin_window_state::Builder::default().build())
         .setup(|app| {
+            let db_uri = format!("sqlite:{}", fast_io::db_path(app.handle())?.to_string_lossy());
+            log::info!("[MMA] db_uri: {}", db_uri);
+            app.handle().plugin(
+                tauri_plugin_sql::Builder::default()
+                    .add_migrations(&db_uri, migrations)
+                    .build(),
+            )?;
+
             #[cfg(desktop)]
             {
                 app.handle().plugin(tauri_plugin_updater::Builder::new().build())?;

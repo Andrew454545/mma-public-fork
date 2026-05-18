@@ -458,11 +458,15 @@ pub type StoreState = Mutex<Store>;
 // Helpers
 // ---------------------------------------------------------------------------
 
+//TODO: seems derivable
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OpenResult {
     pub location_count: usize,
     pub version: u64,
+    pub can_undo: bool,
+    pub can_redo: bool,
+    pub tag_counts: HashMap<u32, usize>,
 }
 
 #[derive(serde::Serialize)]
@@ -721,7 +725,13 @@ pub async fn store_open_map(
     store.undo_stack = undo;
     store.redo_stack = redo;
 
-    Ok(OpenResult { location_count: count, version })
+    Ok(OpenResult {
+        location_count: count,
+        version,
+        can_undo: !store.undo_stack.is_empty(),
+        can_redo: !store.redo_stack.is_empty(),
+        tag_counts: store.tag_counts.clone(),
+    })
 }
 
 #[tauri::command]

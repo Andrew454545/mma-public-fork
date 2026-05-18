@@ -313,9 +313,10 @@ export async function openMap(id: string, pushHistory = true) {
 	if (currentMap) {
 		const t1 = performance.now();
 		try {
-			await invoke("store_open_map", { mapId: id });
+			const openResult = await invoke<StoreStatus>("store_open_map", { mapId: id });
 			log.debug(`[openMap] store_open_map=${(performance.now() - t1).toFixed(0)}ms`);
-			tagCounts = await invoke<Record<number, number>>("store_tag_counts");
+			tagCounts = openResult.tagCounts;
+			undoRedoState = { canUndo: openResult.canUndo, canRedo: openResult.canRedo };
 		} catch (e) {
 			log.error("[openMap] store_open_map failed:", e);
 			currentMap = null;
@@ -331,7 +332,6 @@ export async function openMap(id: string, pushHistory = true) {
 	activeLocationId = null;
 	review = null;
 	workArea = "overview";
-	undoRedoState = { canUndo: false, canRedo: false };
 
 	mapVersion++;
 	notify();
@@ -506,15 +506,19 @@ export function addLocationCount(delta: number) {
 	};
 }
 
-interface MutationResultJS {
+interface StoreStatus {
+	version: number;
 	locationCount: number;
 	canUndo: boolean;
 	canRedo: boolean;
-	delta: CellDelta;
 	tagCounts: Record<number, number>;
 }
 
-function syncMutationResult(r: MutationResultJS) {
+interface MutationResult extends StoreStatus {
+	delta: CellDelta;
+}
+
+function syncMutationResult(r: MutationResult) {
 	if (!currentMap) return;
 	const needsNotify =
 		currentMap.meta.locationCount !== r.locationCount ||
@@ -532,8 +536,8 @@ function syncMutationResult(r: MutationResultJS) {
 	}
 }
 
-async function mutate(cmd: string, args: Record<string, unknown>): Promise<MutationResultJS> {
-	const r: MutationResultJS = await invoke(cmd, args);
+async function mutate(cmd: string, args: Record<string, unknown>): Promise<MutationResult> {
+	const r: MutationResult = await invoke(cmd, args);
 	emitRenderDelta(r.delta);
 	syncMutationResult(r);
 	refreshAfterMutation();
@@ -547,9 +551,9 @@ export async function addLocations(locs: Location[], opts?: { hideInDelta?: bool
 	for (const l of locs) if (l.extra) for (const k of Object.keys(l.extra)) extraKeys.add(k);
 	if (extraKeys.size > 0) autoRegisterFieldDefs([...extraKeys]);
 	const t0 = performance.now();
-	let r: MutationResultJS & { version: number };
+	let r: MutationResult;
 	try {
-		r = await invoke<MutationResultJS & { version: number }>("store_add_locations", {
+		r = await invoke<MutationResult>("store_add_locations", {
 			locations: locs,
 		});
 	} catch (e) {
@@ -588,7 +592,7 @@ export async function duplicateLocation(locId: number): Promise<number | null> {
 export function removeLocations(ids: Set<number>) {
 	if (!currentMap || ids.size === 0) return;
 	const t0 = performance.now();
-	invoke<MutationResultJS & { version: number }>("store_remove_locations", { ids: [...ids] })
+	invoke<MutationResult>("store_remove_locations", { ids: [...ids] })
 		.then((r) => {
 			log.debug(
 				`[delete] ipc_roundtrip=${(performance.now() - t0).toFixed(0)}ms ids=${ids.size} delta: +${r.delta.added.length} -${r.delta.removed.length}`,
@@ -1170,7 +1174,7 @@ export async function reviewPrev() {
 export async function reviewDelete() {
 	if (!review || !currentMap) return;
 	const currentLocId = review.locations[review.index];
-	const r: MutationResultJS & { version: number } = await invoke("store_remove_locations", {
+	const r: MutationResult = await invoke("store_remove_locations", {
 		ids: [currentLocId],
 	});
 	emitRenderDelta(r.delta);

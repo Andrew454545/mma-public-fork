@@ -1028,6 +1028,7 @@ export async function deleteTag(tagId: number) {
 		...currentMap,
 		meta: { ...currentMap.meta, tags: { ...currentMap.meta.tags, [tagId]: { ...existing, visible: false } } },
 	};
+	removeSelection(`tag:${tagId}`);
 	persistTags();
 	refreshAfterMutation();
 }
@@ -1045,6 +1046,7 @@ export async function deleteSelectedTags() {
 				meta: { ...currentMap.meta, tags: { ...currentMap.meta.tags, [tagId]: { ...existing, visible: false } } },
 			};
 		}
+		removeSelection(`tag:${tagId}`);
 	}
 	persistTags();
 	refreshAfterMutation();

@@ -388,6 +388,7 @@ pub fn run() {
             location_store::store_add_locations,
             location_store::store_remove_locations,
             location_store::store_update_locations,
+            location_store::store_strip_tags,
             location_store::store_set_active,
             location_store::store_get_location,
             location_store::store_get_locations_by_ids,

@@ -1023,16 +1023,16 @@ export function updateTags(patches: { id: number; patch: Partial<Tag> }[]) {
 
 export async function deleteTags(tagIds: number[]) {
 	if (!currentMapId || !currentMap || tagIds.length === 0) return;
+	await mutate("store_strip_tags", { tagIds });
 	const newTags = { ...currentMap.meta.tags };
 	for (const tagId of tagIds) {
-		await removeTagFromAll(tagId);
 		const existing = newTags[tagId];
 		if (existing) newTags[tagId] = { ...existing, visible: false };
 		removeSelection(`tag:${tagId}`);
 	}
 	currentMap = { ...currentMap, meta: { ...currentMap.meta, tags: newTags } };
 	persistTags();
-	refreshAfterMutation();
+	scheduleSave();
 }
 
 export async function deleteSelectedTags() {

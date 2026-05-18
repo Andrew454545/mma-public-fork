@@ -557,7 +557,7 @@ where
     Ok(Some(Option::deserialize(deserializer)?))
 }
 
-#[derive(serde::Deserialize)]
+#[derive(Default, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LocationPatch {
     pub lat: Option<f64>,
@@ -913,6 +913,53 @@ pub fn store_update_locations(
     }
     log::debug!("[cmd] store_update_locations n={} undo={} total={}ms", updates.len(), record_undo, _t.elapsed().as_millis());
     Ok(store.finish_mutation(delta))
+}
+
+#[tauri::command]
+pub fn store_strip_tags(
+    state: tauri::State<'_, StoreState>,
+    tag_ids: Vec<u32>,
+) -> Result<MutationResult, String> {
+    let _t = std::time::Instant::now();
+    let mut store = state.lock().map_err(|e| e.to_string())?;
+    let tag_set: HashSet<u32> = tag_ids.into_iter().collect();
+    let view = store.loc_view();
+    let mut affected_ids = Vec::new();
+    for &tag_id in &tag_set {
+        let ids = selections::resolve(&view, &SelectionProps::Tag { tag_id });
+        affected_ids.extend(ids);
+    }
+    drop(view);
+    let affected_ids: HashSet<u32> = affected_ids.into_iter().collect();
+    if affected_ids.is_empty() {
+        return Ok(store.finish_mutation(RenderDelta::default()));
+    }
+    let mut old_locs = Vec::new();
+    let mut new_locs = Vec::new();
+    for &id in &affected_ids {
+        if let Some(old) = store.get_loc_by_id(id) {
+            let mut new_loc = old.clone();
+            new_loc.tags.retain(|t| !tag_set.contains(t));
+            old_locs.push(old);
+            new_locs.push(new_loc);
+        }
+    }
+    store.remove_tag_counts(&old_locs);
+    for new_loc in &new_locs {
+        let patch = LocationPatch { tags: Some(new_loc.tags.clone()), ..Default::default() };
+        store.overlay_update(new_loc.id, &patch);
+    }
+    store.add_tag_counts(&new_locs);
+    let (changed_old, changed_new): (Vec<_>, Vec<_>) = old_locs.into_iter()
+        .zip(new_locs)
+        .filter(|(o, n)| o != n)
+        .unzip();
+    if !changed_old.is_empty() {
+        store.push_undo(EditEntry { created: changed_new, removed: changed_old });
+        store.redo_stack.clear();
+    }
+    log::debug!("[cmd] store_strip_tags n={} total={}ms", affected_ids.len(), _t.elapsed().as_millis());
+    Ok(store.finish_mutation(RenderDelta::default()))
 }
 
 #[tauri::command]

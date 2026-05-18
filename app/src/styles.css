@@ -3034,6 +3034,7 @@ summary.button {
 	position: relative;
 	cursor: pointer;
 	overflow: hidden;
+	flex-shrink: 0;
 }
 .selection-row:active {
 	cursor: grabbing;

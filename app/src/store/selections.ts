@@ -124,34 +124,24 @@ export function removeSelection(current: Selection[], key: string): Selection[] 
 	});
 }
 
-export function intersectSelections(
+function composeSelectionGroup(
 	map: MapData,
 	current: Selection[],
 	keys: string[] | null,
+	type: "Intersection" | "Union",
 ): Selection[] {
 	if (current.length < 2) return current;
 	const targetKeys = keys ?? current.map((s) => s.key);
 	const targets: Selection[] = [];
 	const others: Selection[] = [];
 	for (const s of current) (targetKeys.includes(s.key) ? targets : others).push(s);
-	// flatten nested intersections
-	const flat = targets.flatMap((s) => (s.props.type === "Intersection" ? s.props.selections : [s]));
-	return [...others, buildSelection(map, { type: "Intersection", selections: dedupe(flat) })];
+	const flat = targets.flatMap((s) => (s.props.type === type ? s.props.selections : [s]));
+	return [...others, buildSelection(map, { type, selections: dedupe(flat) })];
 }
 
-export function unionSelections(
-	map: MapData,
-	current: Selection[],
-	keys: string[] | null,
-): Selection[] {
-	if (current.length < 2) return current;
-	const targetKeys = keys ?? current.map((s) => s.key);
-	const targets: Selection[] = [];
-	const others: Selection[] = [];
-	for (const s of current) (targetKeys.includes(s.key) ? targets : others).push(s);
-	const flat = targets.flatMap((s) => (s.props.type === "Union" ? s.props.selections : [s]));
-	return [...others, buildSelection(map, { type: "Union", selections: dedupe(flat) })];
-}
+export const intersectSelections = (map: MapData, current: Selection[], keys: string[] | null) => composeSelectionGroup(map, current, keys, "Intersection");
+
+export const unionSelections = (map: MapData, current: Selection[], keys: string[] | null) => composeSelectionGroup(map, current, keys, "Union");
 
 export function invertSelections(
 	map: MapData,

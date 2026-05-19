@@ -254,12 +254,6 @@ impl Store {
             return SelectionSync { counts, patch_file: None, selected_count };
         }
 
-        // Rebuild full bitmask but use selection_loc_sets (HashSet, O(1) lookup)
-        // Only iterate affected cells for the expensive contains check;
-        // for unaffected cells, all bits stay the same from the previous bitmask.
-        // BUT: JS replaces the full file, so we need all cells.
-        // Optimization: write only affected cells + metadata, have JS patch locally.
-        // For now: full rebuild but using HashSets (no allocation, just lookups).
         let num_sels = self.selections.len();
         let mut buf: Vec<u8> = Vec::new();
         buf.push(num_sels as u8);
@@ -814,6 +808,8 @@ pub struct LocationPatch {
 // Commands
 // ---------------------------------------------------------------------------
 
+/// Load a map's Arrow data from disk, rebuild all indexes, and return initial state
+/// (tag counts, undo/redo availability). Must be called before any other store commands.
 #[tauri::command]
 #[specta::specta]
 pub async fn store_open_map(
@@ -1153,6 +1149,7 @@ pub fn store_update_locations(
     Ok(store.finish_mutation(delta))
 }
 
+/// Remove the given tag IDs from every location that has them. Returns a MutationResult.
 #[tauri::command]
 #[specta::specta]
 pub fn store_strip_tags(
@@ -1225,6 +1222,8 @@ pub fn store_get_location(
     r
 }
 
+/// Write a single location as JSON to a temp file and return the path.
+/// Faster than invoke for the response payload (~10ms less IPC overhead).
 #[tauri::command]
 #[specta::specta]
 pub fn store_get_location_file(
@@ -1282,6 +1281,8 @@ struct DeltaOverlay {
     patches: Vec<Location>,
 }
 
+/// Delta-only autosave: writes only dirty geohash chunks to disk (~17ms).
+/// Does NOT bake the overlay — call `store_bake_and_save` for a full merge.
 #[tauri::command]
 #[specta::specta]
 pub async fn store_save_dirty(
@@ -1393,6 +1394,8 @@ fn save_arrow_inner(store: &Store, app: &tauri::AppHandle, map_id: &str) -> Resu
 // VCS: snapshot / restore Arrow files
 // ---------------------------------------------------------------------------
 
+/// Merge the overlay into the Arrow batch, then write the full file to disk.
+/// Expensive at 10M+ rows — only called on commit, not on autosave.
 #[tauri::command]
 #[specta::specta]
 pub fn store_bake_and_save(
@@ -1726,6 +1729,8 @@ fn build_cell_render_buffers(store: &mut Store, req: &RenderRequest) -> Vec<u8> 
     buf
 }
 
+/// Full render rebuild: single-pass over all alive locations, writes binary to a temp file.
+/// Returns the file path for JS to fetch via `mma-buf://`. Only called on map open or full reset.
 #[tauri::command]
 #[specta::specta]
 pub async fn store_fill_render_file(
@@ -2121,6 +2126,8 @@ pub struct SyncSelectionsResult {
     pub selected_count: usize,
 }
 
+/// Replace all selections, resolve bitmasks against current data, and write a binary
+/// patch file for JS to apply to the render overlay. Returns per-selection counts.
 // TODO: selection resolution perf at 1M+ scale (~500ms currently)
 // - Inverted index (tag_id → HashSet<loc_id>) for O(1) tag/untagged/panoId lookups
 // - BitVec instead of HashSet for membership — 1M locs = 125KB, bitmask binary becomes a direct copy

@@ -962,6 +962,8 @@ pub fn store_import_file(
     })
 }
 
+/// Parse raw text (JSON or CSV) as locations and import into the open map.
+/// Handles tag reconciliation, ID allocation, and render delta in one shot.
 #[tauri::command]
 #[specta::specta]
 pub fn store_import_paste(

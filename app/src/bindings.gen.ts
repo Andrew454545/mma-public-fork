@@ -14,12 +14,21 @@ export const commands = {
 	bulkImportConfirm: (path: string, selectedIndices: number[]) => typedError<ImportedMapInfo[], string>(__TAURI_INVOKE("bulk_import_confirm", { path, selectedIndices })),
 	storeImportPreview: (path: string) => typedError<EditorImportPreview, string>(__TAURI_INVOKE("store_import_preview", { path })),
 	storeImportFile: (droppedFields: string[]) => typedError<EditorImportResult_Serialize, string>(__TAURI_INVOKE("store_import_file", { droppedFields })),
+	/**
+	 *  Parse raw text (JSON or CSV) as locations and import into the open map.
+	 *  Handles tag reconciliation, ID allocation, and render delta in one shot.
+	 */
 	storeImportPaste: (text: string) => typedError<EditorImportResult_Serialize, string>(__TAURI_INVOKE("store_import_paste", { text })),
+	/**
+	 *  Load a map's Arrow data from disk, rebuild all indexes, and return initial state
+	 *  (tag counts, undo/redo availability). Must be called before any other store commands.
+	 */
 	storeOpenMap: (mapId: string) => typedError<StoreStatus, string>(__TAURI_INVOKE("store_open_map", { mapId })),
 	storeCloseMap: () => typedError<null, string>(__TAURI_INVOKE("store_close_map")),
 	storeAddLocations: (locations: Location_Deserialize[]) => typedError<MutationResult_Serialize, string>(__TAURI_INVOKE("store_add_locations", { locations })),
 	storeRemoveLocations: (ids: number[]) => typedError<MutationResult_Serialize, string>(__TAURI_INVOKE("store_remove_locations", { ids })),
 	storeUpdateLocations: (updates: ([number, LocationPatch_Deserialize])[], recordUndo: boolean | null) => typedError<MutationResult_Serialize, string>(__TAURI_INVOKE("store_update_locations", { updates, recordUndo })),
+	/**  Remove the given tag IDs from every location that has them. Returns a MutationResult. */
 	storeStripTags: (tagIds: number[]) => typedError<MutationResult_Serialize, string>(__TAURI_INVOKE("store_strip_tags", { tagIds })),
 	storeSetActive: (id: number | null) => typedError<null, string>(__TAURI_INVOKE("store_set_active", { id })),
 	storeGetLocation: (id: number) => typedError<{
@@ -36,9 +45,17 @@ export const commands = {
 	createdAt: string,
 	modifiedAt?: string | null,
 } | null, string>(__TAURI_INVOKE("store_get_location", { id })),
+	/**
+	 *  Write a single location as JSON to a temp file and return the path.
+	 *  Faster than invoke for the response payload (~10ms less IPC overhead).
+	 */
 	storeGetLocationFile: (id: number) => typedError<string | null, string>(__TAURI_INVOKE("store_get_location_file", { id })),
 	storeGetLocationsByIds: (ids: number[]) => typedError<Location_Serialize[], string>(__TAURI_INVOKE("store_get_locations_by_ids", { ids })),
 	storeGetAllLocations: () => typedError<string, string>(__TAURI_INVOKE("store_get_all_locations")),
+	/**
+	 *  Delta-only autosave: writes only dirty geohash chunks to disk (~17ms).
+	 *  Does NOT bake the overlay — call `store_bake_and_save` for a full merge.
+	 */
 	storeSaveDirty: () => typedError<SaveResult, string>(__TAURI_INVOKE("store_save_dirty")),
 	storeGetSummary: () => typedError<SummaryResult, string>(__TAURI_INVOKE("store_get_summary")),
 	storeTagCounts: () => typedError<{ [key in number]: number }, string>(__TAURI_INVOKE("store_tag_counts")),
@@ -53,19 +70,38 @@ export const commands = {
 	storeLocationCount: () => typedError<number, string>(__TAURI_INVOKE("store_location_count")),
 	storeHasLocation: (id: number) => typedError<boolean, string>(__TAURI_INVOKE("store_has_location", { id })),
 	storeExtraFieldValues: (field: string) => typedError<string[], string>(__TAURI_INVOKE("store_extra_field_values", { field })),
+	/**
+	 *  Full render rebuild: single-pass over all alive locations, writes binary to a temp file.
+	 *  Returns the file path for JS to fetch via `mma-buf://`. Only called on map open or full reset.
+	 */
 	storeFillRenderFile: (req: RenderRequest) => typedError<string, string>(__TAURI_INVOKE("store_fill_render_file", { req })),
 	storeResolvePick: (cell: string, cellIndex: number) => typedError<number | null, string>(__TAURI_INVOKE("store_resolve_pick", { cell, cellIndex })),
+	/**
+	 *  Replace all selections, resolve bitmasks against current data, and write a binary
+	 *  patch file for JS to apply to the render overlay. Returns per-selection counts.
+	 */
 	storeSyncSelections: (sels: SelectionInput[]) => typedError<SyncSelectionsResult, string>(__TAURI_INVOKE("store_sync_selections", { sels })),
 	storeGetSelectedIdsList: () => typedError<number[], string>(__TAURI_INVOKE("store_get_selected_ids_list")),
 	storeSetSelectedIds: (ids: number[]) => typedError<null, string>(__TAURI_INVOKE("store_set_selected_ids", { ids })),
 	storeResolveSelection: (props: SelectionProps) => typedError<number[], string>(__TAURI_INVOKE("store_resolve_selection", { props })),
-	storeFindNearby: (lat: number, lng: number, radiusM: number) => typedError<Location[], string>(__TAURI_INVOKE("store_find_nearby", { lat, lng, radiusM })),
+	/**
+	 *  Find all locations within `radius_m` metres of (`lat`, `lng`).
+	 * 
+	 *  O(n) linear scan with a cheap bounding-box pre-filter (degree margin)
+	 *  that rejects 99.9%+ of points before haversine is called.
+	 *  At 1M locations this is sub-millisecond on a modern CPU.
+	 */
+	storeFindNearby: (lat: number | null, lng: number | null, radiusM: number | null) => typedError<Location_Serialize[], string>(__TAURI_INVOKE("store_find_nearby", { lat, lng, radiusM })),
 	storeAddSelection: (props: SelectionProps) => typedError<SelectionResult, string>(__TAURI_INVOKE("store_add_selection", { props })),
 	storeRemoveSelection: (key: string) => typedError<number, string>(__TAURI_INVOKE("store_remove_selection", { key })),
 	storeResetSelections: () => typedError<number, string>(__TAURI_INVOKE("store_reset_selections")),
 	storeGetSelections: () => typedError<SelectionSummary[], string>(__TAURI_INVOKE("store_get_selections")),
 	storeGetSelectedIds: () => typedError<number[], string>(__TAURI_INVOKE("store_get_selected_ids")),
 	storeRefreshSelections: () => typedError<number, string>(__TAURI_INVOKE("store_refresh_selections")),
+	/**
+	 *  Merge the overlay into the Arrow batch, then write the full file to disk.
+	 *  Expensive at 10M+ rows — only called on commit, not on autosave.
+	 */
 	storeBakeAndSave: () => typedError<null, string>(__TAURI_INVOKE("store_bake_and_save")),
 	storeSnapshotCommit: () => typedError<CommitBlobEntry[], string>(__TAURI_INVOKE("store_snapshot_commit")),
 	storeRestoreCommit: (mapId: string, blobs: CommitBlobEntry[]) => typedError<null, string>(__TAURI_INVOKE("store_restore_commit", { mapId, blobs })),

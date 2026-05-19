@@ -59,6 +59,7 @@ export const commands = {
 	storeGetSelectedIdsList: () => typedError<number[], string>(__TAURI_INVOKE("store_get_selected_ids_list")),
 	storeSetSelectedIds: (ids: number[]) => typedError<null, string>(__TAURI_INVOKE("store_set_selected_ids", { ids })),
 	storeResolveSelection: (props: SelectionProps) => typedError<number[], string>(__TAURI_INVOKE("store_resolve_selection", { props })),
+	storeFindNearby: (lat: number, lng: number, radiusM: number) => typedError<Location[], string>(__TAURI_INVOKE("store_find_nearby", { lat, lng, radiusM })),
 	storeAddSelection: (props: SelectionProps) => typedError<SelectionResult, string>(__TAURI_INVOKE("store_add_selection", { props })),
 	storeRemoveSelection: (key: string) => typedError<number, string>(__TAURI_INVOKE("store_remove_selection", { key })),
 	storeResetSelections: () => typedError<number, string>(__TAURI_INVOKE("store_reset_selections")),

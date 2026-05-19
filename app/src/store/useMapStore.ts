@@ -10,6 +10,7 @@ import { debugSpan } from "@/lib/util/debug";
 import { mmaBufUrl } from "@/lib/util/util";
 import type { RenderDelta } from "@/lib/render/CellManager";
 
+/** Minimal pub/sub bus. `.on()` returns an unsubscribe function. */
 function createBus<T extends (...args: never[]) => void>() {
 	let handlers: T[] = [];
 	return {
@@ -18,6 +19,7 @@ function createBus<T extends (...args: never[]) => void>() {
 	};
 }
 
+/** Fires when Rust sends incremental render changes (adds/removes/patches to cell buffers). */
 export const renderDeltaBus = createBus<(delta: RenderDelta) => void>();
 
 type SelectionBitmaskHandler = (
@@ -25,6 +27,7 @@ type SelectionBitmaskHandler = (
 	cellEntries: { cellChar: string; locCount: number; masks: Uint8Array[] }[],
 	setIds: (ids: Set<number>) => void,
 ) => void;
+/** Fires when selection bitmasks are resolved. Subscribers apply per-cell masks to the render overlay. */
 export const selBitmaskBus = createBus<SelectionBitmaskHandler>();
 
 import {
@@ -120,6 +123,7 @@ let selections: Selection[] = [];
 let selectionVersion = 0;
 let selectedLocationIds = new Set<number>();
 let activeLocationId: number | null = null;
+let duplicateLocations: Location[] = [];
 let review: { locations: number[]; index: number } | null = null;
 let workArea: WorkArea = "overview";
 let activePluginId: string | null = null;
@@ -177,6 +181,11 @@ let cachedActiveLocation: Location | null = null;
 export function useActiveLocation(): Location | null {
 	useSyncExternalStore(subscribe, getMapSnapshot);
 	return cachedActiveLocation;
+}
+
+export function useDuplicateLocations(): Location[] {
+	useSyncExternalStore(subscribe, getMapSnapshot);
+	return duplicateLocations;
 }
 
 export function useWorkArea() {
@@ -480,6 +489,7 @@ export function setUndoRedoState(canUndo: boolean, canRedo: boolean) {
 	undoRedoState = { canUndo, canRedo };
 }
 
+/** Sync JS-side state (location count, undo/redo, tag counts, selections) from a Rust MutationResult. */
 function syncMutationResult(r: MutationResult) {
 	if (!currentMap) return;
 	const needsNotify =
@@ -501,6 +511,7 @@ function syncMutationResult(r: MutationResult) {
 	}
 }
 
+/** Parse a binary selection bitmask file from Rust and push it to the render overlay via selBitmaskBus. */
 async function applySelectionSync(sync: { counts: number[]; patchFile: string | null; selectedCount: number }) {
 	for (let i = 0; i < selections.length; i++) {
 		selections[i] = { ...selections[i], count: sync.counts[i] ?? 0 };
@@ -540,6 +551,7 @@ async function applySelectionSync(sync: { counts: number[]; patchFile: string | 
 	notify();
 }
 
+/** Await a mutation IPC, emit its render delta, and sync JS state. Wraps all mutating Rust calls. */
 async function mutate(p: Promise<MutationResult>): Promise<MutationResult> {
 	const r = await p;
 	renderDeltaBus.emit(r.delta);
@@ -701,6 +713,7 @@ export function useSelectionVersion() {
 	return selectionVersion;
 }
 
+/** Apply a pure selection transform, then IPC to Rust to resolve bitmasks and sync the overlay. */
 async function applySelectionUpdate(updater: (m: MapData, sels: Selection[]) => Selection[]) {
 	if (!currentMap) return;
 	const t0 = performance.now();
@@ -897,7 +910,8 @@ export function useSelectedTagIds() {
 	return ids;
 }
 
-export async function setActiveLocation(id: number | null) {
+/** Set the active location. Fetches from Rust, checks for nearby duplicates, and updates workArea. */
+export async function setActiveLocation(id: number | null, checkDuplicates = true) {
 	const t0 = performance.now();
 	activeLocationId = id;
 	cmd.storeSetActive(id).catch((e) =>
@@ -906,15 +920,50 @@ export async function setActiveLocation(id: number | null) {
 	if (id) {
 		const loc = await fetchViaFile<Location>(cmd.storeGetLocationFile(id));
 		log.debug(`[setActive] store_get_location_file ipc=${(performance.now() - t0).toFixed(0)}ms`);
+		if (checkDuplicates && loc) {
+			//todo
+			const nearby = (await cmd.storeFindNearby(loc.lat, loc.lng, 2.0)) as Location[];
+			if (nearby.length >= 2) {
+				duplicateLocations = nearby;
+				workArea = "duplicates";
+				activeLocationId = null;
+				cachedActiveLocation = null;
+				mapVersion++;
+				notify();
+				log.debug(`[setActive] duplicates=${nearby.length} total=${(performance.now() - t0).toFixed(0)}ms`);
+				return;
+			}
+		}
 		cachedActiveLocation = loc ?? null;
 		workArea = "location";
 	} else {
 		cachedActiveLocation = null;
+		duplicateLocations = [];
 		workArea = activePluginId ? "plugin" : "overview";
 	}
 	mapVersion++;
 	notify();
 	log.debug(`[setActive] total=${(performance.now() - t0).toFixed(0)}ms`);
+}
+
+export function openDuplicateLocation(loc: Location) {
+	activeLocationId = loc.id;
+	cachedActiveLocation = loc;
+	workArea = "location";
+	cmd.storeSetActive(loc.id).catch((e) =>
+		log.error("[setActive] store_set_active failed:", e),
+	);
+	mapVersion++;
+	notify();
+}
+
+export function closeDuplicates() {
+	duplicateLocations = [];
+	activeLocationId = null;
+	cachedActiveLocation = null;
+	workArea = "overview";
+	mapVersion++;
+	notify();
 }
 
 export function setWorkArea(area: WorkArea) {
@@ -1178,6 +1227,7 @@ export async function reviewDelete() {
 
 // --- Undo/redo ---
 
+/** Shared undo/redo handler: call the IPC, reconcile orphaned tags, clear active if removed. */
 async function undoRedo(which: () => Promise<MutationResult>) {
 	if (!currentMap) return;
 	try {
@@ -1226,6 +1276,7 @@ function formatDiffMessage(diff: {
 	return parts.length > 0 ? parts.join(" ") : undefined;
 }
 
+/** Bake overlay, snapshot Arrow file, create a VCS commit. Resets undo stack. */
 export async function commitMap(message?: string): Promise<string> {
 	if (!currentMapId) throw new Error("No map open");
 	const t0 = performance.now();

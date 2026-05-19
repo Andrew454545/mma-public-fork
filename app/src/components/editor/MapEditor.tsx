@@ -34,6 +34,7 @@ import { parseMapsUrl } from "@/lib/data/importExport";
 import { Icon } from "@/components/primitives/Icon";
 import { mdiBackburger, mdiPencil } from "@mdi/js";
 import { PluginSidebarHost } from "@/components/editor/PluginSidebarHost";
+import SameLocation from "@/components/editor/SameLocation.add";
 
 function usePasteHandler() {
 	useEffect(() => {
@@ -274,6 +275,7 @@ export function MapEditor() {
 			</section>
 			{workArea === "overview" && <MapOverview />}
 			{workArea === "location" && <LocationPreview />}
+			{workArea === "duplicates" && <SameLocation />}
 			{workArea === "plugin" && <PluginSidebarHost />}
 			<CommandPalette />
 		</div>

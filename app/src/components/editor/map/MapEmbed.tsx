@@ -1256,7 +1256,6 @@ export function MapEmbed() {
 		};
 	}, []);
 
-	// Viewport culling: re-cull cached buffer on pan/zoom (zero IPC)
 	useEffect(() => {
 		if (svPreview?.url) return () => URL.revokeObjectURL(svPreview.url);
 	}, [svPreview?.url]);

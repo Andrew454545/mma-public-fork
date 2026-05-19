@@ -1,4 +1,4 @@
-/** Acts as selection composition orchestrator for Rust-side resolution. */
+/** Pure selection transforms. These only manipulate the JS selection tree; Rust resolves the actual bitmasks. */
 
 import type { MapData } from "@/types";
 import { hslToRgb } from "@/lib/util/color";
@@ -94,6 +94,7 @@ function keyForProps(_map: MapData, props: SelectionProps, locations: number[]):
 	}
 }
 
+/** Create a Selection with a deterministic key and hashed color from its props. */
 export function buildSelection(map: MapData, props: SelectionProps): Selection {
 	const locations = resolveLocations(map, props);
 	const key = keyForProps(map, props, locations);
@@ -115,6 +116,7 @@ export function addSelection(
 	return dedupe([...current, buildSelection(map, props)]);
 }
 
+/** Remove a selection by key. Composites (Intersection/Union/Invert) unwrap their children back into the list. */
 export function removeSelection(current: Selection[], key: string): Selection[] {
 	return current.flatMap((s) => {
 		if (s.key !== key) return [s];
@@ -124,6 +126,7 @@ export function removeSelection(current: Selection[], key: string): Selection[] 
 	});
 }
 
+/** Merge targeted selections into a single composite, flattening nested groups of the same type. */
 function composeSelectionGroup(
 	map: MapData,
 	current: Selection[],
@@ -143,6 +146,7 @@ export const intersectSelections = (map: MapData, current: Selection[], keys: st
 
 export const unionSelections = (map: MapData, current: Selection[], keys: string[] | null) => composeSelectionGroup(map, current, keys, "Union");
 
+/** Invert targeted selections. Single target toggles in-place; multiple are wrapped in Union then Invert. */
 export function invertSelections(
 	map: MapData,
 	current: Selection[],
@@ -201,6 +205,7 @@ export function reorderSelections(
 	return without.toSpliced(toIdx, 0, item);
 }
 
+/** Drag-drop composition: merge drag into drop as a new composite, absorbing existing children of the same type. */
 export function composeSelections(
 	map: MapData,
 	current: Selection[],
@@ -271,6 +276,7 @@ function removeChildFromComposite(
 	return null;
 }
 
+/** Pull a child out of a composite back into the top-level list. Parent collapses if only one child remains. */
 export function decomposeChild(
 	map: MapData,
 	current: Selection[],
@@ -373,6 +379,7 @@ export function composeWithChild(
 	return current.filter((_, i) => i !== dragIdx).map((s) => (s.key === parentKey ? newParent : s));
 }
 
+/** Human-readable label for a selection, resolving tag names and filter ops. */
 export function selectionDisplayName(map: MapData, sel: Selection): string {
 	const p = sel.props;
 	switch (p.type) {

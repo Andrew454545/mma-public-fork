@@ -195,6 +195,7 @@ pub fn run() {
                     location_store::store_get_selected_ids_list,
                     location_store::store_set_selected_ids,
                     location_store::store_resolve_selection,
+                    location_store::store_find_nearby,
                     location_store::store_add_selection,
                     location_store::store_remove_selection,
                     location_store::store_reset_selections,

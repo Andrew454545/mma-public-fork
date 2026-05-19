@@ -258,9 +258,6 @@ pub fn run() {
                 .target(tauri_plugin_log::Target::new(
                     tauri_plugin_log::TargetKind::LogDir { file_name: Some("mma".to_string()) },
                 ))
-                .target(tauri_plugin_log::Target::new(
-                    tauri_plugin_log::TargetKind::Stdout,
-                ))
                 .build(),
         )
         .plugin(tauri_plugin_window_state::Builder::default().build())

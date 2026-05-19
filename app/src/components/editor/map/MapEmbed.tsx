@@ -1373,9 +1373,9 @@ export function MapEmbed() {
 			onHover: handleHover as any,
 			onError: (e: unknown) => log.error("[deck.gl overlay error]", e),
 		});
-		log.debug(
-			`[overlay] buildLayers=${(t1 - t0).toFixed(0)}ms setProps=${(performance.now() - t1).toFixed(0)}ms layers=${layers.length}`,
-		);
+		// log.debug(
+		// 	`[overlay] buildLayers=${(t1 - t0).toFixed(0)}ms setProps=${(performance.now() - t1).toFixed(0)}ms layers=${layers.length}`,
+		// );
 	}, [buildLayers, handleClick, handleHover]);
 
 	useEffect(() => {

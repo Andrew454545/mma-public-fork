@@ -581,8 +581,8 @@ declare const mmaApi: {
 	removeLocations: (ids: Set<number>) => void;
 	updateLocation: (id: number, patch: Partial<Location$1>) => void;
 	setActiveLocation: (id: number | null) => Promise<void>;
-	addTag: (tag: Tag) => Promise<void>;
-	updateTag: (tagId: number, patch: Partial<Tag>) => Promise<void>;
+	addTag: (tag: Tag) => void;
+	updateTag: (tagId: number, patch: Partial<Tag>) => void;
 	getSelections: () => Selection$1[];
 	getSelectedLocationIds: () => Set<number>;
 	queryIds: (props: SelectionProps) => Promise<number[]>;

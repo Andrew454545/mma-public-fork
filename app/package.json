@@ -4,8 +4,9 @@
 	"version": "0.3.1",
 	"type": "module",
 	"scripts": {
+		"gen:plugin-types": "node ../plugins/types/generate.js",
 		"dev": "vite",
-		"build": "vite build",
+		"build": "npm run gen:plugin-types && vite build",
 		"lint": "eslint .",
 		"preview": "vite preview",
 		"test": "vitest run",

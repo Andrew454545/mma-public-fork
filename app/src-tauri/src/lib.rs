@@ -152,6 +152,7 @@ pub fn run() {
         .invoke_handler({
             let mut specta_builder = tauri_specta::Builder::<tauri::Wry>::new()
                 .dangerously_cast_bigints_to_number()
+                .semantic_types(specta_typescript::semantic::Configuration::default().enable_lossless_floats())
                 .commands(tauri_specta::collect_commands![
                     write_temp_file,
                     read_file,

@@ -61,7 +61,7 @@ export const commands = {
 	storeTagCounts: () => typedError<{ [key in number]: number }, string>(__TAURI_INVOKE("store_tag_counts")),
 	storeAllocTagId: () => typedError<number, string>(__TAURI_INVOKE("store_alloc_tag_id")),
 	storeResolveTagNames: (names: string[]) => typedError<Tag[], string>(__TAURI_INVOKE("store_resolve_tag_names", { names })),
-	storeBounds: () => typedError<[(number | null), (number | null), (number | null), (number | null)] | null, string>(__TAURI_INVOKE("store_bounds")),
+	storeBounds: () => typedError<[number, number, number, number] | null, string>(__TAURI_INVOKE("store_bounds")).then((v) => ((v.status === "ok" ? { ...v, data: v.data==null?v.data:v.data.map(i=>i) } : v) as typeof v)),
 	storeCommitDiff: () => typedError<[number, number, number], string>(__TAURI_INVOKE("store_commit_diff")),
 	storeResetUndo: () => typedError<null, string>(__TAURI_INVOKE("store_reset_undo")),
 	storeUndo: () => typedError<MutationResult_Serialize, string>(__TAURI_INVOKE("store_undo")),
@@ -91,7 +91,7 @@ export const commands = {
 	 *  that rejects 99.9%+ of points before haversine is called.
 	 *  At 1M locations this is sub-millisecond on a modern CPU.
 	 */
-	storeFindNearby: (lat: number | null, lng: number | null, radiusM: number | null) => typedError<Location_Serialize[], string>(__TAURI_INVOKE("store_find_nearby", { lat, lng, radiusM })),
+	storeFindNearby: (lat: number, lng: number, radiusM: number) => typedError<Location_Serialize[], string>(__TAURI_INVOKE("store_find_nearby", { lat, lng, radiusM })),
 	storeAddSelection: (props: SelectionProps) => typedError<SelectionResult, string>(__TAURI_INVOKE("store_add_selection", { props })),
 	storeRemoveSelection: (key: string) => typedError<number, string>(__TAURI_INVOKE("store_remove_selection", { key })),
 	storeResetSelections: () => typedError<number, string>(__TAURI_INVOKE("store_reset_selections")),
@@ -109,7 +109,7 @@ export const commands = {
 	storeExportCsv: (scope: number[] | null) => typedError<string, string>(__TAURI_INVOKE("store_export_csv", { scope })),
 	storeExportGeojson: (scope: number[] | null, tagsJson: string) => typedError<string, string>(__TAURI_INVOKE("store_export_geojson", { scope, tagsJson })),
 	storeExportBulkZip: () => typedError<string, string>(__TAURI_INVOKE("store_export_bulk_zip")),
-	reverseGeocode: (lat: number | null, lng: number | null) => __TAURI_INVOKE<{
+	reverseGeocode: (lat: number, lng: number) => __TAURI_INVOKE<{
 	city: string,
 	admin: string,
 	country: string,
@@ -506,11 +506,11 @@ export type SeenMapInfo = {
 
 export type SeenWriteEntry = {
 	panoId: string,
-	lat: number | null,
-	lng: number | null,
-	heading: number | null,
-	pitch: number | null,
-	zoom: number | null,
+	lat: number,
+	lng: number,
+	heading: number,
+	pitch: number,
+	zoom: number,
 	enteredAt: number,
 	mapId: string | null,
 	locationId: number | null,

@@ -1,7 +1,7 @@
 import { distMeters } from "@/lib/geo/geo";
 import { fetchPanoDotsWithIds } from "@/lib/geo/photometa";
-import { isOfficialPano } from "@/lib/sv/panoId";
-import { cameraTypeFromHeight } from "@/lib/sv/svMeta";
+import { getGoogle } from "@/lib/sv/opensv";
+import { cameraTypeFromHeight, fetchSvMetadata } from "@/lib/sv/svMeta";
 import { LocationFlag, hasLoadAsPanoId } from "@/types";
 import type { Location } from "@/types";
 
@@ -26,24 +26,6 @@ export function parsePanoDate(d: Date | { year?: number; month?: number } | stri
 	return new Date(0);
 }
 
-/** Extract deduplicated, sorted historical pano dates from a PanoData response. */
-export function extractPanoDates(
-	data: google.maps.StreetViewResolvedPanoramaData | null,
-): PanoTime[] {
-	if (!data?.time) return [];
-	const seen = new Set<string>();
-	const dates: PanoTime[] = [];
-	for (const t of data.time) {
-		if (t.pano && !seen.has(t.pano)) {
-			seen.add(t.pano);
-			// eslint-disable-next-line @typescript-eslint/no-explicit-any -- opensv uses .AA for date in some versions
-			dates.push({ pano: t.pano, date: parsePanoDate(t.date ?? (t as any).AA) });
-		}
-	}
-	dates.sort((a, b) => a.date.getTime() - b.date.getTime());
-	return dates;
-}
-
 /** Fetch panorama data via StreetViewService. Returns null on failure or missing location. */
 export async function fetchPanoData(
 	g: Google,
@@ -60,41 +42,13 @@ export async function fetchPanoData(
 	}
 }
 
-/** Get all available historical pano dates for a location (merges coord + panoId lookups). */
-export async function fetchPanoDates(g: Google, loc: Location): Promise<PanoTime[]> {
-	const byCoord = fetchPanoData(g, { location: { lat: loc.lat, lng: loc.lng }, radius: 50 });
-	const byPano = loc.panoId ? fetchPanoData(g, { pano: loc.panoId }) : Promise.resolve(null);
-	const [coordData, panoData] = await Promise.all([byCoord, byPano]);
-
-	const current = panoData ?? coordData;
-	const allUnofficial = current?.time?.every((t) => !isOfficialPano(t.pano)) ?? true;
-
-	let officialData: google.maps.StreetViewResolvedPanoramaData | null = null;
-	if (allUnofficial) {
-		officialData = await fetchPanoData(g, {
-			location: { lat: loc.lat, lng: loc.lng },
-			radius: 25,
-			source: g.maps.StreetViewSource.GOOGLE,
-		});
-	}
-
-	const merged = new Map<string, PanoTime>();
-	if (officialData) {
-		for (const d of extractPanoDates(officialData)) merged.set(d.pano, d);
-	}
-	const primary = panoData ?? coordData;
-	if (primary) {
-		for (const d of extractPanoDates(primary)) merged.set(d.pano, d);
-	}
-	return Array.from(merged.values()).sort((a, b) => a.date.getTime() - b.date.getTime());
-}
-
 export async function getPanoAtCoords(
+	g: Google,
 	lat: number,
 	lng: number,
 	radius = SV_SEARCH_RADIUS,
 ): Promise<string | null> {
-	const sv = new google.maps.StreetViewService();
+	const sv = new g.maps.StreetViewService();
 	try {
 		const result = await sv.getPanorama({ location: { lat, lng }, radius });
 		return result.data.location?.pano ?? null;
@@ -140,6 +94,8 @@ export async function resolvePanoIds(
 ): Promise<ResolvePanoResult> {
 	const { concurrency = 500, batchSize = 200, signal, onProgress } = opts;
 	const result: ResolvePanoResult = { resolved: [], failed: [] };
+	const g = getGoogle();
+	if (!g) return result;
 	const { runConcurrent } = await import("@/lib/util/concurrent");
 	const { batchUpdateLocations } = await import("@/store/useMapStore");
 
@@ -150,7 +106,7 @@ export async function resolvePanoIds(
 		await runConcurrent(
 			chunk,
 			async (loc) => {
-				const pano = await getPanoAtCoords(loc.lat, loc.lng);
+				const pano = await getPanoAtCoords(g, loc.lat, loc.lng);
 				if (pano) {
 					updates.push({ id: loc.id, patch: { panoId: pano } });
 					result.resolved.push({ id: loc.id, panoId: pano });
@@ -405,7 +361,6 @@ export async function lookupStreetView(
  * Returns an array of locations along the road, up to `maxSteps`.
  */
 export async function followLinkedPanos(
-	g: Google,
 	startPanoId: string,
 	heading: number,
 	maxSteps = 50,
@@ -416,15 +371,14 @@ export async function followLinkedPanos(
 	let currentHeading = heading;
 
 	for (let i = 0; i < maxSteps; i++) {
-		const data = await fetchPanoData(g, { pano: currentPanoId });
+		const [data] = await fetchSvMetadata([currentPanoId]);
 		const links = data?.links;
 		if (!links || links.length === 0) break;
 
 		let best: { pano: string; heading: number } | null = null;
 		let bestDelta = Infinity;
 		for (const link of links) {
-			// eslint-disable-next-line @typescript-eslint/no-explicit-any -- opensv internal property names
-			const pid = link.pano ?? (link as any).Ub ?? (link as any).description;
+			const pid = link.pano;
 			const lh = link.heading ?? 0;
 			if (!pid || visited.has(pid)) continue;
 			const delta = Math.abs(normalizeHeading(lh - currentHeading));
@@ -436,7 +390,7 @@ export async function followLinkedPanos(
 		if (!best || bestDelta > 90) break;
 
 		visited.add(best.pano);
-		const nextData = await fetchPanoData(g, { pano: best.pano });
+		const [nextData] = await fetchSvMetadata([best.pano]);
 		if (!nextData) break;
 
 		const pos = nextData.location.latLng;

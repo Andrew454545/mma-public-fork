@@ -44,8 +44,6 @@ import {
 	type PanoTime,
 	type ResolvedPano,
 	parsePanoDate,
-	fetchPanoData,
-	extractPanoDates,
 	resolvePano,
 	followLinkedPanos,
 	downloadPanoTile,
@@ -837,28 +835,18 @@ export function LocationPreview() {
 		};
 	}, [location?.id]);
 
+	// Reactive: fetch metadata (dates, altitude, cameraType, etc.) whenever the current pano changes
 	useEffect(() => {
 		if (!currentPano) {
 			setPanoDates([]);
 			return;
 		}
 		let cancelled = false;
-		const g = getGoogle();
-		if (!g) return;
-		fetchPanoData(g, { pano: currentPano.panoId }).then((data) => {
-			if (!cancelled) setPanoDates(extractPanoDates(data));
-		});
-		return () => {
-			cancelled = true;
-		};
-	}, [location?.id, currentPano?.panoId]);
-
-	// Reactive: fetch metadata (altitude, cameraType, etc.) whenever the current pano changes
-	useEffect(() => {
-		if (!currentPano) return;
-		let cancelled = false;
 		fetchSvMetadata([currentPano.panoId]).then(([data]) => {
 			if (cancelled || !data) return;
+			setPanoDates(
+				(data.time ?? []).flatMap((t) => (t.date ? [{ pano: t.pano, date: t.date }] : [])),
+			);
 			setAltitude(data.extra?.altitude ?? 0);
 			const loc = getActiveLocation();
 			if (loc) enrich(loc, data);
@@ -1042,11 +1030,9 @@ export function LocationPreview() {
 		const panoId = singletonPano.getPano();
 		const heading = singletonPano.getPov().heading;
 		if (!panoId) return;
-		const g = getGoogle();
-		if (!g) return;
 		const container = fullscreenContainerRef.current ?? panoContainerRef.current?.parentElement;
 		if (container) showToast(container, "Following road...");
-		followLinkedPanos(g, panoId, heading)
+		followLinkedPanos(panoId, heading)
 			.then((locs) => {
 				if (locs.length > 0) addLocations(locs);
 				if (container) showToast(container, `Added ${locs.length} locations`);

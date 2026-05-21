@@ -4,6 +4,7 @@ import { ValidationState } from "@/store/selections";
 import { fetchSvMetadata } from "./svMeta";
 import { isOfficialPano } from "./panoId";
 import { getPanoAtCoords } from "./lookup.add";
+import { getGoogle } from "./opensv";
 import { runConcurrent } from "@/lib/util/concurrent";
 
 const GOOD_CAM_TYPES = new Set(["gen4", "gen2"]);
@@ -13,6 +14,7 @@ async function validateOne(loc: Location, signal?: AbortSignal): Promise<Validat
 	signal?.throwIfAborted();
 
 	const n = hasLoadAsPanoId(loc);
+	const g = getGoogle();
 	let r: google.maps.StreetViewResolvedPanoramaData | null = null;
 	let i: google.maps.StreetViewResolvedPanoramaData | null = null;
 	let a = ValidationState.Ok;
@@ -26,12 +28,12 @@ async function validateOne(loc: Location, signal?: AbortSignal): Promise<Validat
 		// LoadAsPanoId: if pano lookup failed, mark broke, fall back to coord
 		if (r == null) {
 			if (loc.panoId != null) a = ValidationState.PanoIdBroke;
-			const coordPano = await getPanoAtCoords(loc.lat, loc.lng);
+			const coordPano = g ? await getPanoAtCoords(g, loc.lat, loc.lng) : null;
 			if (coordPano) [r] = await fetchSvMetadata([coordPano]);
 		}
 	} else {
 		// No LoadAsPanoId: do coord lookup
-		const coordPano = await getPanoAtCoords(loc.lat, loc.lng);
+		const coordPano = g ? await getPanoAtCoords(g, loc.lat, loc.lng) : null;
 		if (coordPano) [i] = await fetchSvMetadata([coordPano]);
 	}
 

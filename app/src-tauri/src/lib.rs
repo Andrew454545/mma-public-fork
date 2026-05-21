@@ -101,6 +101,124 @@ fn list_user_plugins(app: tauri::AppHandle) -> Vec<PluginManifest> {
     plugins
 }
 
+fn build_http_client(follow_redirects: bool) -> reqwest::blocking::Client {
+    let redirect = if follow_redirects {
+        reqwest::redirect::Policy::default()
+    } else {
+        reqwest::redirect::Policy::none()
+    };
+    reqwest::blocking::Client::builder()
+        .use_native_tls()
+        .redirect(redirect)
+        .timeout(std::time::Duration::from_secs(15))
+        .build()
+        .expect("failed to build http client")
+}
+
+/// Follows redirects (svtile tiles, gmaps RPC).
+fn proxy_client() -> &'static reqwest::blocking::Client {
+    static C: std::sync::OnceLock<reqwest::blocking::Client> = std::sync::OnceLock::new();
+    C.get_or_init(|| build_http_client(true))
+}
+
+/// Does NOT follow redirects, so the `Location` header is readable (googl).
+fn resolve_client() -> &'static reqwest::blocking::Client {
+    static C: std::sync::OnceLock<reqwest::blocking::Client> = std::sync::OnceLock::new();
+    C.get_or_init(|| build_http_client(false))
+}
+
+fn proxy_error(msg: String) -> tauri::http::Response<Vec<u8>> {
+    tauri::http::Response::builder()
+        .status(502)
+        .header("Access-Control-Allow-Origin", "*")
+        .body(msg.into_bytes())
+        .unwrap()
+}
+
+/// Relays an upstream response body + content-type back to the webview with CORS.
+fn relay(resp: reqwest::blocking::Response, default_ct: &str) -> tauri::http::Response<Vec<u8>> {
+    let status = resp.status().as_u16();
+    let content_type = resp
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or(default_ct)
+        .to_string();
+    match resp.bytes() {
+        Ok(body) => tauri::http::Response::builder()
+            .status(status)
+            .header("Content-Type", content_type)
+            .header("Access-Control-Allow-Origin", "*")
+            .body(body.to_vec())
+            .unwrap(),
+        Err(e) => proxy_error(format!("read error: {e}")),
+    }
+}
+
+/// svtile: StreetView photosphere tiles via lh3.ggpht.com.
+fn fetch_svtile(url: &str) -> tauri::http::Response<Vec<u8>> {
+    match proxy_client().get(url).send() {
+        Ok(resp) => {
+            let mut out = relay(resp, "image/jpeg");
+            if let Ok(v) = "private, max-age=86400".parse() {
+                out.headers_mut().insert(tauri::http::header::CACHE_CONTROL, v);
+            }
+            out
+        }
+        Err(e) => proxy_error(format!("svtile fetch error: {e}")),
+    }
+}
+
+/// gmaps: forward a request (POST batchexecute etc.) to www.google.com.
+fn proxy_gmaps(
+    method: reqwest::Method,
+    url: &str,
+    content_type: String,
+    user_agent: String,
+    body: Vec<u8>,
+) -> tauri::http::Response<Vec<u8>> {
+    match proxy_client()
+        .request(method, url)
+        .header(reqwest::header::CONTENT_TYPE, content_type)
+        .header(reqwest::header::USER_AGENT, user_agent)
+        .body(body)
+        .send()
+    {
+        Ok(resp) => relay(resp, "text/plain"),
+        Err(e) => proxy_error(format!("gmaps fetch error: {e}")),
+    }
+}
+
+/// googl: resolve a goo.gl / maps.app.goo.gl short link by reading its redirect
+/// `Location` header; returns the target URL as a JSON string.
+fn resolve_googl(id: &str, mapsapp: bool) -> tauri::http::Response<Vec<u8>> {
+    let url = if mapsapp {
+        format!("https://maps.app.goo.gl/{id}")
+    } else {
+        format!("https://goo.gl/maps/{id}")
+    };
+    match resolve_client().get(&url).send() {
+        Ok(resp) => match resp
+            .headers()
+            .get(reqwest::header::LOCATION)
+            .and_then(|v| v.to_str().ok())
+        {
+            Some(location) => tauri::http::Response::builder()
+                .status(200)
+                .header("Content-Type", "application/json")
+                .header("Access-Control-Allow-Origin", "*")
+                .body(serde_json::to_string(location).unwrap_or_default().into_bytes())
+                .unwrap(),
+            None => tauri::http::Response::builder()
+                .status(404)
+                .header("Access-Control-Allow-Origin", "*")
+                .body(Vec::new())
+                .unwrap(),
+        },
+        Err(e) => proxy_error(format!("googl fetch error: {e}")),
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let builder = tauri::Builder::default()
@@ -145,6 +263,44 @@ pub fn run() {
                 Err(_) => tauri::http::Response::builder()
                     .status(404).body(vec![]).unwrap(),
             }
+        })
+        .register_asynchronous_uri_scheme_protocol("svtile", |_ctx, req, responder| {
+            let path = req.uri().path().trim_start_matches('/').to_string();
+            let query = req.uri().query().map(|q| format!("?{q}")).unwrap_or_default();
+            let url = format!("https://lh3.ggpht.com/jsapi2/a/b/c/{path}{query}");
+            std::thread::spawn(move || responder.respond(fetch_svtile(&url)));
+        })
+        .register_asynchronous_uri_scheme_protocol("gmaps", |_ctx, req, responder| {
+            let path = req.uri().path().to_string();
+            let query = req.uri().query().map(|q| format!("?{q}")).unwrap_or_default();
+            let url = format!("https://www.google.com{path}{query}");
+            let method = req.method().clone();
+            let content_type = req
+                .headers()
+                .get(tauri::http::header::CONTENT_TYPE)
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or("application/x-www-form-urlencoded")
+                .to_string();
+            let user_agent = req
+                .headers()
+                .get(tauri::http::header::USER_AGENT)
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or("")
+                .to_string();
+            let body = req.body().clone();
+            std::thread::spawn(move || {
+                responder.respond(proxy_gmaps(method, &url, content_type, user_agent, body))
+            });
+        })
+        .register_asynchronous_uri_scheme_protocol("googl", |_ctx, req, responder| {
+            let id = req.uri().path().trim_start_matches('/').to_string();
+            let mapsapp = req
+                .uri()
+                .query()
+                .unwrap_or("")
+                .split('&')
+                .any(|kv| kv == "source=mapsapp");
+            std::thread::spawn(move || responder.respond(resolve_googl(&id, mapsapp)));
         })
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_shell::init())

@@ -1,5 +1,5 @@
 import { imageKeyToPanoId } from "@/lib/sv/svMeta";
-import { fovToZoom } from "@/lib/util/util";
+import { fovToZoom, schemeBase } from "@/lib/util/util";
 
 export interface ParsedUrl {
 	lat: number;
@@ -15,9 +15,9 @@ async function resolveShortUrl(url: URL): Promise<URL> {
 	const id = url.pathname.split("/").at(-1);
 	if (!id) return url;
 	const source = url.hostname === "maps.app.goo.gl" ? "mapsapp" : undefined;
-	const proxyUrl = import.meta.env.DEV
-		? `/googl/${id}${source ? `?source=${source}` : ""}`
-		: `https://maps.app.goo.gl/${id}`;
+	// Routed through the Tauri `googl` URI-scheme handler (resolves the redirect
+	// server-side), so it works in dev and release.
+	const proxyUrl = `${schemeBase("googl")}${id}${source ? `?source=${source}` : ""}`;
 	const res = await fetch(proxyUrl, { headers: { accept: "application/json" } });
 	if (!res.ok) throw new Error("Failed to resolve short URL");
 	return new URL(await res.json());

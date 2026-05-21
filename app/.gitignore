@@ -13,6 +13,8 @@ test/logs
 dist-ssr
 *.local
 
+opensv-build/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

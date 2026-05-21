@@ -1,6 +1,8 @@
-const BATCH_URL = import.meta.env.DEV
-	? "/gmaps/maps/_/MapsWizUi/data/batchexecute"
-	: "https://www.google.com/maps/_/MapsWizUi/data/batchexecute";
+import { schemeBase } from "@/lib/util/util";
+
+// Routed through the Tauri `gmaps` URI-scheme handler (server-side proxy to
+// www.google.com), so it works in dev and release.
+const BATCH_URL = `${schemeBase("gmaps")}maps/_/MapsWizUi/data/batchexecute`;
 
 export async function shortenMapsUrl(longUrl: string): Promise<string> {
 	const innerPayload = JSON.stringify([

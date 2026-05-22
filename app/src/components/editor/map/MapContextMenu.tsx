@@ -38,6 +38,15 @@ export const MapContextMenuContent = forwardRef<HTMLDivElement, MapContextMenuPr
 				)}
 				<ContextMenu.Item
 					className="context-menu__item"
+					onSelect={() => {
+						const { lat, lng } = getContextMenuTarget().latLng;
+						navigator.clipboard.writeText(`${lat.toFixed(6)}, ${lng.toFixed(6)}`);
+					}}
+				>
+					Copy coordinates
+				</ContextMenu.Item>
+				<ContextMenu.Item
+					className="context-menu__item"
 					onSelect={() => setLatLngAnchor(getContextMenuTarget().latLng)}
 				>
 					Set latitude/longitude anchors

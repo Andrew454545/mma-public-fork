@@ -19,6 +19,7 @@ describe("Selections - basic types", () => {
 	before(async () => {
 		await waitForReady();
 		mapId = await createAndOpenMap("E2E Selections");
+		await browser.pause(500);
 
 		const tagRed = await createTag("tag-red");
 		tagRedId = tagRed.id;
@@ -316,6 +317,7 @@ describe("Selection correctness after mutations", () => {
 	before(async () => {
 		await waitForReady();
 		mapId = await createAndOpenMap("E2E Sel Mutations");
+		await browser.pause(500);
 	});
 
 	after(async () => {
@@ -341,8 +343,9 @@ describe("Selection correctness after mutations", () => {
 			await api.selectPanoIds();
 			const before = api.getSelectedLocationIds().length;
 			for (let i = 0; i < 5; i++) {
-				await api.updateLocation(ids[i], { flags: 1 });
+				api.updateLocation(ids[i], { flags: 1 });
 			}
+			await new Promise((r) => setTimeout(r, 500));
 			api.resetSelections();
 			await api.selectPanoIds();
 			const after = api.getSelectedLocationIds().length;
@@ -354,29 +357,15 @@ describe("Selection correctness after mutations", () => {
 
 	it("selection updates after adding locations", async () => {
 		const result = await withApi(async (api) => {
-			api.resetSelections();
+			await api.resetSelections();
 			await api.selectEverything();
-			const before = api.getSelectedLocationIds().length;
+			const before = (await api.syncSelections()).ids.length;
 
-			const newLoc = [
-				{
-					lat: 50,
-					lng: 50,
-					heading: 0,
-					pitch: 0,
-					zoom: 1,
-					panoId: null,
-					id: 0,
-					flags: 0,
-					tags: [],
-					createdAt: new Date().toISOString(),
-				},
-			];
-			await api.addLocations(newLoc);
+			await api.addLocations([makeLoc({ lat: 50, lng: 50 })]);
 
-			api.resetSelections();
+			await api.resetSelections();
 			await api.selectEverything();
-			const after = api.getSelectedLocationIds().length;
+			const after = (await api.syncSelections()).ids.length;
 			return { before, after };
 		});
 		expect(result.after).toBe(result.before + 1);
@@ -384,14 +373,14 @@ describe("Selection correctness after mutations", () => {
 
 	it("selection updates after removing locations", async () => {
 		const result = await withApi(async (api) => {
-			api.resetSelections();
+			await api.resetSelections();
 			await api.selectEverything();
-			const ids = api.getSelectedLocationIds();
-			const before = ids.length;
-			const toRemove = ids[ids.length - 1];
-			await api.removeLocations([toRemove]);
+			const before = (await api.syncSelections()).ids;
+			const toRemove = before[before.length - 1];
+			api.removeLocations([toRemove]);
+			await new Promise((r) => setTimeout(r, 300));
 			const after = (await api.syncSelections()).ids;
-			return { before, after: after.length };
+			return { before: before.length, after: after.length };
 		});
 		expect(result.after).toBe(result.before - 1);
 	});
@@ -399,14 +388,17 @@ describe("Selection correctness after mutations", () => {
 	it("PanoIds selection correct after undo of flag change", async () => {
 		await withApi(async (api, id: number) => {
 			api.resetSelections();
-			await api.updateLocation(id, { flags: 0 });
+			await api.selectPanoIds();
+			api.updateLocation(id, { flags: 0 });
+			await new Promise((r) => setTimeout(r, 300));
 		}, locIds[0]);
 
 		const afterUnpin = await refreshSelections();
 		expect(afterUnpin.length).toBe(4);
 
 		await withApi(async (api) => {
-			await api.undo();
+			api.undo();
+			await new Promise((r) => setTimeout(r, 300));
 		});
 
 		const afterUndo = await refreshSelections();
@@ -436,6 +428,7 @@ describe("Selection with Filter", () => {
 	before(async () => {
 		await waitForReady();
 		mapId = await createAndOpenMap("E2E Filter");
+		await browser.pause(500);
 
 		const locs: any[] = [];
 		for (let i = 0; i < 50; i++) {

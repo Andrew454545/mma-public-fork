@@ -75,7 +75,7 @@ function panoIdToImageKey(panoId: string): [number, string] {
 	if (isOfficialPano(panoId)) return [2, panoId];
 	// Base64-encoded protobuf (user-uploaded, etc.) — decode [type, id]
 	try {
-		const b64 = panoId.replace(/-/g, "+").replace(/_/g, "/");
+		const b64 = panoId.replace(/\.+$/, "").replace(/-/g, "+").replace(/_/g, "/");
 		const bin = atob(b64);
 		const bytes = new Uint8Array(bin.length);
 		for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);

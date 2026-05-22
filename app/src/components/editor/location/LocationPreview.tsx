@@ -45,10 +45,12 @@ import {
 	type ResolvedPano,
 	parsePanoDate,
 	resolvePano,
+	fetchPanoData,
 	followLinkedPanos,
 	downloadPanoTile,
 	showToast,
 } from "@/lib/sv/lookup.add";
+import { isOfficialPano } from "@/lib/sv/panoId";
 import { enrich } from "@/lib/sv/enrich.add";
 import {
 	buildTileUrl,
@@ -107,6 +109,7 @@ function PanoDatePicker({
 	selectedPanoId,
 	defaultPanoId,
 	resolvedPanoId,
+	currentPanoDate,
 	lat,
 	lng,
 	onChange,
@@ -116,6 +119,7 @@ function PanoDatePicker({
 	selectedPanoId: string | null;
 	defaultPanoId: string | null;
 	resolvedPanoId: string | null;
+	currentPanoDate: Date | null;
 	lat: number;
 	lng: number;
 	onChange: (panoId: string | null) => void;
@@ -134,7 +138,7 @@ function PanoDatePicker({
 			? (defaultEntry ?? resolvedEntry)
 			: sorted.find((d) => d.pano === selectedPanoId);
 	const isDefault = selectedPanoId == null;
-	const displayDate = currentEntry?.date ?? null;
+	const displayDate = currentEntry?.date ?? (isDefault ? currentPanoDate : null);
 	const prevLabelRef = useRef("");
 	const displayLabel = displayDate
 		? isDefault
@@ -634,6 +638,7 @@ interface CurrentPano {
 	panoId: string;
 	lat: number;
 	lng: number;
+	imageDate: Date | null;
 }
 
 function applyResolved(sv: google.maps.StreetViewPanorama, result: ResolvedPano, loc: Location) {
@@ -751,6 +756,7 @@ export function LocationPreview() {
 						panoId,
 						lat: pos?.lat() ?? 0,
 						lng: pos?.lng() ?? 0,
+						imageDate: prev?.imageDate ?? null,
 					};
 				});
 				if (pos) {
@@ -797,10 +803,12 @@ export function LocationPreview() {
 			// Covers the case where setPano() with the same ID doesn't trigger status_changed.
 			if (result.pano?.location) {
 				const loc = result.pano.location;
+				const imgDate = result.pano.imageDate ? parsePanoDate(result.pano.imageDate) : null;
 				setCurrentPano({
 					panoId: loc.pano,
 					lat: loc.latLng.lat(),
 					lng: loc.latLng.lng(),
+					imageDate: imgDate,
 				});
 			}
 			setPanoReady(true);
@@ -823,25 +831,61 @@ export function LocationPreview() {
 		};
 	}, [location?.id]);
 
-	// Reactive: fetch metadata (dates, altitude, cameraType, etc.) whenever the current pano changes
+	// Reactive: fetch dates + metadata whenever the current pano changes.
+	// Like the original, two getPanorama calls provide the date list:
+	//   - by-ID: time entries for the pinned pano
+	//   - by-location: time entries for the default coverage ("nearby" dates)
+	// The date picker shows the merged, deduplicated union (keyed by pano ID).
+	// A separate GetMetadata RPC enriches the current pano (altitude, camera type).
 	useEffect(() => {
 		if (!currentPano) {
 			setPanoDates([]);
 			return;
 		}
 		let cancelled = false;
+
+		function extractTimes(data: google.maps.StreetViewPanoramaData | null): PanoTime[] {
+			const raw = ((data as unknown as { time?: { pano: string; AA?: Date }[] })?.time) ?? [];
+			return raw.flatMap((t) =>
+				t.pano && t.AA instanceof Date ? [{ pano: t.pano, date: t.AA }] : [],
+			);
+		}
+
+		const byPano = fetchPanoData({ pano: currentPano.panoId });
+		const byLoc = fetchPanoData({ location: { lat: currentPano.lat, lng: currentPano.lng }, radius: 50 });
+
+		Promise.all([byPano, byLoc]).then(([panoData, locData]) => {
+			if (cancelled) return;
+			const merged = new Map<string, PanoTime>();
+			for (const t of extractTimes(locData)) merged.set(t.pano, t);
+			for (const t of extractTimes(panoData)) merged.set(t.pano, t);
+
+			// Like the original: if all entries are unofficial, do an extra
+			// official-only lookup to get the full multi-year coverage history.
+			const allUnofficial = merged.size > 0 && [...merged.keys()].every((p) => !isOfficialPano(p));
+			if (allUnofficial && !cancelled) {
+				fetchPanoData({
+					location: { lat: currentPano.lat, lng: currentPano.lng },
+					radius: 25,
+					sources: [google.maps.StreetViewSource.GOOGLE],
+				}).then((officialData) => {
+					if (cancelled) return;
+					for (const t of extractTimes(officialData)) merged.set(t.pano, t);
+					setPanoDates(Array.from(merged.values()));
+				});
+			} else {
+				setPanoDates(Array.from(merged.values()));
+			}
+		});
+
 		fetchSvMetadata([currentPano.panoId]).then(([data]) => {
 			if (cancelled || !data) return;
-			setPanoDates(
-				(data.time ?? []).flatMap((t) => (t.date ? [{ pano: t.pano, date: t.date }] : [])),
-			);
 			setAltitude(data.extra?.altitude ?? 0);
 			const loc = getActiveLocation();
 			if (loc) enrich(loc, data);
 		});
-		return () => {
-			cancelled = true;
-		};
+
+		return () => { cancelled = true; };
 	}, [location?.id, currentPano?.panoId]);
 
 	useEffect(() => {

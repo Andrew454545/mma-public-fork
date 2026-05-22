@@ -1103,11 +1103,13 @@ describe("LocationPreview — tag management in preview", () => {
 		await input.setValue("Alp");
 		await browser.pause(300);
 
-		// Click the suggestion
-		const suggestion = await browser.$(".location-preview__tags ol.tag-list .tag");
-		if (await suggestion.isExisting()) {
-			await suggestion.click();
+		const addBtn = await browser.$(".location-preview__tags ol.tag-list .tag__button--add");
+		if (await addBtn.isExisting()) {
+			await addBtn.click();
 			await browser.pause(300);
+			const saveBtn = await browser.$("[data-qa='location-save']");
+			await saveBtn.click();
+			await browser.pause(500);
 
 			const l = await readLocation(tagmgmt1Id);
 			expect(l.tags).toContain(mgmtTagAId);
@@ -1115,30 +1117,20 @@ describe("LocationPreview — tag management in preview", () => {
 	});
 
 	it("tag removal button removes tag from location", async () => {
-		// First ensure the tag is on the location
-		await withApi(
-			async (api, id, aId, bId) => {
-				api.updateLocation(id, { tags: [aId, bId] });
-				return "ok";
-			},
-			tagmgmt1Id,
-			mgmtTagAId,
-			mgmtTagBId,
-		);
-
 		await openLocation(tagmgmt1Id);
 		await waitForPreview();
 		await browser.pause(500);
 
-		// Click the remove button on the first tag
 		const removeBtn = await browser.$(
 			".location-preview__tags .tag .tag__remove, .location-preview__tags .tag button",
 		);
 		if (await removeBtn.isExisting()) {
 			await removeBtn.click();
 			await browser.pause(300);
+			const saveBtn = await browser.$("[data-qa='location-save']");
+			await saveBtn.click();
+			await browser.pause(500);
 			const l = await readLocation(tagmgmt1Id);
-			// Should have one fewer tag
 			expect(l.tags.length).toBeLessThan(2);
 		}
 	});

@@ -1419,6 +1419,11 @@ export function MapEmbed() {
 	const mapNavSettingsRef = useRef(appSettings);
 	mapNavSettingsRef.current = appSettings;
 
+	useHotkey(useBinding("mapZoomReset"), () => {
+		const gm = gMapRef.current;
+		if (gm) gm.moveCamera({ zoom: 1 });
+	});
+
 	useHotkey(useBinding("mapZoomBounds"), () => {
 		cmd.storeBounds().then((bounds) => {
 			const gm = gMapRef.current;

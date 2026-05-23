@@ -40,6 +40,7 @@ export type HotkeyAction =
 	| "mapZoomIn"
 	| "mapZoomOut"
 	| "mapZoomBounds"
+	| "mapZoomReset"
 	| "panoLookLeft"
 	| "panoLookRight"
 	| "panoLookUp"
@@ -193,6 +194,7 @@ const RAW_HOTKEY_DEFS: HotkeyDef[] = [
 	{ action: "mapZoomIn", label: "Zoom in", group: "Map Navigation", defaultBinding: "Shift+w" },
 	{ action: "mapZoomOut", label: "Zoom out", group: "Map Navigation", defaultBinding: "Shift+s" },
 	{ action: "mapZoomBounds", label: "Zoom to bounds", group: "Map Navigation", defaultBinding: "Shift+q" },
+	{ action: "mapZoomReset", label: "Zoom all the way out", group: "Map Navigation", defaultBinding: "Shift+0" },
 	{
 		action: "panoLookLeft",
 		label: "Look left",

@@ -42,6 +42,9 @@ pub struct Selection {
     pub key: String,
     pub color: [u8; 3],
     pub props: SelectionProps,
+    /// JS-only: cached resolved count for sidebar display. Rust never sets this.
+    #[serde(default)]
+    pub count: Option<u32>,
 }
 
 #[derive(Serialize, specta::Type)]

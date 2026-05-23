@@ -2268,6 +2268,7 @@ pub async fn store_sync_selections(
                 key: format!("sync:{i}"),
                 color: sel.color,
                 props: sel.props.clone(),
+                count: None,
             }
         }).collect();
         store.selection_loc_sets = sel_sets;
@@ -2402,7 +2403,7 @@ pub fn store_add_selection(state: tauri::State<'_, StoreState>, props: Selection
     let key = selection_key(&props, &locations);
     let color = color_for_key(&key);
     let count = locations.len();
-    store.selections.push(Selection { key: key.clone(), color, props });
+    store.selections.push(Selection { key: key.clone(), color, props, count: None });
     store.selection_loc_sets.push(locations.into_iter().collect());
     store.selection_version += 1;
     Ok(SelectionResult { key, count, selection_version: store.selection_version })

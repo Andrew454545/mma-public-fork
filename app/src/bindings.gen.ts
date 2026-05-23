@@ -523,6 +523,8 @@ export type Selection = {
 	key: string,
 	color: [number, number, number],
 	props: SelectionProps,
+	/**  JS-only: cached resolved count for sidebar display. Rust never sets this. */
+	count?: number | null,
 };
 
 export type SelectionInput = {

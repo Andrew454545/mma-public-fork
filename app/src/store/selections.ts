@@ -3,10 +3,8 @@
 import type { MapData } from "@/types";
 import { hslToRgb } from "@/lib/util/color";
 
-export type { SelectionProps, PolygonGeometry } from "@/bindings.gen";
-import type { Selection as BaseSelection, SelectionProps } from "@/bindings.gen";
-
-export type Selection = BaseSelection & { count?: number };
+export type { Selection, SelectionProps, PolygonGeometry } from "@/bindings.gen";
+import type { Selection, SelectionProps } from "@/bindings.gen";
 
 export enum ValidationState {
 	Ok = 0,

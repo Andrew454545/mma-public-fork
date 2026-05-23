@@ -116,6 +116,8 @@ type Selection$1 = {
 		number
 	];
 	props: SelectionProps;
+	/**  JS-only: cached resolved count for sidebar display. Rust never sets this. */
+	count?: number | null;
 };
 export type SelectionProps = {
 	type: "Locations";
@@ -177,9 +179,6 @@ declare function createLocation(partial: Partial<Location$1> & {
 	lat: number;
 	lng: number;
 }): Location$1;
-type Selection$1 = Selection$1 & {
-	count?: number;
-};
 export interface EnrichFieldOption {
 	key: string;
 	label: string;

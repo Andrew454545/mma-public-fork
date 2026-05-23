@@ -44,8 +44,8 @@ import {
 	tryInterceptClick,
 	tryInterceptDraw,
 } from "@/lib/map/mapState";
-import { parseHotkey, matchesKey, isEditableElement } from "@/lib/hooks/useHotkey";
-import { getBinding } from "@/lib/util/hotkeys.add";
+import { useHotkey, parseHotkey, matchesKey, isEditableElement } from "@/lib/hooks/useHotkey";
+import { useBinding, getBinding } from "@/lib/util/hotkeys.add";
 import { useSettings } from "@/store/settings.add";
 import { useLocalStorage } from "@/lib/hooks/useLocalStorage";
 import { Dialog, DialogContent } from "@/components/primitives/Dialog";
@@ -1418,6 +1418,18 @@ export function MapEmbed() {
 	const appSettings = useSettings();
 	const mapNavSettingsRef = useRef(appSettings);
 	mapNavSettingsRef.current = appSettings;
+
+	useHotkey(useBinding("mapZoomBounds"), () => {
+		cmd.storeBounds().then((bounds) => {
+			const gm = gMapRef.current;
+			if (!gm || !bounds || !google?.maps) return;
+			const [west, south, east, north] = bounds as [number, number, number, number];
+			gm.fitBounds({ west, south, east, north });
+			google.maps.event.addListenerOnce(gm, "bounds_changed", () => {
+				gm.moveCamera({ center: gm.getCenter()!, zoom: gm.getZoom()! });
+			});
+		});
+	});
 
 	useEffect(() => {
 		const nav = mapNavRef.current;

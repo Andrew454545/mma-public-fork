@@ -383,6 +383,7 @@ pub fn run() {
                     map_meta::store_delete_folder,
                     map_meta::store_move_map_to_folder,
                     map_meta::store_update_map_labels,
+                    map_meta::store_register_field_defs,
                     map_meta::store_get_pano_date,
                     map_meta::store_set_pano_date,
                     map_meta::store_db_table_info,

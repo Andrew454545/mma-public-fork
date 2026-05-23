@@ -128,6 +128,7 @@ export const commands = {
 	storeDeleteFolder: (name: string) => typedError<null, string>(__TAURI_INVOKE("store_delete_folder", { name })),
 	storeMoveMapToFolder: (mapId: string, folder: string | null) => typedError<null, string>(__TAURI_INVOKE("store_move_map_to_folder", { mapId, folder })),
 	storeUpdateMapLabels: (mapId: string, labels: string[]) => typedError<null, string>(__TAURI_INVOKE("store_update_map_labels", { mapId, labels })),
+	storeRegisterFieldDefs: (defs: { [key in string]: ExtraFieldDef }) => typedError<null, string>(__TAURI_INVOKE("store_register_field_defs", { defs })),
 	storeGetPanoDate: (panoId: string) => typedError<number | null, string>(__TAURI_INVOKE("store_get_pano_date", { panoId })),
 	storeSetPanoDate: (panoId: string, timestamp: number) => typedError<null, string>(__TAURI_INVOKE("store_set_pano_date", { panoId, timestamp })),
 	storeDbTableInfo: () => typedError<DbTableInfo[], string>(__TAURI_INVOKE("store_db_table_info")),
@@ -229,6 +230,7 @@ export type EditorImportResult_Deserialize = {
 	tagCounts: { [key in number]: number },
 	canUndo: boolean,
 	canRedo: boolean,
+	newFieldDefs: { [key in string]: ExtraFieldDef } | null,
 };
 
 export type EditorImportResult_Serialize = {
@@ -239,6 +241,7 @@ export type EditorImportResult_Serialize = {
 	tagCounts: { [key in number]: number },
 	canUndo: boolean,
 	canRedo: boolean,
+	newFieldDefs: { [key in string]: ExtraFieldDef } | null,
 };
 
 export type ExportOpts = {
@@ -403,11 +406,13 @@ export type MutationResult = MutationResult_Serialize | MutationResult_Deseriali
 export type MutationResult_Deserialize = {
 	delta: RenderDelta_Deserialize,
 	selectionSync: SelectionSync | null,
+	newFieldDefs: { [key in string]: ExtraFieldDef } | null,
 } & StoreStatus;
 
 export type MutationResult_Serialize = {
 	delta: RenderDelta_Serialize,
 	selectionSync: SelectionSync | null,
+	newFieldDefs: { [key in string]: ExtraFieldDef } | null,
 } & StoreStatus;
 
 export type PluginManifest = {

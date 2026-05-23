@@ -48,7 +48,6 @@ import {
 	moveMapToFolder,
 	deleteFolder,
 	updateMapMeta,
-	updateMapExtraFields,
 	// bulkImportMaps,
 	setActiveLocation,
 	beginReview,
@@ -186,7 +185,7 @@ function buildTestApi() {
 		moveMapToFolder: (mapId: string, folder: string | null) => moveMapToFolder(mapId, folder),
 		deleteFolder: (name: string) => deleteFolder(name),
 		updateMapMeta: (patch: Partial<MapMeta>) => updateMapMeta(patch),
-		updateMapExtraFields: (fields: Record<string, any>) => updateMapExtraFields(fields),
+		registerFieldDefs: (defs: Record<string, any>) => cmd.storeRegisterFieldDefs(defs),
 		// bulkImportMaps: (entries: any[]) => bulkImportMaps(entries),
 
 		// --- Version control ---

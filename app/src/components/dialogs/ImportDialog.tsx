@@ -8,6 +8,7 @@ import {
 	addLocationCount,
 	setTagCounts,
 	setUndoRedoState,
+	mergeNewFieldDefs,
 } from "@/store/useMapStore";
 import { fmt } from "@/lib/util/format";
 import { cmd } from "@/lib/commands";
@@ -91,6 +92,7 @@ export function ImportDialog({ onClose }: Props) {
 			addLocationCount(r.locationCount);
 			setTagCounts(r.tagCounts);
 			setUndoRedoState(r.canUndo, r.canRedo);
+			mergeNewFieldDefs(r.newFieldDefs);
 			renderDeltaBus.emit(r.delta);
 			refreshAfterMutation();
 			scheduleSave();

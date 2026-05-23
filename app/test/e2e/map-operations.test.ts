@@ -386,7 +386,7 @@ describe("Extra field definitions", () => {
 
 	it("set extra field definitions on map", async () => {
 		await withApi(async (api) => {
-			await api.updateMapExtraFields({
+			await api.registerFieldDefs({
 				altitude: { type: "number", label: "Altitude (m)" },
 				country: { type: "string", label: "Country" },
 				region: { type: "enum", label: "Region", values: ["NA", "EU", "AS"] },
@@ -407,5 +407,66 @@ describe("Extra field definitions", () => {
 		const extra = await withApi(async (api) => api.getCurrentMap()?.meta.extra);
 		expect(extra!.fields!.altitude.type).toBe("number");
 		expect(extra!.fields!.altitude.label).toBe("Altitude (m)");
+	});
+
+	it("auto-registers field defs when adding locations with extras", async () => {
+		await withApi(async (api) => {
+			await api.addLocations([
+				makeLoc({ extra: { plumbus: 1, captured: "2024-03", note: "hello" } }),
+			]);
+		});
+
+		const extra = await withApi(async (api) => api.getCurrentMap()?.meta.extra);
+		expect(extra!.fields!.plumbus.type).toBe("number");
+		expect(extra!.fields!.captured.type).toBe("month");
+		expect(extra!.fields!.note.type).toBe("string");
+	});
+
+	it("auto-registered field defs use known labels for enrichment keys", async () => {
+		await withApi(async (api) => {
+			await api.addLocations([
+				makeLoc({ extra: { countryCode: "US", imageDate: "2023-05" } }),
+			]);
+		});
+
+		const extra = await withApi(async (api) => api.getCurrentMap()?.meta.extra);
+		expect(extra!.fields!.countryCode.label).toBe("Country code");
+		expect(extra!.fields!.imageDate.type).toBe("month");
+		expect(extra!.fields!.imageDate.label).toBe("Image date");
+	});
+
+	it("auto-registered field defs persist across map close/reopen", async () => {
+		await withApi(async (api) => {
+			await api.addLocations([
+				makeLoc({ extra: { fleeb: 99 } }),
+			]);
+		});
+
+		await flushAndWait();
+		await closeMap();
+		await openMap(mapId);
+
+		const extra = await withApi(async (api) => api.getCurrentMap()?.meta.extra);
+		expect(extra!.fields!.fleeb).toBeDefined();
+		expect(extra!.fields!.fleeb.type).toBe("number");
+	});
+
+	it("does not re-register already known keys", async () => {
+		// Explicitly register with a custom label
+		await withApi(async (api) => {
+			await api.registerFieldDefs({
+				score: { type: "number", label: "My Score" },
+			});
+		});
+
+		// Add a location with the same key — should not overwrite the custom def
+		await withApi(async (api) => {
+			await api.addLocations([
+				makeLoc({ extra: { score: 42 } }),
+			]);
+		});
+
+		const extra = await withApi(async (api) => api.getCurrentMap()?.meta.extra);
+		expect(extra!.fields!.score.label).toBe("My Score");
 	});
 });

@@ -331,7 +331,7 @@ describe("Enrichment — auto-registers field defs on map meta", () => {
 	it("does not clobber user-customized field defs", async () => {
 		// Manually set countryCode to a custom type
 		await withApi(async (api) => {
-			await api.updateMapExtraFields({
+			await api.registerFieldDefs({
 				countryCode: { type: "enum", label: "My Custom Country", values: ["US", "RU"] },
 			});
 			return "ok";
@@ -508,7 +508,7 @@ describe("Enrichment — metadata filter uses registered field types", () => {
 		filterCId = ids[2];
 		// Register field defs
 		await withApi(async (api) => {
-			await api.updateMapExtraFields({
+			await api.registerFieldDefs({
 				altitude: { type: "number", label: "Altitude" },
 				countryCode: { type: "string", label: "Country code" },
 				imageDate: { type: "month", label: "Image date" },

@@ -3,8 +3,6 @@ import { Dialog, DialogContent } from "@/components/primitives/Dialog";
 import { useCurrentMap, setMapExtraFields, fetchAllLocations } from "@/store/useMapStore";
 import type { Location } from "@/types";
 import type { ExtraFieldDef } from "@/types";
-import { ENRICHMENT_FIELD_DEFS } from "@/lib/data/fieldDefs.add";
-
 const FIELD_TYPES: ExtraFieldDef["type"][] = ["string", "number", "date", "month", "enum"];
 const TYPE_LABELS: Record<ExtraFieldDef["type"], string> = {
 	string: "Text",
@@ -37,11 +35,10 @@ export function ManageFieldsModal({ onClose }: { onClose: () => void }) {
 
 	const initialRows: FieldRow[] = [...allKeys].sort().map((key) => {
 		const def = defs[key];
-		const knownDef = ENRICHMENT_FIELD_DEFS[key];
 		return {
 			key,
-			label: def?.label ?? knownDef?.label ?? key,
-			type: def?.type ?? knownDef?.type ?? "string",
+			label: def?.label ?? key,
+			type: def?.type ?? "string",
 			hasData: locs.some((l) => l.extra?.[key] != null),
 		};
 	});

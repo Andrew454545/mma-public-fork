@@ -820,6 +820,7 @@ pub struct EditorImportResult {
     pub tag_counts: std::collections::HashMap<u32, usize>,
     pub can_undo: bool,
     pub can_redo: bool,
+    pub new_field_defs: Option<std::collections::HashMap<String, crate::map_meta::ExtraFieldDef>>,
 }
 
 fn reconcile_tags(
@@ -852,7 +853,7 @@ fn add_parsed_to_store(
     app: &tauri::AppHandle,
     store: &mut crate::location_store::Store,
     parsed: &mut ParsedMap,
-) -> Result<(), String> {
+) -> Result<Option<std::collections::HashMap<String, crate::map_meta::ExtraFieldDef>>, String> {
     let existing_tags = if let Some(map_id) = &store.map_id {
         if let Ok(conn) = fast_io::open_db(app) {
             crate::location_store::read_tags_json(&conn, map_id)
@@ -922,7 +923,28 @@ fn add_parsed_to_store(
     }
     store.redo_stack.clear();
     store.bump();
-    Ok(())
+    // Auto-register field defs for new extra keys
+    let extras: Vec<&serde_json::Map<String, serde_json::Value>> = parsed.locations.iter()
+        .filter_map(|l| l.extra.as_ref())
+        .collect();
+    let new_defs = if !extras.is_empty() {
+        if let Some(defs) = crate::map_meta::auto_register_field_defs(&store.known_field_keys, &extras) {
+            if let Some(map_id) = &store.map_id {
+                if let Ok(conn) = crate::fast_io::open_db(app) {
+                    let _ = crate::map_meta::persist_field_defs(&conn, map_id, &defs);
+                }
+            }
+            for key in defs.keys() {
+                store.known_field_keys.insert(key.clone());
+            }
+            Some(defs)
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+    Ok(new_defs)
 }
 
 #[tauri::command]
@@ -954,7 +976,7 @@ pub fn store_import_file(
     log::debug!("[import] parse=cached locs={}", parsed.locations.len());
 
     let mut store = state.lock().map_err(|e| e.to_string())?;
-    add_parsed_to_store(&app, &mut store, &mut parsed)?;
+    let new_field_defs = add_parsed_to_store(&app, &mut store, &mut parsed)?;
 
     log::debug!("[import] total={:.0}ms locs={}", t0.elapsed().as_millis(), parsed.locations.len());
 
@@ -969,6 +991,7 @@ pub fn store_import_file(
         tag_counts: store.tag_counts.clone(),
         can_undo: !store.undo_stack.is_empty(),
         can_redo: !store.redo_stack.is_empty(),
+        new_field_defs,
     })
 }
 
@@ -990,7 +1013,7 @@ pub fn store_import_paste(
     log::debug!("[paste-import] parse={:.0}ms locs={}", t0.elapsed().as_millis(), parsed.locations.len());
 
     let mut store = state.lock().map_err(|e| e.to_string())?;
-    add_parsed_to_store(&app, &mut store, &mut parsed)?;
+    let new_field_defs = add_parsed_to_store(&app, &mut store, &mut parsed)?;
 
     log::debug!("[paste-import] total={:.0}ms locs={}", t0.elapsed().as_millis(), parsed.locations.len());
 
@@ -1007,6 +1030,7 @@ pub fn store_import_paste(
         tag_counts: store.tag_counts.clone(),
         can_undo: !store.undo_stack.is_empty(),
         can_redo: !store.redo_stack.is_empty(),
+        new_field_defs,
     }, single_id))
 }
 

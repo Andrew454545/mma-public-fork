@@ -67,22 +67,3 @@ export function filterEnrichPatch(
 	return filtered;
 }
 
-export const ENRICHMENT_FIELD_DEFS: Record<string, ExtraFieldDef> = {
-	altitude: { type: "number", label: "Altitude" },
-	countryCode: { type: "string", label: "Country code" },
-	cameraType: {
-		type: "enum",
-		label: "Camera type",
-		values: ["gen1", "gen2", "gen4", "badcam", "tripod"],
-		labels: { gen1: "Gen 1", gen2: "Gen 2", gen4: "Gen 4", badcam: "Bad cam", tripod: "Tripod" },
-	},
-	panoType: {
-		type: "enum",
-		label: "Pano type",
-		values: ["2", "3", "10"],
-		labels: { "2": "Official", "3": "Unknown", "10": "User uploaded" },
-	},
-	imageDate: { type: "month", label: "Image date" },
-	datetime: { type: "date", label: "Exact date" },
-	timezone: { type: "enum", label: "Timezone" },
-};

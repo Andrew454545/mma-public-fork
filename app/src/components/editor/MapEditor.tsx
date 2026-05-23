@@ -15,6 +15,7 @@ import {
 	refreshAfterMutation,
 	scheduleSave,
 	renderDeltaBus,
+	mergeNewFieldDefs,
 } from "@/store/useMapStore";
 import { activatePlugins, deactivatePlugins } from "@/plugins/registry";
 import { getGoogleMap as getGoogleMapInstance } from "@/lib/map/mapState";
@@ -76,6 +77,7 @@ function usePasteHandler() {
 					addLocationCount(r.locationCount);
 					setTagCounts(r.tagCounts);
 					setUndoRedoState(r.canUndo, r.canRedo);
+					mergeNewFieldDefs(r.newFieldDefs);
 					renderDeltaBus.emit(r.delta);
 					refreshAfterMutation();
 					scheduleSave();

@@ -148,6 +148,7 @@ pub struct Store {
     pub(crate) undo_stack: Vec<EditEntry>,
     pub(crate) redo_stack: Vec<EditEntry>,
     committed_blobs: HashMap<String, (String, u32)>,
+    pub(crate) known_field_keys: HashSet<String>,
 }
 
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
@@ -184,6 +185,7 @@ impl Store {
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
             committed_blobs: HashMap::new(),
+            known_field_keys: HashSet::new(),
         }
     }
 
@@ -224,6 +226,7 @@ impl Store {
             status: self.store_status(),
             delta,
             selection_sync,
+            new_field_defs: None,
         }
     }
 
@@ -881,6 +884,7 @@ pub struct MutationResult {
     pub status: StoreStatus,
     pub delta: RenderDelta,
     pub selection_sync: Option<SelectionSync>,
+    pub new_field_defs: Option<HashMap<String, crate::map_meta::ExtraFieldDef>>,
 }
 
 /// Deserialize a present-but-null JSON field as `Some(None)` instead of `None`.
@@ -1091,6 +1095,16 @@ pub async fn store_open_map(
         conn.execute("UPDATE maps SET location_count = ?1 WHERE id = ?2",
             rusqlite::params![count, map_id]).map_err(|e| e.to_string())?;
         let tags = read_tags_json(&conn, &map_id);
+        // Populate known_field_keys from persisted field defs
+        let extra_str: String = conn.query_row(
+            "SELECT extra FROM maps WHERE id = ?1",
+            rusqlite::params![map_id],
+            |row| row.get(0),
+        ).unwrap_or_default();
+        let extra: crate::map_meta::MapExtra = serde_json::from_str(&extra_str).unwrap_or_default();
+        store.known_field_keys = extra.fields.as_ref()
+            .map(|f| f.keys().cloned().collect())
+            .unwrap_or_default();
         tags.keys().max().copied().unwrap_or(0) + 1
     };
     store.geohash_index = geohash_index;
@@ -1147,12 +1161,14 @@ pub fn store_close_map(
     store.active_id = None;
     store.undo_stack.clear();
     store.redo_stack.clear();
+    store.known_field_keys.clear();
     Ok(())
 }
 
 #[tauri::command]
 #[specta::specta]
 pub fn store_add_locations(
+    app: tauri::AppHandle,
     state: tauri::State<'_, StoreState>,
     mut locations: Vec<Location>,
 ) -> Result<MutationResult, String> {
@@ -1172,8 +1188,26 @@ pub fn store_add_locations(
     for loc in locations {
         store.overlay_add(loc);
     }
+    let mut result = store.finish_mutation(ChangeSet { added: added.clone(), ..Default::default() });
+    // Auto-register field defs for new extra keys
+    let extras: Vec<&serde_json::Map<String, serde_json::Value>> = added.iter()
+        .filter_map(|l| l.extra.as_ref())
+        .collect();
+    if !extras.is_empty() {
+        if let Some(new_defs) = crate::map_meta::auto_register_field_defs(&store.known_field_keys, &extras) {
+            if let Some(map_id) = &store.map_id {
+                if let Ok(conn) = fast_io::open_db(&app) {
+                    let _ = crate::map_meta::persist_field_defs(&conn, map_id, &new_defs);
+                }
+            }
+            for key in new_defs.keys() {
+                store.known_field_keys.insert(key.clone());
+            }
+            result.new_field_defs = Some(new_defs);
+        }
+    }
     log::debug!("[cmd] store_add_locations lock={}ms total={}ms", _lock, _t.elapsed().as_millis());
-    Ok(store.finish_mutation(ChangeSet { added, ..Default::default() }))
+    Ok(result)
 }
 
 #[tauri::command]
@@ -1204,6 +1238,7 @@ pub fn store_remove_locations(
 #[tauri::command]
 #[specta::specta]
 pub fn store_update_locations(
+    app: tauri::AppHandle,
     state: tauri::State<'_, StoreState>,
     updates: Vec<(u32, LocationPatch)>,
     record_undo: Option<bool>,
@@ -1213,6 +1248,7 @@ pub fn store_update_locations(
     let mut store = state.lock().map_err(|e| e.to_string())?;
     let mut updated: Vec<(Location, Location)> = Vec::new();
     let any_tags = updates.iter().any(|(_, p)| p.tags.is_some());
+    let any_extras = updates.iter().any(|(_, p)| p.extra.is_some());
     for (id, patch) in &updates {
         if let Some(old) = store.get_loc_by_id(*id) {
             store.overlay_update(*id, patch);
@@ -1236,8 +1272,27 @@ pub fn store_update_locations(
             store.redo_stack.clear();
         }
     }
+    let mut result = store.finish_mutation(ChangeSet { updated: updated.clone(), ..Default::default() });
+    if any_extras {
+        let extras: Vec<&serde_json::Map<String, serde_json::Value>> = updated.iter()
+            .filter_map(|(_, n)| n.extra.as_ref())
+            .collect();
+        if !extras.is_empty() {
+            if let Some(new_defs) = crate::map_meta::auto_register_field_defs(&store.known_field_keys, &extras) {
+                if let Some(map_id) = &store.map_id {
+                    if let Ok(conn) = fast_io::open_db(&app) {
+                        let _ = crate::map_meta::persist_field_defs(&conn, map_id, &new_defs);
+                    }
+                }
+                for key in new_defs.keys() {
+                    store.known_field_keys.insert(key.clone());
+                }
+                result.new_field_defs = Some(new_defs);
+            }
+        }
+    }
     log::debug!("[cmd] store_update_locations n={} undo={} total={}ms", updates.len(), record_undo, _t.elapsed().as_millis());
-    Ok(store.finish_mutation(ChangeSet { updated, ..Default::default() }))
+    Ok(result)
 }
 
 /// Remove the given tag IDs from every location that has them. Returns a MutationResult.

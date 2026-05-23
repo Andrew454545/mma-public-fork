@@ -6,14 +6,13 @@ import {
 	fetchAllLocations,
 	batchUpdateLocations,
 	patchLocationExtra,
-	updateMapExtraFields,
 } from "@/store/useMapStore";
 import {
-	ENRICHMENT_FIELD_DEFS,
 	filterEnrichPatch,
 	isFieldEnabled,
 	getEnrichmentProviders,
 } from "@/lib/data/fieldDefs.add";
+import { cmd } from "@/lib/commands";
 import { resolvePanoIds } from "@/lib/sv/lookup.add";
 import { log } from "@/lib/util/log";
 import type { Location } from "@/types";
@@ -140,7 +139,6 @@ export async function enrichAll(
 		return updates;
 	}
 
-	let totalEnriched = 0;
 	for (let i = 0; i < enrichable.length; i += BATCH_SIZE) {
 		signal?.throwIfAborted();
 		const batch = enrichable.slice(i, i + BATCH_SIZE);
@@ -148,7 +146,6 @@ export async function enrichAll(
 
 		const updates = await enrichBatch(batch, panoIds);
 		if (updates.length > 0) batchUpdateLocations(updates);
-		totalEnriched += updates.length;
 
 		onProgress?.(skipped + Math.min(i + batch.length, enrichable.length), pending.length);
 	}
@@ -207,13 +204,9 @@ export async function enrichAll(
 					return { id, patch: { extra: { ...loc?.extra, ...patch } } };
 				});
 				batchUpdateLocations(updates);
-				await updateMapExtraFields(provider.fieldDefs);
+				await cmd.storeRegisterFieldDefs(provider.fieldDefs);
 			}
 		}
-	}
-
-	if (totalEnriched > 0 || result.dateSuccess.length > 0) {
-		await updateMapExtraFields(ENRICHMENT_FIELD_DEFS);
 	}
 
 	return result;

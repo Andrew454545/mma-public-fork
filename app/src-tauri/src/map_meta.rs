@@ -72,6 +72,122 @@ impl Default for ScoreBounds {
 }
 
 // ---------------------------------------------------------------------------
+// Known field defs + auto-registration
+// ---------------------------------------------------------------------------
+
+pub fn known_field_def(key: &str) -> Option<ExtraFieldDef> {
+    match key {
+        "altitude" => Some(ExtraFieldDef {
+            field_type: ExtraFieldType::Number,
+            label: Some("Altitude".into()),
+            values: None,
+            labels: None,
+        }),
+        "countryCode" => Some(ExtraFieldDef {
+            field_type: ExtraFieldType::String,
+            label: Some("Country code".into()),
+            values: None,
+            labels: None,
+        }),
+        "cameraType" => Some(ExtraFieldDef {
+            field_type: ExtraFieldType::Enum,
+            label: Some("Camera type".into()),
+            values: Some(vec!["gen1".into(), "gen2".into(), "gen4".into(), "badcam".into(), "tripod".into()]),
+            labels: Some([("gen1", "Gen 1"), ("gen2", "Gen 2"), ("gen4", "Gen 4"), ("badcam", "Bad cam"), ("tripod", "Tripod")]
+                .into_iter().map(|(k, v)| (k.into(), v.into())).collect()),
+        }),
+        "panoType" => Some(ExtraFieldDef {
+            field_type: ExtraFieldType::Enum,
+            label: Some("Pano type".into()),
+            values: Some(vec!["2".into(), "3".into(), "10".into()]),
+            labels: Some([("2", "Official"), ("3", "Unknown"), ("10", "User uploaded")]
+                .into_iter().map(|(k, v)| (k.into(), v.into())).collect()),
+        }),
+        "imageDate" => Some(ExtraFieldDef {
+            field_type: ExtraFieldType::Month,
+            label: Some("Image date".into()),
+            values: None,
+            labels: None,
+        }),
+        "datetime" => Some(ExtraFieldDef {
+            field_type: ExtraFieldType::Date,
+            label: Some("Exact date".into()),
+            values: None,
+            labels: None,
+        }),
+        "timezone" => Some(ExtraFieldDef {
+            field_type: ExtraFieldType::Enum,
+            label: Some("Timezone".into()),
+            values: None,
+            labels: None,
+        }),
+        _ => None,
+    }
+}
+
+pub fn infer_field_type(value: &serde_json::Value) -> ExtraFieldType {
+    if value.is_number() {
+        return ExtraFieldType::Number;
+    }
+    if let Some(s) = value.as_str() {
+        let b = s.as_bytes();
+        if b.len() == 7 && b[4] == b'-'
+            && b[..4].iter().all(|c| c.is_ascii_digit())
+            && b[5..].iter().all(|c| c.is_ascii_digit())
+        {
+            return ExtraFieldType::Month;
+        }
+    }
+    ExtraFieldType::String
+}
+
+pub fn auto_register_field_defs(
+    known_keys: &std::collections::HashSet<String>,
+    extras: &[&serde_json::Map<String, serde_json::Value>],
+) -> Option<HashMap<String, ExtraFieldDef>> {
+    let mut new_defs: HashMap<String, ExtraFieldDef> = HashMap::new();
+    for extra in extras {
+        for (key, value) in *extra {
+            if known_keys.contains(key) || new_defs.contains_key(key) {
+                continue;
+            }
+            let def = known_field_def(key).unwrap_or_else(|| ExtraFieldDef {
+                field_type: infer_field_type(value),
+                label: None,
+                values: None,
+                labels: None,
+            });
+            new_defs.insert(key.clone(), def);
+        }
+    }
+    if new_defs.is_empty() { None } else { Some(new_defs) }
+}
+
+/// Persist new field defs into the map's `extra` column in SQLite (read-modify-write).
+pub fn persist_field_defs(
+    conn: &rusqlite::Connection,
+    map_id: &str,
+    new_defs: &HashMap<String, ExtraFieldDef>,
+) -> Result<(), String> {
+    let extra_str: String = conn.query_row(
+        "SELECT extra FROM maps WHERE id = ?1",
+        params![map_id],
+        |row| row.get(0),
+    ).map_err(|e| e.to_string())?;
+    let mut extra: MapExtra = serde_json::from_str(&extra_str).unwrap_or_default();
+    let fields = extra.fields.get_or_insert_with(HashMap::new);
+    for (k, v) in new_defs {
+        fields.entry(k.clone()).or_insert_with(|| v.clone());
+    }
+    let json = serde_json::to_string(&extra).unwrap_or_default();
+    conn.execute(
+        "UPDATE maps SET extra = ?1 WHERE id = ?2",
+        params![json, map_id],
+    ).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
 // MapMeta
 // ---------------------------------------------------------------------------
 
@@ -406,6 +522,23 @@ pub fn store_set_pano_date(
     Ok(())
 }
 
+#[tauri::command]
+#[specta::specta]
+pub fn store_register_field_defs(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, crate::location_store::StoreState>,
+    defs: HashMap<String, ExtraFieldDef>,
+) -> Result<(), String> {
+    let mut store = state.lock().map_err(|e| e.to_string())?;
+    let map_id = store.map_id.as_ref().ok_or("no map open")?.clone();
+    let conn = crate::fast_io::open_db(&app)?;
+    persist_field_defs(&conn, &map_id, &defs)?;
+    for key in defs.keys() {
+        store.known_field_keys.insert(key.clone());
+    }
+    Ok(())
+}
+
 // ---------------------------------------------------------------------------
 // Debug / diagnostics
 // ---------------------------------------------------------------------------
@@ -494,4 +627,138 @@ pub fn store_db_stats(app: tauri::AppHandle) -> Result<DbStats, String> {
         journal_mode,
         foreign_keys: fk != 0,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashSet;
+
+    #[test]
+    fn infer_number() {
+        assert!(matches!(infer_field_type(&serde_json::json!(42)), ExtraFieldType::Number));
+        assert!(matches!(infer_field_type(&serde_json::json!(3.14)), ExtraFieldType::Number));
+    }
+
+    #[test]
+    fn infer_month() {
+        assert!(matches!(infer_field_type(&serde_json::json!("2023-05")), ExtraFieldType::Month));
+        assert!(matches!(infer_field_type(&serde_json::json!("1999-12")), ExtraFieldType::Month));
+    }
+
+    #[test]
+    fn infer_not_month() {
+        assert!(matches!(infer_field_type(&serde_json::json!("2023-5")), ExtraFieldType::String));
+        assert!(matches!(infer_field_type(&serde_json::json!("hello")), ExtraFieldType::String));
+        assert!(matches!(infer_field_type(&serde_json::json!("2023-123")), ExtraFieldType::String));
+    }
+
+    #[test]
+    fn infer_string_fallback() {
+        assert!(matches!(infer_field_type(&serde_json::json!("hello")), ExtraFieldType::String));
+        assert!(matches!(infer_field_type(&serde_json::json!(true)), ExtraFieldType::String));
+    }
+
+    #[test]
+    fn known_enrichment_keys() {
+        assert!(known_field_def("altitude").is_some());
+        assert!(known_field_def("countryCode").is_some());
+        assert!(known_field_def("cameraType").is_some());
+        assert!(known_field_def("panoType").is_some());
+        assert!(known_field_def("imageDate").is_some());
+        assert!(known_field_def("datetime").is_some());
+        assert!(known_field_def("timezone").is_some());
+        assert!(known_field_def("plumbus").is_none());
+    }
+
+    #[test]
+    fn known_field_types() {
+        assert!(matches!(known_field_def("altitude").unwrap().field_type, ExtraFieldType::Number));
+        assert!(matches!(known_field_def("imageDate").unwrap().field_type, ExtraFieldType::Month));
+        assert!(matches!(known_field_def("datetime").unwrap().field_type, ExtraFieldType::Date));
+        assert!(matches!(known_field_def("cameraType").unwrap().field_type, ExtraFieldType::Enum));
+    }
+
+    #[test]
+    fn auto_register_no_new_keys() {
+        let known: HashSet<String> = ["altitude", "countryCode"].iter().map(|s| s.to_string()).collect();
+        let extra: serde_json::Map<String, serde_json::Value> = serde_json::from_str(r#"{"altitude": 100}"#).unwrap();
+        assert!(auto_register_field_defs(&known, &[&extra]).is_none());
+    }
+
+    #[test]
+    fn auto_register_known_key() {
+        let known: HashSet<String> = HashSet::new();
+        let extra: serde_json::Map<String, serde_json::Value> = serde_json::from_str(r#"{"altitude": 500}"#).unwrap();
+        let result = auto_register_field_defs(&known, &[&extra]).unwrap();
+        assert_eq!(result.len(), 1);
+        let def = &result["altitude"];
+        assert!(matches!(def.field_type, ExtraFieldType::Number));
+        assert_eq!(def.label.as_deref(), Some("Altitude"));
+    }
+
+    #[test]
+    fn auto_register_unknown_number() {
+        let known: HashSet<String> = HashSet::new();
+        let extra: serde_json::Map<String, serde_json::Value> = serde_json::from_str(r#"{"plumbus": 1}"#).unwrap();
+        let result = auto_register_field_defs(&known, &[&extra]).unwrap();
+        assert_eq!(result.len(), 1);
+        let def = &result["plumbus"];
+        assert!(matches!(def.field_type, ExtraFieldType::Number));
+        assert!(def.label.is_none());
+    }
+
+    #[test]
+    fn auto_register_unknown_string() {
+        let known: HashSet<String> = HashSet::new();
+        let extra: serde_json::Map<String, serde_json::Value> = serde_json::from_str(r#"{"region": "EU"}"#).unwrap();
+        let result = auto_register_field_defs(&known, &[&extra]).unwrap();
+        assert!(matches!(result["region"].field_type, ExtraFieldType::String));
+    }
+
+    #[test]
+    fn auto_register_unknown_month() {
+        let known: HashSet<String> = HashSet::new();
+        let extra: serde_json::Map<String, serde_json::Value> = serde_json::from_str(r#"{"captured": "2024-03"}"#).unwrap();
+        let result = auto_register_field_defs(&known, &[&extra]).unwrap();
+        assert!(matches!(result["captured"].field_type, ExtraFieldType::Month));
+    }
+
+    #[test]
+    fn auto_register_mixed() {
+        let known: HashSet<String> = ["altitude"].iter().map(|s| s.to_string()).collect();
+        let extra: serde_json::Map<String, serde_json::Value> = serde_json::from_str(
+            r#"{"altitude": 100, "countryCode": "US", "plumbus": 42}"#
+        ).unwrap();
+        let result = auto_register_field_defs(&known, &[&extra]).unwrap();
+        // altitude is already known → skipped
+        assert!(!result.contains_key("altitude"));
+        // countryCode is new but in known_field_def → gets label
+        assert_eq!(result["countryCode"].label.as_deref(), Some("Country code"));
+        // plumbus is unknown → inferred as Number, no label
+        assert!(matches!(result["plumbus"].field_type, ExtraFieldType::Number));
+        assert!(result["plumbus"].label.is_none());
+    }
+
+    #[test]
+    fn auto_register_deduplicates_across_extras() {
+        let known: HashSet<String> = HashSet::new();
+        let e1: serde_json::Map<String, serde_json::Value> = serde_json::from_str(r#"{"foo": 1}"#).unwrap();
+        let e2: serde_json::Map<String, serde_json::Value> = serde_json::from_str(r#"{"foo": 2, "bar": "x"}"#).unwrap();
+        let result = auto_register_field_defs(&known, &[&e1, &e2]).unwrap();
+        assert_eq!(result.len(), 2);
+        assert!(result.contains_key("foo"));
+        assert!(result.contains_key("bar"));
+    }
+
+    #[test]
+    fn camera_type_has_enum_values() {
+        let def = known_field_def("cameraType").unwrap();
+        assert!(def.values.is_some());
+        let values = def.values.unwrap();
+        assert!(values.contains(&"gen1".to_string()));
+        assert!(values.contains(&"tripod".to_string()));
+        assert!(def.labels.is_some());
+        assert_eq!(def.labels.as_ref().unwrap().get("gen1").unwrap(), "Gen 1");
+    }
 }

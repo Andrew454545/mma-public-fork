@@ -2,10 +2,9 @@ import { useEffect, useSyncExternalStore } from "react";
 import type { MapData, MapMeta, Location, Tag, WorkArea, ExtraFieldDef } from "@/types";
 import { emit as tauriEmit, listen } from "@tauri-apps/api/event";
 import { cmd, fetchViaFile } from "@/lib/commands";
-import type { MutationResult_Serialize as MutationResult, LocationPatch_Deserialize as LocationPatch } from "@/bindings.gen";
+import type { MutationResult_Serialize as MutationResult, LocationPatch_Deserialize as LocationPatch, MapMetaPatch } from "@/bindings.gen";
 import { emit as emitEvent } from "@/lib/events";
 import { log } from "@/lib/util/log";
-import { ENRICHMENT_FIELD_DEFS } from "@/lib/data/fieldDefs.add";
 import { debugSpan } from "@/lib/util/debug";
 import { mmaBufUrl } from "@/lib/util/util";
 import type { RenderDelta } from "@/lib/render/CellManager";
@@ -75,43 +74,6 @@ async function reloadMapList() {
 export async function invalidateMapList() {
 	await reloadMapList();
 	tauriEmit("map-list-changed");
-}
-
-// --- Extra field index (incremental cache of known extra keys) ---
-interface ExtraFieldInfo {
-	count: number;
-	numericCount: number;
-}
-let extraFieldIndex = new Map<string, ExtraFieldInfo>();
-
-function indexExtrasFromLocations(locs: Location[]) {
-	for (const loc of locs) {
-		if (!loc.extra) continue;
-		for (const [k, v] of Object.entries(loc.extra)) {
-			const info = extraFieldIndex.get(k) ?? { count: 0, numericCount: 0 };
-			info.count++;
-			if (typeof v === "number") info.numericCount++;
-			extraFieldIndex.set(k, info);
-		}
-	}
-}
-
-function indexExtraPatch(patch: Record<string, unknown>) {
-	for (const [k, v] of Object.entries(patch)) {
-		const info = extraFieldIndex.get(k) ?? { count: 0, numericCount: 0 };
-		info.count++;
-		if (typeof v === "number") info.numericCount++;
-		extraFieldIndex.set(k, info);
-	}
-}
-
-export function getExtraFieldIndex(): ReadonlyMap<string, { count: number; numericCount: number }> {
-	return extraFieldIndex;
-}
-
-export function useExtraFieldIndex(): ReadonlyMap<string, { count: number; numericCount: number }> {
-	useSyncExternalStore(subscribe, getMapSnapshot);
-	return extraFieldIndex;
 }
 
 // --- Current map state ---
@@ -291,7 +253,6 @@ export async function openMap(id: string, pushHistory = true) {
 	const t0 = performance.now();
 	currentMap = await cmd.storeGetMap(id);
 	log.debug(`[openMap] getMap=${(performance.now() - t0).toFixed(0)}ms`);
-	extraFieldIndex = new Map();
 
 	if (currentMap) {
 		const t1 = performance.now();
@@ -434,27 +395,29 @@ export async function updateMapLabels(id: string, labels: string[]) {
 	await invalidateMapList();
 }
 
-export async function updateMapMeta(patch: Partial<MapMeta>) {
+export async function updateMapMeta(patch: MapMetaPatch) {
 	if (!currentMapId || !currentMap) return;
 	await cmd.storeUpdateMapMeta(currentMapId, patch);
-	if (patch.name !== undefined) currentMap.meta.name = patch.name;
-	if (patch.description !== undefined) currentMap.meta.description = patch.description;
+	if (patch.name != null) currentMap.meta.name = patch.name;
+	if (patch.description != null) currentMap.meta.description = patch.description;
 	if (patch.folder !== undefined) currentMap.meta.folder = patch.folder;
-	if (patch.settings !== undefined) currentMap.meta.settings = patch.settings;
-	if (patch.scoreBounds !== undefined) currentMap.meta.scoreBounds = patch.scoreBounds;
-	if (patch.extra !== undefined) currentMap.meta.extra = patch.extra;
+	if (patch.settings != null) currentMap.meta.settings = patch.settings;
+	if (patch.scoreBounds != null) currentMap.meta.scoreBounds = patch.scoreBounds;
+	if (patch.extra != null) currentMap.meta.extra = patch.extra;
 	refreshAfterMutation();
 	await invalidateMapList();
 }
 
-export async function updateMapExtraFields(fields: Record<string, ExtraFieldDef>) {
-	if (!currentMapId || !currentMap) return;
+export function mergeNewFieldDefs(newDefs: Record<string, ExtraFieldDef> | null) {
+	if (!newDefs || !currentMap) return;
 	const current = currentMap.meta.extra ?? {};
-	const merged = { ...current, fields: { ...current.fields, ...fields } };
-	currentMap = { ...currentMap, meta: { ...currentMap.meta, extra: merged } };
-	mapVersion++;
-	notify();
-	await cmd.storeUpdateMapMeta(currentMapId, { extra: merged } as Partial<MapMeta>);
+	currentMap = {
+		...currentMap,
+		meta: {
+			...currentMap.meta,
+			extra: { ...current, fields: { ...current.fields, ...newDefs } },
+		},
+	};
 }
 
 export async function setMapExtraFields(fields: Record<string, ExtraFieldDef>) {
@@ -465,20 +428,6 @@ export async function setMapExtraFields(fields: Record<string, ExtraFieldDef>) {
 	mapVersion++;
 	notify();
 	await cmd.storeUpdateMapMeta(currentMapId, { extra: replaced } as Partial<MapMeta>);
-}
-
-function autoRegisterFieldDefs(extraKeys: string[]) {
-	if (!currentMap) return;
-	const existing = currentMap.meta.extra?.fields ?? {};
-	const newDefs: Record<string, ExtraFieldDef> = {};
-	for (const key of extraKeys) {
-		if (!existing[key] && ENRICHMENT_FIELD_DEFS[key]) {
-			newDefs[key] = ENRICHMENT_FIELD_DEFS[key];
-		}
-	}
-	if (Object.keys(newDefs).length > 0) {
-		updateMapExtraFields(newDefs);
-	}
 }
 
 export function addLocationCount(delta: number) {
@@ -517,6 +466,7 @@ function syncMutationResult(r: MutationResult) {
 	if (r.selectionSync) {
 		applySelectionSync(r.selectionSync);
 	}
+	mergeNewFieldDefs(r.newFieldDefs);
 }
 
 /** Parse a binary bitmask file from Rust and emit to selBitmaskBus. */
@@ -573,10 +523,6 @@ async function mutate(p: Promise<MutationResult>): Promise<MutationResult> {
 
 export async function addLocations(locs: Location[], opts?: { hideInDelta?: boolean }) {
 	if (!currentMap || locs.length === 0) return;
-	indexExtrasFromLocations(locs);
-	const extraKeys = new Set<string>();
-	for (const l of locs) if (l.extra) for (const k of Object.keys(l.extra)) extraKeys.add(k);
-	if (extraKeys.size > 0) autoRegisterFieldDefs([...extraKeys]);
 	const t0 = performance.now();
 	const r = await mutate(cmd.storeAddLocations(locs));
 	log.debug(`[add] ipc=${(performance.now() - t0).toFixed(0)}ms delta: +${r.delta.added.length} -${r.delta.removed.length}`);
@@ -657,8 +603,6 @@ export function patchLocationExtra(
 	replace = false,
 ) {
 	if (!currentMap) return;
-	indexExtraPatch(extraPatch);
-	autoRegisterFieldDefs(Object.keys(extraPatch));
 	const send = (extra: Record<string, unknown>) => {
 		mutate(cmd.storeUpdateLocations([[locId, { extra }]], false)).then(
 			() => {

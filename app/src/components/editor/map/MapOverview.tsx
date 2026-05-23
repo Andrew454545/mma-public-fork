@@ -20,7 +20,6 @@ import {
 	beginReview,
 	selectDuplicates,
 	selectFilter,
-	useExtraFieldIndex,
 	reorderSelection,
 	composeSelections,
 	decomposeChild,
@@ -365,17 +364,6 @@ function SelectionRow({
 	);
 }
 
-const KNOWN_FIELD_LABELS: Record<string, string> = {
-	countryCode: "Country code",
-	cameraType: "Camera type",
-	panoType: "Pano type",
-	imageDate: "Image date",
-	altitude: "Altitude",
-	datetime: "Exact date",
-	timezone: "Timezone",
-	createdAt: "Created",
-	modifiedAt: "Modified",
-};
 const ALL_OPS: FilterOp[] = [
 	"eq",
 	"neq",
@@ -422,39 +410,25 @@ const VIRTUAL_FIELDS: FieldEntry[] = [
 ];
 
 function useExtraFieldKeys(): FieldEntry[] {
-	const index = useExtraFieldIndex();
 	const map = useCurrentMap();
 	const defs = map?.meta.extra?.fields;
 	return useMemo(() => {
-		const seen = new Set<string>();
 		const entries: FieldEntry[] = [];
-		for (const [key, stats] of index.entries()) {
-			seen.add(key);
-			const def = defs?.[key];
-			const fallbackNumeric = stats.numericCount > stats.count / 2;
-			entries.push({
-				key,
-				label: def?.label ?? KNOWN_FIELD_LABELS[key] ?? key,
-				fieldType: def?.type ?? (fallbackNumeric ? "number" : "string"),
-				fieldDef: def,
-			});
-		}
 		if (defs) {
 			for (const [key, def] of Object.entries(defs)) {
-				if (seen.has(key)) continue;
 				entries.push({
 					key,
-					label: def.label ?? KNOWN_FIELD_LABELS[key] ?? key,
+					label: def.label ?? key,
 					fieldType: def.type ?? "string",
 					fieldDef: def,
 				});
 			}
 		}
 		for (const vf of VIRTUAL_FIELDS) {
-			if (!seen.has(vf.key)) entries.push(vf);
+			if (!defs?.[vf.key]) entries.push(vf);
 		}
 		return entries;
-	}, [index, defs]);
+	}, [defs]);
 }
 
 function unixToDatetimeLocal(unix: string): string {

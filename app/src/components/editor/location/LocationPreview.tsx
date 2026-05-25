@@ -27,6 +27,7 @@ import {
 	reviewNext,
 	reviewPrev,
 	reviewDelete,
+	getVisibleTags,
 } from "@/store/useMapStore";
 import { loadOpenSV, google } from "@/lib/sv/opensv";
 import { fetchSvMetadata } from "@/lib/sv/svMeta";
@@ -1094,7 +1095,7 @@ export function LocationPreview() {
 	useHotkey("1,2,3,4,5,6,7,8,9", (e) => {
 		if (!location || !map) return;
 		const idx = parseInt(e.key) - 1;
-		const tags = Object.values(map.meta.tags);
+		const tags = getVisibleTags();
 		if (idx >= tags.length) return;
 		const tag = tags[idx];
 		const cur = pendingTagsRef.current;
@@ -1240,7 +1241,7 @@ export function LocationPreview() {
 	if (!location || !map) return null;
 
 	const locTags = pendingTags.map((id) => map.meta.tags[id]).filter(Boolean);
-	const allTags = Object.values(map.meta.tags).sort(
+	const allTags = getVisibleTags().sort(
 		(a, b) => (a.order ?? 0) - (b.order ?? 0) || a.name.localeCompare(b.name),
 	);
 	const suggestions = (() => {
@@ -1326,7 +1327,7 @@ export function LocationPreview() {
 						<FullscreenTagBar
 							pendingTags={pendingTags}
 							onChangeTags={setPendingTags}
-							tags={Object.values(map.meta.tags)}
+							tags={getVisibleTags()}
 						/>
 					)}
 				</div>

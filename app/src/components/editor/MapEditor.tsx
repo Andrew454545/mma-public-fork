@@ -9,14 +9,7 @@ import {
 	setActiveLocation,
 	getActiveLocation,
 	resolveTagsByName,
-	addTags,
-	addLocationCount,
-	setTagCounts,
-	setUndoRedoState,
-	refreshAfterMutation,
-	scheduleSave,
-	renderDeltaBus,
-	mergeNewFieldDefs,
+	mutate,
 } from "@/store/useMapStore";
 import { activatePlugins, deactivatePlugins } from "@/plugins/registry";
 import { getGoogleMap as getGoogleMapInstance } from "@/lib/map/mapState";
@@ -72,15 +65,8 @@ function usePasteHandler() {
 
 			try {
 				const [r, singleId] = await cmd.storeImportPaste(text);
-				if (r.locationCount > 0) {
-					addTags(r.tags.map((t) => ({ id: t.id, name: t.name, color: t.color, visible: true })));
-					addLocationCount(r.locationCount);
-					setTagCounts(r.tagCounts);
-					setUndoRedoState(r.canUndo, r.canRedo);
-					mergeNewFieldDefs(r.newFieldDefs);
-					renderDeltaBus.emit(r.delta);
-					refreshAfterMutation();
-					scheduleSave();
+				if (r.importedCount > 0) {
+					await mutate(Promise.resolve(r));
 					if (singleId != null) setActiveLocation(singleId);
 				}
 			} catch {

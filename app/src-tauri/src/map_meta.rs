@@ -402,23 +402,6 @@ pub fn store_update_map_meta(
     Ok(())
 }
 
-#[tauri::command]
-#[specta::specta]
-pub fn store_save_tags(
-    app: tauri::AppHandle,
-    map_id: String,
-    tags: HashMap<String, Tag>,
-) -> Result<(), String> {
-    let conn = crate::fast_io::open_db(&app)?;
-    let now = now_iso();
-    let json = serde_json::to_string(&tags).unwrap_or_default();
-    conn.execute(
-        "UPDATE maps SET tags = ?1, updated_at = ?2 WHERE id = ?3",
-        params![json, now, map_id],
-    )
-    .map_err(|e| e.to_string())?;
-    Ok(())
-}
 
 #[tauri::command]
 #[specta::specta]

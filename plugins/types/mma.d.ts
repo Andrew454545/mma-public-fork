@@ -173,6 +173,7 @@ export type Tag = {
 	color: string;
 	visible?: boolean;
 	order?: number | null;
+	count?: number;
 };
 type Location$1 = Location_Serialize;
 type Tag$1 = Tag;
@@ -588,7 +589,7 @@ declare const mmaApi: {
 	updateLocation: (id: number, patch: Partial<Location$1>) => void;
 	setActiveLocation: (id: number | null) => Promise<void>;
 	addTag: (tag: Tag$1) => void;
-	updateTag: (tagId: number, patch: Partial<Tag$1>) => void;
+	updateTag: (tagId: number, patch: Partial<Tag$1>) => Promise<void>;
 	getSelections: () => Selection$1[];
 	getSelectedLocationIds: () => Set<number>;
 	queryIds: (props: SelectionProps) => Promise<number[]>;

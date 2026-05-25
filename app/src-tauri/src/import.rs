@@ -502,7 +502,7 @@ fn parse_single_json_mut(buf: &mut [u8]) -> ParsedMap {
         let color = meta.and_then(|m| m.color.clone())
             .unwrap_or_else(|| color_for_name(&name));
         let order = meta.and_then(|m| m.order);
-        Tag { id, name, color, visible: true, order }
+        Tag { id, name, color, visible: true, order, count: 0 }
     }).collect();
     tags.sort_by(|a, b| {
         a.order.unwrap_or(u32::MAX).cmp(&b.order.unwrap_or(u32::MAX))
@@ -813,14 +813,10 @@ pub fn store_import_preview(path: String) -> Result<EditorImportPreview, String>
 #[derive(serde::Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct EditorImportResult {
-    pub location_count: u32,
-    pub tags: Vec<Tag>,
-    pub delta: crate::location_store::RenderDelta,
+    #[serde(flatten)]
+    pub mutation: crate::location_store::MutationResult,
+    pub imported_count: u32,
     pub warnings: Vec<String>,
-    pub tag_counts: std::collections::HashMap<u32, usize>,
-    pub can_undo: bool,
-    pub can_redo: bool,
-    pub new_field_defs: Option<std::collections::HashMap<String, crate::map_meta::ExtraFieldDef>>,
 }
 
 fn reconcile_tags(
@@ -846,6 +842,7 @@ fn reconcile_tags(
             true
         }
     });
+
     remap
 }
 
@@ -853,18 +850,17 @@ fn add_parsed_to_store(
     app: &tauri::AppHandle,
     store: &mut crate::location_store::Store,
     parsed: &mut ParsedMap,
-) -> Result<Option<std::collections::HashMap<String, crate::map_meta::ExtraFieldDef>>, String> {
-    let existing_tags = if let Some(map_id) = &store.map_id {
-        if let Ok(conn) = fast_io::open_db(app) {
-            crate::location_store::read_tags_json(&conn, map_id)
-        } else {
-            HashMap::new()
-        }
-    } else {
-        HashMap::new()
-    };
+) -> Result<crate::location_store::MutationResult, String> {
+    let existing_tags = store.tags.clone();
 
     let tag_id_remap = reconcile_tags(store, parsed, &existing_tags);
+
+    if !parsed.tags.is_empty() {
+        for tag in &parsed.tags {
+            store.tags.insert(tag.id, tag.clone());
+        }
+        store.tags_dirty = true;
+    }
 
     for loc in &mut parsed.locations {
         loc.id = store.alloc_id();
@@ -876,7 +872,7 @@ fn add_parsed_to_store(
             let ci = crate::location_store::render_cell_idx(loc.lat, loc.lng);
             store.cell_add_render(ci, loc.id);
             store.overlay_add(loc.clone());
-            for &tag in &loc.tags { *store.tag_counts.entry(tag).or_default() += 1; }
+            store.add_tag_counts(&[loc.clone()]);
         }
         store.push_undo(crate::location_store::EditEntry {
             created: parsed.locations.clone(),
@@ -902,7 +898,7 @@ fn add_parsed_to_store(
         fast_io::write_arrow_ipc(&path, &new_batch)?;
 
         for loc in &parsed.locations {
-            for &tag in &loc.tags { *store.tag_counts.entry(tag).or_default() += 1; }
+            store.add_tag_counts(&[loc.clone()]);
             let ci = crate::location_store::render_cell_idx(loc.lat, loc.lng);
             store.cell_add_render(ci, loc.id);
         }
@@ -922,12 +918,17 @@ fn add_parsed_to_store(
         store.undo_stack.clear();
     }
     store.redo_stack.clear();
-    store.bump();
+
+    let mut result = store.finish_mutation(
+        crate::location_store::ChangeSet { full_reset: true, ..Default::default() }
+    );
+    result.tags = Some(store.tags.clone());
+
     // Auto-register field defs for new extra keys
     let extras: Vec<&serde_json::Map<String, serde_json::Value>> = parsed.locations.iter()
         .filter_map(|l| l.extra.as_ref())
         .collect();
-    let new_defs = if !extras.is_empty() {
+    if !extras.is_empty() {
         if let Some(defs) = crate::map_meta::auto_register_field_defs(&store.known_field_keys, &extras) {
             if let Some(map_id) = &store.map_id {
                 if let Ok(conn) = crate::fast_io::open_db(app) {
@@ -937,14 +938,10 @@ fn add_parsed_to_store(
             for key in defs.keys() {
                 store.known_field_keys.insert(key.clone());
             }
-            Some(defs)
-        } else {
-            None
+            result.new_field_defs = Some(defs);
         }
-    } else {
-        None
-    };
-    Ok(new_defs)
+    }
+    Ok(result)
 }
 
 #[tauri::command]
@@ -976,22 +973,14 @@ pub fn store_import_file(
     log::debug!("[import] parse=cached locs={}", parsed.locations.len());
 
     let mut store = state.lock().map_err(|e| e.to_string())?;
-    let new_field_defs = add_parsed_to_store(&app, &mut store, &mut parsed)?;
+    let mutation = add_parsed_to_store(&app, &mut store, &mut parsed)?;
 
     log::debug!("[import] total={:.0}ms locs={}", t0.elapsed().as_millis(), parsed.locations.len());
 
-    let loc_count = parsed.locations.len();
-
     Ok(EditorImportResult {
-        location_count: loc_count as u32,
-        tags: parsed.tags,
-        // TODO: compute targeted delta from imported locations instead of full_reset
-        delta: crate::location_store::RenderDelta { full_reset: true, ..Default::default() },
+        imported_count: parsed.locations.len() as u32,
         warnings: parsed.warnings,
-        tag_counts: store.tag_counts.clone(),
-        can_undo: !store.undo_stack.is_empty(),
-        can_redo: !store.redo_stack.is_empty(),
-        new_field_defs,
+        mutation,
     })
 }
 
@@ -1013,24 +1002,16 @@ pub fn store_import_paste(
     log::debug!("[paste-import] parse={:.0}ms locs={}", t0.elapsed().as_millis(), parsed.locations.len());
 
     let mut store = state.lock().map_err(|e| e.to_string())?;
-    let new_field_defs = add_parsed_to_store(&app, &mut store, &mut parsed)?;
+    let mutation = add_parsed_to_store(&app, &mut store, &mut parsed)?;
 
     log::debug!("[paste-import] total={:.0}ms locs={}", t0.elapsed().as_millis(), parsed.locations.len());
 
-    let loc_count = parsed.locations.len();
-    // Single-location paste → return its id so the caller can open it; bulk → None.
-    let single_id = if loc_count == 1 { parsed.locations.first().map(|l| l.id) } else { None };
+    let single_id = if parsed.locations.len() == 1 { parsed.locations.first().map(|l| l.id) } else { None };
 
     Ok((EditorImportResult {
-        location_count: loc_count as u32,
-        tags: parsed.tags,
-        // TODO: compute targeted delta from imported locations instead of full_reset
-        delta: crate::location_store::RenderDelta { full_reset: true, ..Default::default() },
+        imported_count: parsed.locations.len() as u32,
         warnings: parsed.warnings,
-        tag_counts: store.tag_counts.clone(),
-        can_undo: !store.undo_stack.is_empty(),
-        can_redo: !store.redo_stack.is_empty(),
-        new_field_defs,
+        mutation,
     }, single_id))
 }
 

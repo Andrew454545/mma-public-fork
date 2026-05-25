@@ -39,6 +39,8 @@ import {
 	decomposeChild,
 	removeChildFromSelection,
 	addTags,
+	mutate,
+	resolveTagsByName,
 	updateTags,
 	deleteTags,
 	bulkAddTag,
@@ -177,7 +179,7 @@ function buildTestApi() {
 		deleteTag: (id: number) => deleteTags([id]),
 		bulkAddTag: (tagId: number) => bulkAddTag(tagId),
 		reorderTags: (ids: number[]) => reorderTags(ids),
-		resolveTagNames: (names: string[]) => cmd.storeResolveTagNames(names),
+		resolveTagNames: (names: string[]) => resolveTagsByName(names),
 
 		// --- Map management ---
 		renameMap: (id: string, name: string) => renameMap(id, name),
@@ -227,8 +229,16 @@ function buildTestApi() {
 			cmd.storeExportGeojson(scope, tagsJson),
 		writeTempFile: (name: string, content: string) => cmd.writeTempFile(name, content),
 		importPreview: (path: string) => cmd.storeImportPreview(path),
-		importFile: (droppedFields: string[]) => cmd.storeImportFile(droppedFields),
-		importPaste: (text: string) => cmd.storeImportPaste(text),
+		importFile: async (droppedFields: string[]) => {
+			const r = await cmd.storeImportFile(droppedFields);
+			await mutate(Promise.resolve(r));
+			return r;
+		},
+		importPaste: async (text: string) => {
+			const [r, singleId] = await cmd.storeImportPaste(text);
+			await mutate(Promise.resolve(r));
+			return [r, singleId] as const;
+		},
 
 		// --- Low-level updates ---
 		updateLocationNoUndo: (id: number, patch: Partial<Location>) => {

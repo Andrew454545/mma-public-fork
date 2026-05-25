@@ -12,8 +12,8 @@ import {
 	reorderTags,
 	removeTagFromAll,
 	removeTagFromSelection,
-	renameTagInSelection,
 	getSelectedLocationIds,
+	getVisibleTags,
 } from "@/store/useMapStore";
 import type { TagSortMode } from "@/types";
 import { Dialog, DialogContent } from "@/components/primitives/Dialog";
@@ -41,7 +41,7 @@ export function TagManager() {
 		null,
 	);
 
-	const tags = map ? Object.values(map.meta.tags).filter((t) => t.visible !== false) : [];
+	const tags = getVisibleTags();
 	const lastShiftClickRef = useRef<number | null>(null);
 
 	const sortedTags = useMemo(() => {
@@ -316,7 +316,7 @@ function RenameInSelectionDialog({
 
 	const handleSubmit = () => {
 		const trimmed = name.trim();
-		if (trimmed && trimmed !== tag.name) renameTagInSelection(tag.id, trimmed);
+		if (trimmed && trimmed !== tag.name) updateTags([{ id: tag.id, patch: { name: trimmed } }]);
 		onClose();
 	};
 

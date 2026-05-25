@@ -131,7 +131,8 @@ pub struct Store {
     pub(crate) geohash_index: HashMap<String, Vec<usize>>,
     dirty_geohashes: HashSet<String>,
     pub(crate) dirty: bool,
-    pub(crate) tag_counts: HashMap<u32, usize>,
+    pub(crate) tags: HashMap<u32, Tag>,
+    pub(crate) tags_dirty: bool,
     next_id: u32,
     next_tag_id: u32,
     version: u64,
@@ -169,7 +170,8 @@ impl Store {
             geohash_index: HashMap::new(),
             dirty_geohashes: HashSet::new(),
             dirty: false,
-            tag_counts: HashMap::new(),
+            tags: HashMap::new(),
+            tags_dirty: false,
             next_id: 1,
             next_tag_id: 1,
             version: 0,
@@ -200,7 +202,7 @@ impl Store {
             location_count: self.alive_count,
             can_undo: !self.undo_stack.is_empty(),
             can_redo: !self.redo_stack.is_empty(),
-            tag_counts: self.tag_counts.clone(),
+            tag_counts: self.tags.iter().map(|(&id, t)| (id, t.count)).collect(),
         }
     }
 
@@ -222,11 +224,26 @@ impl Store {
                 Some(self.incremental_selection_update(&changes))
             }
         };
+        let mut tags = None;
+        let mut vis_changed = false;
+        for tag in self.tags.values_mut() {
+            let should = tag.count > 0;
+            if tag.visible != should {
+                tag.visible = should;
+                vis_changed = true;
+            }
+        }
+        if vis_changed {
+            self.tags_dirty = true;
+            tags = Some(self.tags.clone());
+        }
+
         MutationResult {
             status: self.store_status(),
             delta,
             selection_sync,
             new_field_defs: None,
+            tags,
         }
     }
 
@@ -352,7 +369,7 @@ impl Store {
             }
         }
 
-        if affected_count == 0 {
+        if affected_count == 0 && changes.removed.is_empty() {
             return SelectionSync { counts, patch_file: None, selected_count };
         }
 
@@ -495,13 +512,23 @@ impl Store {
     /// Adjust tag counts by `delta` (+1 for adds, -1 for removes). O(L * T) where L = locs, T = avg tags per loc.
     pub(crate) fn update_tag_counts(&mut self, locs: &[Location], delta: isize) {
         for loc in locs {
-            for &tag in &loc.tags {
-                if delta < 0 {
-                    if let Some(c) = self.tag_counts.get_mut(&tag) {
-                        *c = c.saturating_sub((-delta) as usize);
+            for &tag_id in &loc.tags {
+                if let Some(tag) = self.tags.get_mut(&tag_id) {
+                    if delta < 0 {
+                        tag.count = tag.count.saturating_sub((-delta) as usize);
+                    } else {
+                        tag.count += delta as usize;
                     }
-                } else {
-                    *self.tag_counts.entry(tag).or_default() += delta as usize;
+                } else if delta > 0 {
+                    self.tags.insert(tag_id, Tag {
+                        id: tag_id,
+                        name: format!("Tag {}", tag_id),
+                        color: crate::util::color_for_name(&format!("Tag {}", tag_id)),
+                        visible: true,
+                        order: None,
+                        count: delta as usize,
+                    });
+                    self.tags_dirty = true;
                 }
             }
         }
@@ -885,6 +912,7 @@ pub struct MutationResult {
     pub delta: RenderDelta,
     pub selection_sync: Option<SelectionSync>,
     pub new_field_defs: Option<HashMap<String, crate::map_meta::ExtraFieldDef>>,
+    pub tags: Option<HashMap<u32, Tag>>,
 }
 
 /// Deserialize a present-but-null JSON field as `Some(None)` instead of `None`.
@@ -1069,32 +1097,45 @@ pub async fn store_open_map(
     store.bump();
     store.map_id = Some(map_id.clone());
     store.next_id = max_id + 1;
-    // Build tag counts from batch
-    let mut tc: HashMap<u32, usize> = HashMap::new();
-    let mut max_tag_id: u32 = 0;
-    {
-        let b = &batch;
-        let tags_col = col_tags(b);
-        for i in 0..b.num_rows() {
-            let list = tags_col.value(i);
-            let ids = list.as_any().downcast_ref::<UInt32Array>().unwrap();
-            for j in 0..ids.len() {
-                let tid = ids.value(j);
-                *tc.entry(tid).or_default() += 1;
-                if tid > max_tag_id { max_tag_id = tid; }
-            }
-        }
-    }
     store.batch = Some(batch);
     store.mmap_handle = mmap_handle;
     store.clear_overlay();
     store.alive_count = count;
-    store.tag_counts = tc;
-    store.next_tag_id = {
+    {
         let conn = fast_io::open_db(&app)?;
         conn.execute("UPDATE maps SET location_count = ?1 WHERE id = ?2",
             rusqlite::params![count, map_id]).map_err(|e| e.to_string())?;
-        let tags = read_tags_json(&conn, &map_id);
+        // Load tags from SQLite into Store, compute counts from batch
+        let mut tags = read_tags_json(&conn, &map_id);
+        for tag in tags.values_mut() { tag.count = 0; }
+        let mut max_tag_id: u32 = tags.keys().max().copied().unwrap_or(0);
+        {
+            let b = store.batch.as_ref().unwrap();
+            let tags_col = col_tags(b);
+            for i in 0..b.num_rows() {
+                let list = tags_col.value(i);
+                let ids = list.as_any().downcast_ref::<UInt32Array>().unwrap();
+                for j in 0..ids.len() {
+                    let tid = ids.value(j);
+                    if tid > max_tag_id { max_tag_id = tid; }
+                    if let Some(tag) = tags.get_mut(&tid) {
+                        tag.count += 1;
+                    } else {
+                        tags.insert(tid, Tag {
+                            id: tid,
+                            name: format!("Tag {}", tid),
+                            color: crate::util::color_for_name(&format!("Tag {}", tid)),
+                            visible: true,
+                            order: None,
+                            count: 1,
+                        });
+                    }
+                }
+            }
+        }
+        store.tags = tags;
+        store.tags_dirty = false;
+        store.next_tag_id = max_tag_id + 1;
         // Populate known_field_keys from persisted field defs
         let extra_str: String = conn.query_row(
             "SELECT extra FROM maps WHERE id = ?1",
@@ -1105,8 +1146,7 @@ pub async fn store_open_map(
         store.known_field_keys = extra.fields.as_ref()
             .map(|f| f.keys().cloned().collect())
             .unwrap_or_default();
-        tags.keys().max().copied().unwrap_or(0) + 1
-    };
+    }
     store.geohash_index = geohash_index;
     store.dirty_geohashes.clear();
     store.committed_blobs.clear();
@@ -1145,6 +1185,10 @@ pub fn store_close_map(
         let conn = fast_io::open_db(&app)?;
         conn.execute("UPDATE maps SET location_count = ?1 WHERE id = ?2", rusqlite::params![count, map_id])
             .map_err(|e| e.to_string())?;
+        if store.tags_dirty {
+            write_tags_json(&conn, map_id, &store.tags)?;
+            store.tags_dirty = false;
+        }
         save_edit_history_inner(&app, map_id, &store.undo_stack, &store.redo_stack)?;
     }
     store.map_id = None;
@@ -1152,6 +1196,8 @@ pub fn store_close_map(
     store.mmap_handle = None;
     store.clear_overlay();
     store.alive_count = 0;
+    store.tags.clear();
+    store.tags_dirty = false;
     store.geohash_index.clear();
     store.dirty_geohashes.clear();
     store.render_cells = [const { None }; 32];
@@ -1344,6 +1390,134 @@ pub fn store_strip_tags(
     Ok(store.finish_mutation(ChangeSet { updated, ..Default::default() }))
 }
 
+/// Update a tag's name and/or color. If the new name collides with an existing
+/// tag (case-insensitive), merges: remaps all locations from `tag_id` to the
+/// existing tag, removes `tag_id`. Returns MutationResult with `tags` populated.
+#[tauri::command]
+#[specta::specta]
+pub fn store_update_tag(
+    state: tauri::State<'_, StoreState>,
+    tag_id: u32,
+    name: Option<String>,
+    color: Option<String>,
+) -> Result<MutationResult, String> {
+    let _t = std::time::Instant::now();
+    let mut store = state.lock().map_err(|e| e.to_string())?;
+
+    if !store.tags.contains_key(&tag_id) { return Err("tag not found".into()); }
+
+    let merge_target = name.as_ref().and_then(|new_name| {
+        let trimmed = new_name.trim();
+        if trimmed.is_empty() { return None; }
+        let lower = trimmed.to_lowercase();
+        store.tags.iter().find(|(&id, t)| id != tag_id && t.name.to_lowercase() == lower).map(|(&id, _)| id)
+    });
+
+    let changeset = if let Some(target_id) = merge_target {
+        let view = store.loc_view();
+        let affected = selections::resolve(&view, &SelectionProps::Tag { tag_id });
+        drop(view);
+
+        let mut updated: Vec<(Location, Location)> = Vec::new();
+        for loc_id in &affected {
+            if let Some(old) = store.get_loc_by_id(*loc_id) {
+                let mut new_tags: Vec<u32> = old.tags.iter()
+                    .filter(|&&t| t != tag_id)
+                    .copied()
+                    .collect();
+                if !new_tags.contains(&target_id) { new_tags.push(target_id); }
+                let mut new_loc = old.clone();
+                new_loc.tags = new_tags;
+                updated.push((old, new_loc));
+            }
+        }
+
+        let old_locs: Vec<Location> = updated.iter().map(|(o, _)| o.clone()).collect();
+        store.remove_tag_counts(&old_locs);
+        for (_, new_loc) in &updated {
+            let patch = LocationPatch { tags: Some(new_loc.tags.clone()), ..Default::default() };
+            store.overlay_update(new_loc.id, &patch);
+        }
+        let new_locs: Vec<Location> = updated.iter().map(|(_, n)| n.clone()).collect();
+        store.add_tag_counts(&new_locs);
+
+        let (changed_old, changed_new): (Vec<_>, Vec<_>) = updated.iter()
+            .filter(|(o, n)| o != n)
+            .map(|(o, n)| (o.clone(), n.clone()))
+            .unzip();
+        if !changed_old.is_empty() {
+            store.push_undo(EditEntry { created: changed_new, removed: changed_old });
+            store.redo_stack.clear();
+        }
+
+        log::debug!("[cmd] store_update_tag merge {}→{} locs={} total={}ms", tag_id, target_id, affected.len(), _t.elapsed().as_millis());
+        ChangeSet { updated, ..Default::default() }
+    } else {
+        if let Some(t) = store.tags.get_mut(&tag_id) {
+            if let Some(n) = &name {
+                let trimmed = n.trim();
+                if !trimmed.is_empty() { t.name = trimmed.to_string(); }
+            }
+            if let Some(c) = &color { t.color = c.clone(); }
+        }
+        log::debug!("[cmd] store_update_tag patch tag={} total={}ms", tag_id, _t.elapsed().as_millis());
+        ChangeSet::default()
+    };
+
+    store.tags_dirty = true;
+    let mut result = store.finish_mutation(changeset);
+    result.tags = Some(store.tags.clone());
+    Ok(result)
+}
+
+/// Remove tags from all locations AND from the tag map. Full delete, not soft.
+/// Returns MutationResult with `tags` populated.
+#[tauri::command]
+#[specta::specta]
+pub fn store_delete_tags(
+    state: tauri::State<'_, StoreState>,
+    tag_ids: Vec<u32>,
+) -> Result<MutationResult, String> {
+    let _t = std::time::Instant::now();
+    let mut store = state.lock().map_err(|e| e.to_string())?;
+
+    let tag_set: HashSet<u32> = tag_ids.iter().copied().collect();
+    let view = store.loc_view();
+    let mut affected_ids = HashSet::new();
+    for &tid in &tag_set {
+        affected_ids.extend(selections::resolve(&view, &SelectionProps::Tag { tag_id: tid }));
+    }
+    drop(view);
+
+    let mut updated: Vec<(Location, Location)> = Vec::new();
+    for &id in &affected_ids {
+        if let Some(old) = store.get_loc_by_id(id) {
+            let mut new_loc = old.clone();
+            new_loc.tags.retain(|t| !tag_set.contains(t));
+            updated.push((old, new_loc));
+        }
+    }
+    let old_locs: Vec<Location> = updated.iter().map(|(o, _)| o.clone()).collect();
+    store.remove_tag_counts(&old_locs);
+    for (_, new_loc) in &updated {
+        let patch = LocationPatch { tags: Some(new_loc.tags.clone()), ..Default::default() };
+        store.overlay_update(new_loc.id, &patch);
+    }
+    let new_locs: Vec<Location> = updated.iter().map(|(_, n)| n.clone()).collect();
+    store.add_tag_counts(&new_locs);
+    let (changed_old, changed_new): (Vec<_>, Vec<_>) = updated.iter()
+        .filter(|(o, n)| o != n)
+        .map(|(o, n)| (o.clone(), n.clone()))
+        .unzip();
+    if !changed_old.is_empty() {
+        store.push_undo(EditEntry { created: changed_new, removed: changed_old });
+        store.redo_stack.clear();
+    }
+
+    log::debug!("[cmd] store_delete_tags n={} locs={} total={}ms", tag_set.len(), affected_ids.len(), _t.elapsed().as_millis());
+    Ok(store.finish_mutation(ChangeSet { updated, ..Default::default() }))
+}
+
 #[tauri::command]
 #[specta::specta]
 pub fn store_set_active(
@@ -1437,33 +1611,49 @@ pub async fn store_save_dirty(
 ) -> Result<SaveResult, String> {
     let _t = std::time::Instant::now();
     log::debug!("[cmd] store_save_dirty ENTER");
-    let (map_id, delta_data, alive) = {
-        let store = state.lock().map_err(|e| e.to_string())?;
+    let (map_id, delta_data, alive, tags_json) = {
+        let mut store = state.lock().map_err(|e| e.to_string())?;
         let map_id = store.map_id.clone().ok_or("no map open")?;
-        if !store.dirty {
+        if !store.dirty && !store.tags_dirty {
             return Ok(SaveResult { saved_chunks: 0 });
         }
-        let overlay = DeltaOverlay {
-            adds: store.overlay_adds.clone(),
-            dead_ids: store.overlay_dead.iter().cloned().collect(),
-            patches: store.overlay_patches.values().cloned().collect(),
+        let delta_data = if store.dirty {
+            let overlay = DeltaOverlay {
+                adds: store.overlay_adds.clone(),
+                dead_ids: store.overlay_dead.iter().cloned().collect(),
+                patches: store.overlay_patches.values().cloned().collect(),
+            };
+            Some(rmp_serde::to_vec_named(&overlay).map_err(|e| e.to_string())?)
+        } else {
+            None
         };
-        let data = rmp_serde::to_vec_named(&overlay).map_err(|e| e.to_string())?;
-        (map_id, data, store.alive_count)
+        let tags_json = if store.tags_dirty {
+            store.tags_dirty = false;
+            Some(serialize_tags_json(&store.tags))
+        } else {
+            None
+        };
+        (map_id, delta_data, store.alive_count, tags_json)
     };
 
-    let size = delta_data.len();
+    let size = delta_data.as_ref().map_or(0, |d| d.len());
     let app2 = app.clone();
     let map_id2 = map_id.clone();
     tokio::task::spawn_blocking(move || {
-        let path = fast_io::arrow_delta_path(&app2, &map_id2)?;
-        fast_io::atomic_write(&path, |mut file| {
-            use std::io::Write;
-            file.write_all(&delta_data).map_err(|e| e.to_string())
-        })?;
+        if let Some(delta_data) = delta_data {
+            let path = fast_io::arrow_delta_path(&app2, &map_id2)?;
+            fast_io::atomic_write(&path, |mut file| {
+                use std::io::Write;
+                file.write_all(&delta_data).map_err(|e| e.to_string())
+            })?;
+        }
         let conn = fast_io::open_db(&app2)?;
         conn.execute("UPDATE maps SET location_count = ?1 WHERE id = ?2",
             rusqlite::params![alive, &map_id2]).map_err(|e| e.to_string())?;
+        if let Some(tags_json) = tags_json {
+            conn.execute("UPDATE maps SET tags = ?1 WHERE id = ?2",
+                rusqlite::params![tags_json, &map_id2]).map_err(|e| e.to_string())?;
+        }
         Ok::<_, String>(())
     })
     .await
@@ -1559,6 +1749,10 @@ pub fn store_bake_and_save(
     let conn = fast_io::open_db(&app)?;
     conn.execute("UPDATE maps SET location_count = ?1 WHERE id = ?2", rusqlite::params![count, map_id])
         .map_err(|e| e.to_string())?;
+    if store.tags_dirty {
+        write_tags_json(&conn, &map_id, &store.tags)?;
+        store.tags_dirty = false;
+    }
     Ok(())
 }
 
@@ -2030,19 +2224,11 @@ fn apply_edit_reverse(store: &mut Store, entry: &EditEntry) -> ChangeSet {
 pub fn store_tag_counts(state: tauri::State<'_, StoreState>) -> Result<HashMap<u32, u32>, String> {
     let _t = std::time::Instant::now();
     let store = state.lock().map_err(|e| e.to_string())?;
-    let r: HashMap<u32, u32> = store.tag_counts.iter().map(|(&k, &v)| (k, v as u32)).collect();
+    let r: HashMap<u32, u32> = store.tags.iter().map(|(&k, v)| (k, v.count as u32)).collect();
     log::debug!("[cmd] store_tag_counts total={}ms", _t.elapsed().as_millis());
     Ok(r)
 }
 
-#[tauri::command]
-#[specta::specta]
-pub fn store_alloc_tag_id(state: tauri::State<'_, StoreState>) -> Result<u32, String> {
-    let mut store = state.lock().map_err(|e| e.to_string())?;
-    let id = store.next_tag_id;
-    store.next_tag_id += 1;
-    Ok(id)
-}
 
 
 pub(crate) fn read_tags_json(conn: &rusqlite::Connection, map_id: &str) -> HashMap<u32, Tag> {
@@ -2053,9 +2239,13 @@ pub(crate) fn read_tags_json(conn: &rusqlite::Connection, map_id: &str) -> HashM
     raw.into_iter().filter_map(|(k, v)| k.parse::<u32>().ok().map(|id| (id, v))).collect()
 }
 
-fn write_tags_json(conn: &rusqlite::Connection, map_id: &str, tags: &HashMap<u32, Tag>) -> Result<(), String> {
+fn serialize_tags_json(tags: &HashMap<u32, Tag>) -> String {
     let as_str_keys: HashMap<String, &Tag> = tags.iter().map(|(k, v)| (k.to_string(), v)).collect();
-    let json = serde_json::to_string(&as_str_keys).map_err(|e| e.to_string())?;
+    serde_json::to_string(&as_str_keys).unwrap_or_default()
+}
+
+pub(crate) fn write_tags_json(conn: &rusqlite::Connection, map_id: &str, tags: &HashMap<u32, Tag>) -> Result<(), String> {
+    let json = serialize_tags_json(tags);
     conn.execute("UPDATE maps SET tags = ?1 WHERE id = ?2", rusqlite::params![json, map_id])
         .map_err(|e| e.to_string())?;
     Ok(())
@@ -2064,44 +2254,59 @@ fn write_tags_json(conn: &rusqlite::Connection, map_id: &str, tags: &HashMap<u32
 #[tauri::command]
 #[specta::specta]
 pub fn store_resolve_tag_names(
-    app: tauri::AppHandle,
     state: tauri::State<'_, StoreState>,
     names: Vec<String>,
 ) -> Result<Vec<Tag>, String> {
     let mut store = state.lock().map_err(|e| e.to_string())?;
-    let map_id = store.map_id.as_ref().ok_or("no map open")?.clone();
-
-    let conn = fast_io::open_db(&app)?;
-    let mut tags = read_tags_json(&conn, &map_id);
 
     let mut name_to_id: HashMap<String, u32> = HashMap::new();
-    for (id, entry) in &tags {
-        name_to_id.insert(entry.name.to_lowercase(), *id);
+    for (&id, entry) in &store.tags {
+        name_to_id.insert(entry.name.to_lowercase(), id);
     }
 
     let mut result = Vec::with_capacity(names.len());
-    let mut changed = false;
 
     for name in &names {
         if let Some(&id) = name_to_id.get(&name.to_lowercase()) {
-            result.push(tags[&id].clone());
+            let tag = store.tags.get_mut(&id).unwrap();
+            if !tag.visible {
+                tag.visible = true;
+            }
+            result.push(tag.clone());
         } else {
             let id = store.alloc_tag_id();
             let color = crate::util::color_for_name(name);
-            let order = Some(tags.len() as u32);
-            let tag = Tag { id, name: name.clone(), color, visible: true, order };
-            tags.insert(id, tag.clone());
+            let order = Some(store.tags.len() as u32);
+            let tag = Tag { id, name: name.clone(), color, visible: true, order, count: 0 };
+            store.tags.insert(id, tag.clone());
             name_to_id.insert(name.to_lowercase(), id);
             result.push(tag);
-            changed = true;
         }
     }
 
-    if changed {
-        write_tags_json(&conn, &map_id, &tags)?;
+    if !result.is_empty() {
+        store.tags_dirty = true;
     }
 
     Ok(result)
+}
+
+/// Persist tag ordering. `ordered_ids` specifies the desired order; each tag's
+/// `order` field is set to its index in the list.
+#[tauri::command]
+#[specta::specta]
+pub fn store_reorder_tags(
+    state: tauri::State<'_, StoreState>,
+    ordered_ids: Vec<u32>,
+) -> Result<(), String> {
+    let mut store = state.lock().map_err(|e| e.to_string())?;
+    for (i, &id) in ordered_ids.iter().enumerate() {
+        if let Some(tag) = store.tags.get_mut(&id) {
+            tag.order = Some(i as u32);
+        }
+    }
+    store.tags_dirty = true;
+    Ok(())
 }
 
 #[tauri::command]

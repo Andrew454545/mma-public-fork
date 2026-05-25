@@ -232,9 +232,8 @@ describe("Benchmarks — selection at scale", () => {
 		mapId = await withApi(async (api) => {
 			const map = await api.createMap("Bench Selections 100K", null);
 			await api.openMap(map.meta.id);
-			const resolved = await api.resolveTagNames(["BenchTag"]);
+			const resolved = await api.createTags(["BenchTag"]);
 			const tagId = resolved[0].id;
-			await api.addTag({ id: tagId, name: "BenchTag", color: "#ff0000", visible: true });
 			const locs = [];
 			for (let i = 0; i < 100000; i++) {
 				locs.push({

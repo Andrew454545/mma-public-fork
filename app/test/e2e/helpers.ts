@@ -132,5 +132,5 @@ export async function refreshSelections(): Promise<number[]> {
 export async function createTag(
 	name: string,
 ): Promise<{ id: number; name: string; color: string }> {
-	return withApi(async (api, n) => (await api.resolveTagNames([n]))[0], name);
+	return withApi(async (api, n) => (await api.createTags([n]))[0], name);
 }

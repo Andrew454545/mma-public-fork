@@ -374,7 +374,7 @@ describe("Speed Matrix", () => {
 			before(async () => {
 				mapId = await createAndOpenMap(`speed-sel-${n}`);
 				const resolved: any = await withApi(async (api) => {
-					return api.resolveTagNames(["bench-tag"]);
+					return api.createTags(["bench-tag"]);
 				});
 				tagId = resolved?.[0]?.id ?? 0;
 				await seedLocs(n, tagId, 0.4, 0.3);

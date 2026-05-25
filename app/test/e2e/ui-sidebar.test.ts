@@ -31,9 +31,6 @@ describe("UI: Tag manager", () => {
 
 		await withApi(
 			async (api, t1, t2, t3) => {
-				await api.addTag({ id: t1, name: "Mountains", color: "#3b82f6", visible: true });
-				await api.addTag({ id: t2, name: "Coastal", color: "#ef4444", visible: true });
-				await api.addTag({ id: t3, name: "Urban", color: "#22c55e", visible: true });
 			},
 			uiTag1Id,
 			uiTag2Id,
@@ -293,7 +290,6 @@ describe("UI: Location editor", () => {
 		const tag = await createTag("TestTag");
 		leTagId = tag.id;
 		await withApi(async (api, tagId) => {
-			await api.addTag({ id: tagId, name: "TestTag", color: "#ff9900", visible: true });
 		}, leTagId);
 
 		const ids = await addLocs([

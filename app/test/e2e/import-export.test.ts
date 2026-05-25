@@ -88,7 +88,6 @@ describe("JSON import/export round-trip", () => {
 
 		await withApi(
 			async (api, locId: number, tag: any) => {
-				await api.addTag({ id: tag.id, name: tag.name, color: tag.color, visible: true });
 				await api.updateLocation(locId, { tags: [tag.id] });
 			},
 			locIds[0],

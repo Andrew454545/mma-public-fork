@@ -639,8 +639,6 @@ describe("LocationPreview — location with tags", () => {
 		tagBlueId = tagBlue.id;
 		await withApi(
 			async (api, trId, tbId) => {
-				await api.addTag({ id: trId, name: "Red", color: "#ff0000", visible: true });
-				await api.addTag({ id: tbId, name: "Blue", color: "#0000ff", visible: true });
 				return "ok";
 			},
 			tagRedId,
@@ -1056,8 +1054,6 @@ describe("LocationPreview — tag management in preview", () => {
 		mgmtTagBId = tagB.id;
 		await withApi(
 			async (api, aId, bId) => {
-				await api.addTag({ id: aId, name: "Alpha", color: "#ff6600", visible: true });
-				await api.addTag({ id: bId, name: "Beta", color: "#0066ff", visible: true });
 				return "ok";
 			},
 			mgmtTagAId,

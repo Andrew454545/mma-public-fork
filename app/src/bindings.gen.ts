@@ -70,7 +70,7 @@ export const commands = {
 	storeSaveDirty: () => typedError<SaveResult, string>(__TAURI_INVOKE("store_save_dirty")),
 	storeGetSummary: () => typedError<SummaryResult, string>(__TAURI_INVOKE("store_get_summary")),
 	storeTagCounts: () => typedError<{ [key in number]: number }, string>(__TAURI_INVOKE("store_tag_counts")),
-storeResolveTagNames: (names: string[]) => typedError<Tag[], string>(__TAURI_INVOKE("store_resolve_tag_names", { names })),
+	storeResolveTagNames: (names: string[]) => typedError<Tag[], string>(__TAURI_INVOKE("store_resolve_tag_names", { names })),
 	/**
 	 *  Persist tag ordering. `ordered_ids` specifies the desired order; each tag's
 	 *  `order` field is set to its index in the list.

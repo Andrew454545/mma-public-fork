@@ -995,7 +995,7 @@ describe("Slot reuse correctness", () => {
 
 			await api.selectTag(tagId);
 
-			// Remove all 10
+			// Remove all 10 — tag count drops to 0, selection is cleared
 			api.removeLocations(batch1.map((l) => l.id));
 			const afterRemoveResult = await api.syncSelections();
 			const afterRemoveIds: number[] = afterRemoveResult.ids;
@@ -1013,6 +1013,8 @@ describe("Slot reuse correctness", () => {
 				);
 			}
 			await api.addLocations(batch2);
+			// Re-select tag (selection was cleared when count hit 0)
+			await api.selectTag(tagId);
 			const afterRefillResult = await api.syncSelections();
 			const afterRefillIds: number[] = afterRefillResult.ids;
 			const afterRefill = afterRefillIds.length;

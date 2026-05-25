@@ -91,9 +91,14 @@ let workArea: WorkArea = "overview";
 let activePluginId: string | null = null;
 let mapVersion = 0;
 let tagCounts: Record<number, number> = {};
+let undoRedoState = { canUndo: false, canRedo: false };
 
 export function useTagCounts(): Record<number, number> {
 	useSyncExternalStore(subscribe, getMapSnapshot);
+	return tagCounts;
+}
+
+export function getTagCounts() {
 	return tagCounts;
 }
 
@@ -945,12 +950,6 @@ export async function deleteTags(tagIds: number[]) {
 	await mutate(cmd.storeDeleteTags(tagIds));
 }
 
-export async function deleteSelectedTags() {
-	if (!currentMapId || !currentMap) return;
-	const tagIds = selections.filter((s) => s.props.type === "Tag").map((s) => (s.props as { type: "Tag"; tagId: number }).tagId);
-	await deleteTags(tagIds);
-}
-
 export async function reorderTags(orderedIds: number[]) {
 	if (!currentMapId || !currentMap) return;
 	const newTags = { ...currentMap.meta.tags };
@@ -1081,8 +1080,6 @@ export function undo() {
 export function redo() {
 	return undoRedo(cmd.storeRedo);
 }
-
-let undoRedoState = { canUndo: false, canRedo: false };
 
 export function getUndoRedoState() {
 	return undoRedoState;

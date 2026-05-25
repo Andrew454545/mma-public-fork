@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import {
 	waitForReady,
 	createAndOpenMap,
@@ -1062,6 +1063,10 @@ describe("LocationPreview — tag management in preview", () => {
 			mgmtTagAId,
 			mgmtTagBId,
 		);
+		await addLocs([
+			loc({ lat: COORD_ONLY.lat + 1, lng: COORD_ONLY.lng + 1, tags: [mgmtTagAId] }),
+			loc({ lat: COORD_ONLY.lat + 2, lng: COORD_ONLY.lng + 2, tags: [mgmtTagBId] }),
+		]);
 		const ids = await addLocs([loc({ lat: COORD_ONLY.lat, lng: COORD_ONLY.lng, tags: [] })]);
 		tagmgmt1Id = ids[0];
 	});

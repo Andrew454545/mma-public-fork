@@ -47,7 +47,7 @@ describe("UI: Tag manager", () => {
 				createLocation({
 					lat: i,
 					lng: i,
-					tags: i < 8 ? [uiTag1Id] : i < 14 ? [uiTag2Id] : [],
+					tags: i < 8 ? [uiTag1Id] : i < 14 ? [uiTag2Id] : [uiTag3Id],
 				}),
 			);
 		}

@@ -281,6 +281,7 @@ export function PanoControls({
 			try {
 				const loc = await lookupStreetView(target.lat(), target.lng(), 0, {
 					onlyOfficial: true,
+					radius: 100,
 				});
 				if (!loc?.panoId) return;
 				if (loc.flags & LocationFlag.LoadAsPanoId) {

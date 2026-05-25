@@ -178,7 +178,7 @@ function timeRemoveAll(): Promise<number> {
 	return withApi(async (api) => {
 		const ids: number[] = await api.cmd.storeResolveSelection({ type: "Everything" });
 		const t0 = performance.now();
-		await api.removeLocations(new Set(ids)));
+		await api.removeLocations(new Set(ids));
 		return performance.now() - t0;
 	});
 }

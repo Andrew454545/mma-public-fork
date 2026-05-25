@@ -191,7 +191,7 @@ describe("Selections - basic types", () => {
 		const result = await withApi(async (api) => {
 			await api.selectDuplicates(1);
 			const ids = api.getSelectedLocationIds();
-			return { count: ids.length };
+			return { count: ids.size };
 		});
 		expect(result.count).toBeGreaterThanOrEqual(1);
 	});

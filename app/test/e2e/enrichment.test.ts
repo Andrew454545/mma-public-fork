@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import {
 	waitForReady,
 	createAndOpenMap,
@@ -520,7 +521,7 @@ describe("Enrichment — metadata filter uses registered field types", () => {
 			return "ok";
 		});
 		const ids = await withApi(async (api) => {
-			return api.getSelectedLocationIds();
+			return [...api.getSelectedLocationIds()];
 		});
 		expect(ids).toContain(filterAId);
 		expect(ids).toContain(filterBId);
@@ -534,7 +535,7 @@ describe("Enrichment — metadata filter uses registered field types", () => {
 			return "ok";
 		});
 		const ids = await withApi(async (api) => {
-			return api.getSelectedLocationIds();
+			return [...api.getSelectedLocationIds()];
 		});
 		expect(ids).toContain(filterAId);
 		expect(ids).not.toContain(filterBId);
@@ -548,7 +549,7 @@ describe("Enrichment — metadata filter uses registered field types", () => {
 			return "ok";
 		});
 		const ids = await withApi(async (api) => {
-			return api.getSelectedLocationIds();
+			return [...api.getSelectedLocationIds()];
 		});
 		expect(ids).toContain(filterAId);
 		expect(ids).not.toContain(filterBId);
@@ -562,7 +563,7 @@ describe("Enrichment — metadata filter uses registered field types", () => {
 			return "ok";
 		});
 		const ids = await withApi(async (api) => {
-			return api.getSelectedLocationIds();
+			return [...api.getSelectedLocationIds()];
 		});
 		expect(ids).toContain(filterBId);
 		expect(ids).not.toContain(filterAId);
@@ -576,7 +577,7 @@ describe("Enrichment — metadata filter uses registered field types", () => {
 			return "ok";
 		});
 		const ids = await withApi(async (api) => {
-			return api.getSelectedLocationIds();
+			return [...api.getSelectedLocationIds()];
 		});
 		expect(ids).toContain(filterBId);
 		expect(ids).not.toContain(filterAId);
@@ -589,7 +590,7 @@ describe("Enrichment — metadata filter uses registered field types", () => {
 			return "ok";
 		});
 		const ids = await withApi(async (api) => {
-			return api.getSelectedLocationIds();
+			return [...api.getSelectedLocationIds()];
 		});
 		expect(ids).toContain(filterAId);
 		expect(ids).not.toContain(filterCId);

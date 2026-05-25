@@ -185,7 +185,7 @@ describe("Location CRUD", () => {
 	it("remove bulk locations", async () => {
 		const idsToRemove = bulkLocIds.slice(0, 100);
 		await withApi(async (api, ids) => {
-			api.removeLocations(new Set(ids)));
+			api.removeLocations(new Set(ids));
 		}, idsToRemove);
 		const count = await getLocCount();
 		expect(count).toBe(401);

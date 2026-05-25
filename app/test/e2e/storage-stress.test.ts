@@ -123,7 +123,7 @@ describe("Bake with mixed overlay", () => {
 
 			// Remove 5 (indices 45-49)
 			const removeIds = ids.slice(45);
-			await api.removeLocations(removeIds);
+			await api.removeLocations(new Set(removeIds));
 
 			return { ids, removeIds };
 		});
@@ -217,7 +217,7 @@ describe("Multiple save/close/reopen cycles", () => {
 
 	it("cycle 3: remove 10, close, reopen", async () => {
 		const toRemove = batch1Ids.slice(0, 10);
-		await withApi((api, ids) => api.removeLocations(new Set(ids)), toRemove));
+		await withApi((api, ids) => api.removeLocations(new Set(ids)), toRemove);
 
 		await closeMap();
 		await openMap(mapId);
@@ -305,7 +305,7 @@ describe("alive_count accuracy", () => {
 
 	it("remove 30 -> count=70", async () => {
 		const toRemove = allIds.slice(0, 30);
-		await withApi((api, ids) => api.removeLocations(new Set(ids)), toRemove));
+		await withApi((api, ids) => api.removeLocations(new Set(ids)), toRemove);
 
 		const count = await getLocCount();
 		expect(count).toBe(70);
@@ -376,7 +376,7 @@ describe("Tag count accuracy", () => {
 
 	it("remove 10 tagged -> tagCount=40", async () => {
 		const toRemove = taggedIds.slice(0, 10);
-		await withApi((api, ids) => api.removeLocations(new Set(ids)), toRemove));
+		await withApi((api, ids) => api.removeLocations(new Set(ids)), toRemove);
 
 		const counts = await withApi((api) => api.cmd.storeTagCounts());
 		expect(counts[tagId]).toBe(40);
@@ -544,8 +544,6 @@ describe("Unicode in all fields", () => {
 				"café crème", // diacritics
 				"Москва", // Cyrillic
 			]);
-			for (const t of resolved) {
-			}
 
 			const loc = api.createLocation({
 				lat: 35.6762,
@@ -679,7 +677,7 @@ describe("Export with scope", () => {
 		// Select by tag (first 5 have the tag)
 		await withApi((api, tId) => api.selectTag(tId), tagId);
 
-		const selectedIds: number[] = await withApi((api) => api.getSelectedLocationIds());
+		const selectedIds: number[] = await withApi((api) => [...api.getSelectedLocationIds()]);
 		expect(selectedIds.length).toBe(5);
 
 		// Export with scope = selectedIds
@@ -922,7 +920,7 @@ describe("Rapid fire-and-forget mutations", () => {
 			const ids = locs.map((l) => l.id);
 
 			// Fire remove + add simultaneously (no await between)
-			const removePromise = Promise.resolve().then(() => api.removeLocations(ids.slice(0, 5)));
+			const removePromise = Promise.resolve().then(() => api.removeLocations(new Set(ids.slice(0, 5))));
 			const addPromise = api.addLocations([
 				api.createLocation({ lat: 99, lng: 99, zoom: 1 }),
 			]);
@@ -1206,13 +1204,12 @@ describe("Selection during mutation", () => {
 			api.resetSelections();
 			await api.selectEverything();
 			const beforeCount = api.getSelectedLocationIds().size;
-			const ids = api.getSelectedLocationIds().slice(0, 5);
-			api.removeLocations(new Set(ids)));
+			const ids = [...api.getSelectedLocationIds()].slice(0, 5);
+			api.removeLocations(new Set(ids));
 			// Give Rust a moment to refresh selections
 			await new Promise((r) => setTimeout(r, 100));
 			await api.selectEverything();
-			const afterIds = api.getSelectedLocationIds();
-			return { before: beforeCount, after: afterIds.length };
+			return { before: beforeCount, after: api.getSelectedLocationIds().size };
 		});
 		expect(result.after).toBe(result.before - 5);
 	});
@@ -1279,7 +1276,7 @@ describe("Delete all then undo", () => {
 		const ids = await addLocs(locs);
 
 		// Delete all
-		await withApi((api, idList) => api.removeLocations(idList), ids);
+		await withApi((api, idList) => api.removeLocations(new Set(idList)), ids);
 
 		let count = await getLocCount();
 		expect(count).toBe(0);
@@ -1332,7 +1329,7 @@ describe("Duplicate then delete original", () => {
 		expect(typeof dupId).toBe("number");
 
 		// Delete original
-		await withApi((api, id) => api.removeLocations(new Set([id]), origId));
+		await withApi((api, id) => api.removeLocations(new Set([id])), origId);
 
 		const count = await getLocCount();
 		expect(count).toBe(1);

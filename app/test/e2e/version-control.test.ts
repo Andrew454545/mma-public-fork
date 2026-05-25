@@ -55,7 +55,7 @@ describe("Version control - commits", () => {
 		const newLocs = [createLocation({ lat: 50, lng: 60, heading: 0, panoId: null, flags: 0 })];
 		await addLocs(newLocs);
 
-		await withApi(async (api, removeId) => api.removeLocations(new Set([removeId]), locIds[0]));
+		await withApi(async (api, removeId) => api.removeLocations(new Set([removeId])), locIds[0]);
 
 		await withApi(async (api) => api.commitMap("add one remove one"));
 
@@ -93,7 +93,7 @@ describe("Version control - checkout", () => {
 		// Make changes after commit
 		await addLocs([createLocation({ lat: 50, lng: 60, heading: 0, panoId: null, flags: 0 })]);
 
-		await withApi(async (api, removeId) => api.removeLocations(new Set([removeId]), locIds[0]));
+		await withApi(async (api, removeId) => api.removeLocations(new Set([removeId])), locIds[0]);
 
 		let count = await getLocCount();
 		expect(count).toBe(2); // locIds[1] + new one
@@ -107,7 +107,7 @@ describe("Version control - checkout", () => {
 
 	it("checkout restores original location data", async () => {
 		const allLocs = await getAllLocs();
-		const allLocIds = allLocs.map((l: any) => l.id);
+		const allLocIds = allLocs.map((l) => l.id);
 		expect(allLocIds).toContain(locIds[0]);
 		expect(allLocIds).toContain(locIds[1]);
 		// The third loc added after commit should not be present

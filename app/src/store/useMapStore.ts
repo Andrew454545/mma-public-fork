@@ -49,6 +49,7 @@ import {
 	composeSiblings as composeSiblingsSel,
 } from "./selections";
 
+
 const storeBus = createBus<() => void>();
 const subscribe = storeBus.on;
 const notify = storeBus.emit;
@@ -569,6 +570,15 @@ export function removeLocations(ids: Set<number>) {
 		activeLocationId = null;
 		cachedActiveLocation = null;
 		workArea = "overview";
+	}
+	if (review) {
+		const remaining = review.locations.filter((id) => !ids.has(id));
+		if (remaining.length === 0) {
+			review = null;
+		} else {
+			const newIndex = Math.min(review.index, remaining.length - 1);
+			review = { locations: remaining, index: newIndex };
+		}
 	}
 	mapVersion++;
 	notify();

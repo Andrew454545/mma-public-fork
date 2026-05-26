@@ -213,19 +213,49 @@ impl Store {
     /// source of truth; the render delta and selection sync are two projections of it.
     pub(crate) fn finish_mutation(&mut self, changes: ChangeSet) -> MutationResult {
         self.bump();
-        let delta = self.derive_render_delta(&changes);
-        let selection_sync = if self.selections.is_empty() {
-            None
-        } else {
-            let total = changes.added.len() + changes.removed.len() + changes.updated.len();
-            // test_add_row can't evaluate relational selections (a row's membership
-            // depends on other rows), so those must always re-resolve in full.
-            if changes.full_reset || total > 100 || self.selections_need_full_resolve() {
-                Some(self.refresh_and_sync_selections())
+
+        // Phase 1: Update selection membership so selected_ids is correct before
+        // deriving the render delta (base_color and colorPatches depend on it).
+        let has_selections = !self.selections.is_empty();
+        let full_resolve = has_selections &&
+            (changes.full_reset || changes.added.len() + changes.removed.len() + changes.updated.len() > 100
+             || self.selections_need_full_resolve());
+        if has_selections {
+            if full_resolve {
+                self.resolve_selection_membership();
             } else {
-                Some(self.incremental_selection_update(&changes))
+                self.update_selection_membership(&changes);
             }
+        }
+
+        // Phase 2: Derive render delta (base_color now correct, render_cells populated).
+        let mut delta = self.derive_render_delta(&changes);
+
+        // Emit colorPatches for newly-added entries that landed in a selection.
+        if has_selections {
+            for entry in &delta.added {
+                if let Some(&color) = self.selected_colors.get(&entry.id) {
+                    if let Some((cell, ci)) = self.cell_lookup(entry.id) {
+                        delta.color_patches.push(ColorPatchEntry {
+                            cell, cell_index: ci,
+                            r: color[0], g: color[1], b: color[2], a: 255,
+                        });
+                    }
+                }
+            }
+        }
+
+        // Phase 3: Build bitmask file (render_cells now contain new entries).
+        let selection_sync = if has_selections {
+            if full_resolve {
+                Some(self.rebuild_selection_bitmask())
+            } else {
+                Some(self.build_selection_bitmask(&changes))
+            }
+        } else {
+            None
         };
+
         let mut tags = None;
         let mut vis_changed = false;
         for tag in self.tags.values_mut() {
@@ -320,9 +350,9 @@ impl Store {
         delta
     }
 
-    fn incremental_selection_update(&mut self, changes: &ChangeSet) -> SelectionSync {
-        // Removed and updated rows leave their current selection sets; updated rows are
-        // then re-tested below (an update is remove-then-add for selection membership).
+    /// Update selection membership sets for incremental changes (adds/removes/updates).
+    /// Only touches selected_ids/selected_colors/selection_loc_sets — no render_cells access.
+    fn update_selection_membership(&mut self, changes: &ChangeSet) {
         let drop_ids: HashSet<u32> = changes.removed.iter().copied()
             .chain(changes.updated.iter().map(|(_, n)| n.id))
             .collect();
@@ -336,7 +366,6 @@ impl Store {
             }
         }
 
-        // Re-test added + updated(new) rows against every selection.
         let test_locs: Vec<&Location> = changes.added.iter()
             .chain(changes.updated.iter().map(|(_, n)| n))
             .collect();
@@ -351,17 +380,19 @@ impl Store {
                 }
             }
         }
+        self.selection_version += 1;
+    }
 
+    /// Build the bitmask file from current render_cells + selection_loc_sets.
+    fn build_selection_bitmask(&self, changes: &ChangeSet) -> SelectionSync {
         let counts: Vec<usize> = self.selection_loc_sets.iter().map(|s| s.len()).collect();
         let selected_count = self.selected_ids.len();
-        self.selection_version += 1;
 
-        // Build bitmask for ONLY changed cells, patch into existing file
-        let changed_ids: HashSet<u32> = drop_ids.iter().copied()
+        let changed_ids: HashSet<u32> = changes.removed.iter().copied()
             .chain(changes.added.iter().map(|l| l.id))
+            .chain(changes.updated.iter().map(|(_, n)| n.id))
             .collect();
 
-        // Find affected cells
         let mut affected_count = 0usize;
         for opt in &self.render_cells {
             if let Some(cr) = opt {
@@ -408,16 +439,15 @@ impl Store {
             None
         };
 
-        log::debug!("[sel-incr] total={}ms sels={} selected={} cells={} affected={} buf={}",
-            std::time::Instant::now().duration_since(std::time::Instant::now()).as_millis(),
+        log::debug!("[sel-incr] sels={} selected={} cells={} affected={} buf={}",
             num_sels, selected_count, num_cells, affected_count, buf.len());
 
         SelectionSync { counts, patch_file, selected_count }
     }
 
-    /// Full selection re-resolve: recomputes bitmasks for all selections from scratch.
-    /// O(S * N) where S = selection count, N = alive locations.
-    pub(crate) fn refresh_and_sync_selections(&mut self) -> SelectionSync {
+    /// Full selection membership resolve: recomputes selection_loc_sets, selected_ids,
+    /// selected_colors from scratch. O(S * N). Does NOT build the bitmask file.
+    fn resolve_selection_membership(&mut self) {
         let props: Vec<SelectionProps> = self.selections.iter().map(|s| s.props.clone()).collect();
         let masks: Vec<Vec<bool>> = {
             let view = self.loc_view();
@@ -446,12 +476,6 @@ impl Store {
             }
         }
 
-        self.rebuild_selection_render_state()
-    }
-
-    fn rebuild_selection_render_state(&mut self) -> SelectionSync {
-        let t0 = std::time::Instant::now();
-        let counts: Vec<usize> = self.selection_loc_sets.iter().map(|s| s.len()).collect();
         let mut all_selected = HashSet::new();
         let mut color_map = HashMap::new();
         for (si, set) in self.selection_loc_sets.iter().enumerate() {
@@ -461,11 +485,22 @@ impl Store {
                 color_map.insert(id, color);
             }
         }
-        let selected_count = all_selected.len();
         self.selected_ids = all_selected;
         self.selected_colors = color_map;
         self.selection_version += 1;
-        let t1 = t0.elapsed().as_millis();
+    }
+
+    /// Full selection re-resolve + bitmask build (used by callers outside finish_mutation).
+    pub(crate) fn refresh_and_sync_selections(&mut self) -> SelectionSync {
+        self.resolve_selection_membership();
+        self.rebuild_selection_bitmask()
+    }
+
+    /// Build the bitmask file from current render_cells + selection_loc_sets (all cells).
+    fn rebuild_selection_bitmask(&self) -> SelectionSync {
+        let t0 = std::time::Instant::now();
+        let counts: Vec<usize> = self.selection_loc_sets.iter().map(|s| s.len()).collect();
+        let selected_count = self.selected_ids.len();
 
         let num_sels = self.selections.len();
         let mut buf: Vec<u8> = Vec::new();
@@ -500,9 +535,8 @@ impl Store {
             None
         };
 
-        log::debug!("[sel-rebuild] id_maps={}ms bitmask={}ms total={}ms sels={} selected={} cells={} buf={}",
-            t1, t0.elapsed().as_millis() - t1, t0.elapsed().as_millis(),
-            num_sels, selected_count, num_cells, buf.len());
+        log::debug!("[sel-rebuild] total={}ms sels={} selected={} cells={} buf={}",
+            t0.elapsed().as_millis(), num_sels, selected_count, num_cells, buf.len());
 
         SelectionSync { counts, patch_file, selected_count }
     }

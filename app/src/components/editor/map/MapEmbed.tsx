@@ -1220,7 +1220,7 @@ export function MapEmbed() {
 				const selPatches = delta.colorPatches.filter(
 					(cp) => !(cp.r === 42 && cp.g === 42 && cp.b === 42),
 				);
-				cm.buildSelectionOverlay(selPatches);
+				cm.appendToSelectionOverlay(selPatches);
 			}
 			log.debug(
 				`[delta] applyDelta=${(performance.now() - t0).toFixed(0)}ms affected=${affected.size} +${delta.added.length} -${delta.removed.length}`,

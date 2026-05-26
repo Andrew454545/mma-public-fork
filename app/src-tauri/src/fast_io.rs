@@ -5,10 +5,10 @@
 //! because unbuffered `File` writes are ~15x slower.
 
 use rusqlite::Connection;
-use sha2::{Digest, Sha256};
 use tauri::ipc::InvokeBody;
 use tauri::Manager;
 use crate::arrow_bridge;
+use crate::util::sha256_hex;
 
 /// True when running under e2e tests or with `MMA_TEST_DB` set.
 /// Controls which database file and Arrow directory are used, keeping
@@ -494,17 +494,6 @@ pub(crate) fn read_arrow_ipc_mmap(path: &std::path::Path) -> Result<(arrow::arra
 // Save
 // ---------------------------------------------------------------------------
 
-/// SHA-256 hash of `bytes` as a lowercase hex string. Used for
-/// content-addressing Arrow blobs and computing commit tree hashes.
-pub(crate) fn sha256_hex(bytes: &[u8]) -> String {
-    let digest = Sha256::digest(bytes);
-    let mut s = String::with_capacity(digest.len() * 2);
-    for b in digest.iter() {
-        use std::fmt::Write;
-        write!(&mut s, "{:02x}", b).unwrap();
-    }
-    s
-}
 
 // #[derive(serde::Deserialize)]
 // #[serde(rename_all = "camelCase")]

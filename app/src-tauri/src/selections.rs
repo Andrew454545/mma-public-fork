@@ -12,6 +12,7 @@ use arrow::array::{RecordBatch, StringArray, Float64Array, UInt32Array, ListArra
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use crate::types::Location;
+use crate::util::{iso_to_unix, unix_to_month_day, unix_to_hour_min};
 
 /// Discriminated union of all selection types. Serialized with `{ "type": "..." }` tag
 /// for JS interop. Simple types (Tag, Untagged, PanoIds, etc.) resolve in O(N) with
@@ -504,58 +505,6 @@ pub(crate) fn haversine_m(lat1: f64, lng1: f64, lat2: f64, lng2: f64) -> f64 {
 }
 
 // --- Filter: field-level comparison predicates ---
-
-/// Convert a Unix day count to (year, month, day) using Howard Hinnant's civil_from_days algorithm.
-fn civil_from_days(days: i64) -> (i64, u32, u32) {
-    let z = days + 719468;
-    let era = z.div_euclid(146097);
-    let doe = z.rem_euclid(146097);
-    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
-    let y = yoe + era * 400;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let d = doy - (153 * mp + 2) / 5 + 1;
-    let m = if mp < 10 { mp + 3 } else { mp - 9 };
-    let y = if m <= 2 { y + 1 } else { y };
-    (y, m as u32, d as u32)
-}
-
-/// Extract (month, day) from a Unix timestamp. Used by `between_anyyear` filter.
-fn unix_to_month_day(ts: f64) -> (u32, u32) {
-    let days = (ts / 86400.0).floor() as i64;
-    let (_, m, d) = civil_from_days(days);
-    (m, d)
-}
-
-/// Extract (hour, minute) from a Unix timestamp. Used by `between_anytime` filter.
-fn unix_to_hour_min(ts: f64) -> (u32, u32) {
-    let secs = ((ts % 86400.0) + 86400.0) % 86400.0;
-    (secs as u32 / 3600, (secs as u32 % 3600) / 60)
-}
-
-/// Parse a simplified ISO-8601 datetime string (e.g., "2024-01-15T12:30:00Z") to Unix timestamp.
-fn iso_to_unix(s: &str) -> Option<f64> {
-    let s = s.trim_end_matches('Z');
-    let (date_part, time_part) = s.split_once('T')?;
-    let mut dp = date_part.splitn(3, '-');
-    let y: i64 = dp.next()?.parse().ok()?;
-    let m: i64 = dp.next()?.parse().ok()?;
-    let d: i64 = dp.next()?.parse().ok()?;
-    let mut tp = time_part.split(':');
-    let h: i64 = tp.next()?.parse().ok()?;
-    let min: i64 = tp.next()?.parse().ok()?;
-    let sec_str = tp.next().unwrap_or("0");
-    let sec: i64 = sec_str.split('.').next()?.parse().ok()?;
-    fn days_from_civil(y: i64, m: i64, d: i64) -> i64 {
-        let y = if m <= 2 { y - 1 } else { y };
-        let era = y.div_euclid(400);
-        let yoe = y.rem_euclid(400);
-        let doy = (153 * (if m > 2 { m - 3 } else { m + 9 }) + 2) / 5 + d - 1;
-        let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
-        era * 146097 + doe - 719468
-    }
-    Some((days_from_civil(y, m, d) * 86400 + h * 3600 + min * 60 + sec) as f64)
-}
 
 /// Resolve a field name to its JSON value from a `Location` struct.
 /// Built-in fields (lat, lng, heading, etc.) are accessed directly;

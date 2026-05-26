@@ -1,36 +1,36 @@
 //! Pure utility functions with no app-specific dependencies.
 //!
-//! Provides timestamp generation, color math, and deterministic tag color
+//! Provides timestamps, color math, hashing, and deterministic tag color
 //! assignment. No I/O, no state -- safe to call from any context.
 
-/// Returns the current UTC time as an ISO 8601 string (e.g. "2024-03-15T08:30:00.000Z").
-///
-/// Uses a dependency-free civil-date algorithm (Howard Hinnant's `days_from_civil`)
-/// to avoid pulling in `chrono` for a single formatting call. Milliseconds are
-/// always ".000" since `SystemTime` only gives us second resolution here.
+use chrono::{DateTime, Datelike, Timelike, Utc};
+use sha2::{Digest, Sha256};
+
+/// Returns the current UTC time as an ISO 8601 string with millisecond precision.
 pub fn now_iso() -> String {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    let secs = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_secs() as i64;
-    let days_since_epoch = secs / 86400;
-    let time_secs = (secs % 86400) as u32;
-    let z = days_since_epoch + 719468;
-    let era = (if z >= 0 { z } else { z - 146096 }) / 146097;
-    let doe = (z - era * 146097) as u32;
-    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
-    let y = yoe as i64 + era * 400;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let d = doy - (153 * mp + 2) / 5 + 1;
-    let m = if mp < 10 { mp + 3 } else { mp - 9 };
-    let y = if m <= 2 { y + 1 } else { y };
-    format!(
-        "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}.000Z",
-        y, m, d,
-        time_secs / 3600, (time_secs % 3600) / 60, time_secs % 60
-    )
+    Utc::now().format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string()
+}
+
+/// Parses an ISO 8601 datetime string (e.g. "2024-01-15T12:30:00Z") to Unix
+/// timestamp in seconds. Accepts optional fractional seconds and trailing 'Z'.
+pub fn iso_to_unix(s: &str) -> Option<f64> {
+    let s = s.trim_end_matches('Z');
+    chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S")
+        .ok()
+        .or_else(|| chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S%.f").ok())
+        .map(|dt| dt.and_utc().timestamp() as f64)
+}
+
+/// Extracts (month, day) from a Unix timestamp in seconds.
+pub fn unix_to_month_day(ts: f64) -> (u32, u32) {
+    let dt = DateTime::<Utc>::from_timestamp(ts as i64, 0).unwrap_or_default();
+    (dt.month(), dt.day())
+}
+
+/// Extracts (hour, minute) from a Unix timestamp in seconds.
+pub fn unix_to_hour_min(ts: f64) -> (u32, u32) {
+    let dt = DateTime::<Utc>::from_timestamp(ts as i64, 0).unwrap_or_default();
+    (dt.hour(), dt.minute())
 }
 
 /// Converts HSL to RGB. `h` is in degrees [0, 360), `s` and `l` in [0, 1].
@@ -57,6 +57,28 @@ pub fn color_for_name(name: &str) -> String {
     let hue = (h.abs() % 360) as f64;
     let (r, g, b) = hsl_to_rgb(hue, 0.5, 0.5);
     format!("#{:02x}{:02x}{:02x}", r, g, b)
+}
+
+/// Parses a "#rrggbb" hex color string to an RGB byte array.
+pub fn hex_to_rgb(hex: &str) -> Option<[u8; 3]> {
+    let h = hex.trim_start_matches('#');
+    if h.len() != 6 { return None; }
+    Some([
+        u8::from_str_radix(&h[0..2], 16).ok()?,
+        u8::from_str_radix(&h[2..4], 16).ok()?,
+        u8::from_str_radix(&h[4..6], 16).ok()?,
+    ])
+}
+
+/// SHA-256 hash of `bytes` as a lowercase hex string.
+pub fn sha256_hex(bytes: &[u8]) -> String {
+    let digest = Sha256::digest(bytes);
+    let mut s = String::with_capacity(digest.len() * 2);
+    for b in digest.iter() {
+        use std::fmt::Write;
+        write!(&mut s, "{:02x}", b).unwrap();
+    }
+    s
 }
 
 #[cfg(test)]

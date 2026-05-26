@@ -6,6 +6,7 @@ use std::io::Write;
 use crate::arrow_bridge;
 use crate::fast_io;
 use crate::location_store::StoreState;
+use crate::util::hex_to_rgb;
 
 const LOAD_AS_PANO_ID: u32 = 1;
 
@@ -24,16 +25,6 @@ pub struct ExportOpts {
     /// convert numeric tag IDs back to human-readable names in the output.
     pub tags_json: String,
     pub extra_fields_json: Option<String>,
-}
-
-fn hex_to_rgb(hex: &str) -> Option<[u8; 3]> {
-    let h = hex.trim_start_matches('#');
-    if h.len() != 6 { return None; }
-    Some([
-        u8::from_str_radix(&h[0..2], 16).ok()?,
-        u8::from_str_radix(&h[2..4], 16).ok()?,
-        u8::from_str_radix(&h[4..6], 16).ok()?,
-    ])
 }
 
 #[cfg(test)]

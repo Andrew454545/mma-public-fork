@@ -13,6 +13,7 @@ use rayon::prelude::*;
 use rusqlite::Connection;
 use serde_json::Value;
 use uuid::Uuid;
+use crate::util::now_iso;
 
 use tauri::Emitter;
 use crate::arrow_bridge;
@@ -113,7 +114,7 @@ fn parse_csv(text: &str) -> ParsedMap {
             (0, 1, None, None, None, None, false)
         };
 
-    let now = chrono_now();
+    let now = now_iso();
     let mut locations = Vec::new();
     for line in text.lines().skip(if has_header { 1 } else { 0 }) {
         let fields: Vec<&str> = line.split(',').map(|f| f.trim()).collect();
@@ -446,7 +447,7 @@ fn parse_single_json_mut(buf: &mut [u8]) -> ParsedMap {
     let obj_ranges = find_object_boundaries(&buf[arr_start..arr_end]);
     let t_boundaries = t0.elapsed();
 
-    let now = chrono_now();
+    let now = now_iso();
     let known_keys: &[&str] = &["lat", "latitude", "lng", "longitude", "lon", "heading", "pitch",
         "zoom", "panoId", "pano", "pano_id", "extra", "countryCode", "stateCode",
         "flags", "tags", "id", "createdAt", "modifiedAt"];
@@ -568,41 +569,6 @@ fn get_str<'a>(obj: &'a serde_json::Map<String, Value>, keys: &[&str]) -> Option
     None
 }
 
-fn chrono_now() -> String {
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_millis();
-    // ISO 8601 format matching JS new Date().toISOString()
-    let secs = (now / 1000) as i64;
-    let millis = (now % 1000) as u32;
-    
-    time_to_iso(secs, millis)
-}
-
-fn time_to_iso(secs: i64, millis: u32) -> String {
-    const DAYS_PER_400Y: i64 = 146097;
-
-    let total_days = secs / 86400 + 719468; // days from year 0 to unix epoch
-    let time_of_day = secs.rem_euclid(86400);
-
-    let era = if total_days >= 0 { total_days } else { total_days - DAYS_PER_400Y + 1 } / DAYS_PER_400Y;
-    let doe = (total_days - era * DAYS_PER_400Y) as u32;
-    let yoe = (doe - doe / 1461 + doe / 36524 - doe / 146096) / 365;
-    let y = yoe as i64 + era * 400;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let d = doy - (153 * mp + 2) / 5 + 1;
-    let m = if mp < 10 { mp + 3 } else { mp - 9 };
-    let y = if m <= 2 { y + 1 } else { y };
-
-    let h = time_of_day / 3600;
-    let min = (time_of_day % 3600) / 60;
-    let s = time_of_day % 60;
-
-    format!("{:04}-{:02}-{:02}T{:02}:{:02}:{:02}.{:03}Z", y, m, d, h, min, s, millis)
-}
-
 // ---------------------------------------------------------------------------
 // Zip orchestration
 // ---------------------------------------------------------------------------
@@ -642,7 +608,7 @@ fn read_single_json(path: &str) -> Result<Vec<(String, String)>, String> {
 /// Assigns sequential u32 location IDs starting at 1.
 fn write_map_to_db(conn: &Connection, app: &tauri::AppHandle, mut map: ParsedMap) -> Result<ImportedMapInfo, String> {
     let map_id = Uuid::new_v4().to_string();
-    let now = chrono_now();
+    let now = now_iso();
     let loc_count = map.locations.len() as u32;
     let tag_count = map.tags.len() as u32;
 

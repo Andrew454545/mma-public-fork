@@ -6,11 +6,11 @@
 //! blobs from the blob store.
 
 use rusqlite::params;
-use sha2::{Digest, Sha256};
 use tauri::State;
 
 use crate::fast_io;
 use crate::location_store::{self, CommitBlobEntry, StoreState};
+use crate::util::{now_iso, sha256_hex};
 
 // ---------------------------------------------------------------------------
 // Types
@@ -48,22 +48,6 @@ impl Default for CommitDiff {
         Self { added: 0, removed: 0, modified: 0 }
     }
 }
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-fn sha256_hex(input: &str) -> String {
-    let hash = Sha256::digest(input.as_bytes());
-    let mut s = String::with_capacity(hash.len() * 2);
-    for b in hash.iter() {
-        use std::fmt::Write;
-        write!(&mut s, "{b:02x}").unwrap();
-    }
-    s
-}
-
-use crate::util::now_iso;
 
 // ---------------------------------------------------------------------------
 // Commands
@@ -110,7 +94,7 @@ pub fn store_create_commit(
         .map(|e| format!("{} {}", e.geohash, e.blob_hash))
         .collect::<Vec<_>>()
         .join("\n");
-    let tree_hash = sha256_hex(&hash_content);
+    let tree_hash = sha256_hex(hash_content.as_bytes());
 
     // 4. Compute commit id
     let now = now_iso();
@@ -118,7 +102,7 @@ pub fn store_create_commit(
         "tree {tree_hash}\nparent {}\ndate {now}",
         parent_id.as_deref().unwrap_or("")
     );
-    let id = sha256_hex(&commit_input);
+    let id = sha256_hex(commit_input.as_bytes());
 
     // 5. Compute location count
     let location_count: u32 = sorted.iter().map(|e| e.location_count).sum();

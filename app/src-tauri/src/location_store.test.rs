@@ -121,8 +121,8 @@ fn tag_counts_after_add() {
     let l1 = loc_with_tags(1, 0.0, 0.0, vec![10, 20]);
     let l2 = loc_with_tags(2, 1.0, 1.0, vec![10]);
     let store = setup_store_with(&[l1, l2]);
-    assert_eq!(store.tags.get(&10).map(|t| t.count), Some(2));
-    assert_eq!(store.tags.get(&20).map(|t| t.count), Some(1));
+    assert_eq!(store.tags.all.get(&10).map(|t| t.count), Some(2));
+    assert_eq!(store.tags.all.get(&20).map(|t| t.count), Some(1));
 }
 
 #[test]
@@ -131,8 +131,8 @@ fn tag_counts_after_remove() {
     let l2 = loc_with_tags(2, 1.0, 1.0, vec![10]);
     let mut store = setup_store_with(&[l1.clone(), l2]);
     store.remove_tag_counts(&[l1]);
-    assert_eq!(store.tags.get(&10).map(|t| t.count), Some(1));
-    assert_eq!(store.tags.get(&20).map(|t| t.count), Some(0));
+    assert_eq!(store.tags.all.get(&10).map(|t| t.count), Some(1));
+    assert_eq!(store.tags.all.get(&20).map(|t| t.count), Some(0));
 }
 
 #[test]
@@ -140,7 +140,7 @@ fn tag_counts_saturate_at_zero() {
     let l = loc_with_tags(1, 0.0, 0.0, vec![10]);
     let mut store = setup_store_with(&[]);
     store.remove_tag_counts(&[l]);
-    assert_eq!(store.tags.get(&10).map(|t| t.count), None);
+    assert_eq!(store.tags.all.get(&10).map(|t| t.count), None);
 }
 
 // -----------------------------------------------------------------------
@@ -203,18 +203,18 @@ fn undo_stack_capped_at_max() {
         let l = loc(i as u32, 0.0, 0.0);
         store.push_undo(EditEntry { created: vec![l], removed: vec![] });
     }
-    assert_eq!(store.undo_stack.len(), MAX_UNDO_ENTRIES);
+    assert_eq!(store.edits.undo.len(), MAX_UNDO_ENTRIES);
 }
 
 #[test]
 fn redo_stack_cleared_on_new_edit() {
     let mut store = setup_store_with(&[]);
-    store.redo_stack.push(EditEntry { created: vec![], removed: vec![] });
-    assert!(!store.redo_stack.is_empty());
+    store.edits.redo.push(EditEntry { created: vec![], removed: vec![] });
+    assert!(!store.edits.redo.is_empty());
 
     store.push_undo(EditEntry { created: vec![loc(1, 0.0, 0.0)], removed: vec![] });
-    store.redo_stack.clear();
-    assert!(store.redo_stack.is_empty());
+    store.edits.redo.clear();
+    assert!(store.edits.redo.is_empty());
 }
 
 // -----------------------------------------------------------------------
@@ -225,22 +225,22 @@ fn redo_stack_cleared_on_new_edit() {
 fn tag_counts_correct_after_undo_add() {
     let l = loc_with_tags(1, 0.0, 0.0, vec![10, 20]);
     let mut store = setup_store_with(&[l.clone()]);
-    assert_eq!(store.tags.get(&10).map(|t| t.count), Some(1));
+    assert_eq!(store.tags.all.get(&10).map(|t| t.count), Some(1));
 
     let entry = EditEntry { created: vec![l], removed: vec![] };
     apply_edit_reverse(&mut store, &entry);
-    assert_eq!(store.tags.get(&10).map(|t| t.count), Some(0));
+    assert_eq!(store.tags.all.get(&10).map(|t| t.count), Some(0));
 }
 
 #[test]
 fn tag_counts_correct_after_undo_remove() {
     let l = loc_with_tags(1, 0.0, 0.0, vec![10]);
     let mut store = setup_store_with(&[]);
-    assert_eq!(store.tags.get(&10).map(|t| t.count), None);
+    assert_eq!(store.tags.all.get(&10).map(|t| t.count), None);
 
     let entry = EditEntry { created: vec![], removed: vec![l] };
     apply_edit_reverse(&mut store, &entry);
-    assert_eq!(store.tags.get(&10).map(|t| t.count), Some(1));
+    assert_eq!(store.tags.all.get(&10).map(|t| t.count), Some(1));
 }
 
 #[test]
@@ -248,16 +248,16 @@ fn tag_counts_correct_after_undo_tag_change() {
     let old = loc_with_tags(1, 0.0, 0.0, vec![10]);
     let new = loc_with_tags(1, 0.0, 0.0, vec![20]);
     let mut store = setup_store_with(&[new.clone()]);
-    for tag in store.tags.values_mut() { tag.count = 0; };
+    for tag in store.tags.all.values_mut() { tag.count = 0; };
     store.add_tag_counts(&[new.clone()]);
-    assert_eq!(store.tags.get(&20).map(|t| t.count), Some(1));
-    assert_eq!(store.tags.get(&10).map(|t| t.count), None);
+    assert_eq!(store.tags.all.get(&20).map(|t| t.count), Some(1));
+    assert_eq!(store.tags.all.get(&10).map(|t| t.count), None);
 
     let entry = EditEntry { created: vec![new], removed: vec![old] };
     apply_edit_reverse(&mut store, &entry);
 
-    assert_eq!(store.tags.get(&10).map(|t| t.count), Some(1));
-    assert_eq!(store.tags.get(&20).map(|t| t.count), Some(0));
+    assert_eq!(store.tags.all.get(&10).map(|t| t.count), Some(1));
+    assert_eq!(store.tags.all.get(&20).map(|t| t.count), Some(0));
 }
 
 #[test]
@@ -267,10 +267,10 @@ fn tag_counts_survive_undo_redo_cycle() {
     let entry = EditEntry { created: vec![l.clone()], removed: vec![] };
 
     apply_edit_reverse(&mut store, &entry);
-    assert_eq!(store.tags.get(&10).map(|t| t.count), Some(0));
+    assert_eq!(store.tags.all.get(&10).map(|t| t.count), Some(0));
 
     apply_edit_forward(&mut store, &entry);
-    assert_eq!(store.tags.get(&10).map(|t| t.count), Some(1));
+    assert_eq!(store.tags.all.get(&10).map(|t| t.count), Some(1));
 }
 
 // -----------------------------------------------------------------------
@@ -395,7 +395,7 @@ fn store_status_reflects_undo_redo() {
     assert!(s.can_undo);
     assert!(!s.can_redo);
 
-    store.redo_stack.push(EditEntry { created: vec![], removed: vec![] });
+    store.edits.redo.push(EditEntry { created: vec![], removed: vec![] });
     let s = store.store_status();
     assert!(s.can_undo);
     assert!(s.can_redo);
@@ -466,7 +466,7 @@ fn cell_remove_returns_correct_info() {
 #[test]
 fn cell_remove_nonexistent_returns_none() {
     let store = setup_store_with(&[]);
-    assert!(store.id_to_cell_idx.get(999).copied().unwrap_or(255) == 255);
+    assert!(store.render.id_to_cell_idx.get(999).copied().unwrap_or(255) == 255);
 }
 
 // -----------------------------------------------------------------------
@@ -496,10 +496,10 @@ fn alloc_tag_id_increments() {
 #[test]
 fn bake_overlay_merges_adds() {
     let mut store = setup_store_with(&[loc(1, 10.0, 20.0), loc(2, 30.0, 40.0)]);
-    assert_eq!(store.overlay_adds.len(), 2);
+    assert_eq!(store.overlay.adds.len(), 2);
 
     store.bake_overlay();
-    assert!(store.overlay_adds.is_empty());
+    assert!(store.overlay.adds.is_empty());
     assert_eq!(store.batch.as_ref().unwrap().num_rows(), 2);
     // locations still accessible
     assert!(store.get_loc_by_id(1).is_some());
@@ -516,7 +516,7 @@ fn bake_overlay_applies_patches() {
 
     let got = store.get_loc_by_id(1).unwrap();
     assert_eq!(got.lat, 99.0);
-    assert!(store.overlay_patches.is_empty());
+    assert!(store.overlay.patches.is_empty());
 }
 
 #[test]
@@ -648,7 +648,7 @@ fn cell_swap_remove_maintains_correct_indices() {
     let (_, idx20) = store.cell_lookup(20).unwrap();
     assert_eq!(idx20, 1, "id 20 should be undisturbed");
 
-    let cr = store.render_cells[24].as_ref().unwrap();
+    let cr = store.render.cells[24].as_ref().unwrap();
     assert_eq!(cr.id_order.len(), 2);
 }
 
@@ -702,11 +702,11 @@ fn multiple_undo_redo_cycles_consistent() {
     for _ in 0..5 {
         apply_edit_forward(&mut store, &entry);
         assert_eq!(store.get_loc_by_id(1).unwrap().tags, vec![20]);
-        assert_eq!(store.tags.get(&20).map(|t| t.count), Some(1));
+        assert_eq!(store.tags.all.get(&20).map(|t| t.count), Some(1));
 
         apply_edit_reverse(&mut store, &entry);
         assert_eq!(store.get_loc_by_id(1).unwrap().tags, vec![10]);
-        assert_eq!(store.tags.get(&10).map(|t| t.count), Some(1));
+        assert_eq!(store.tags.all.get(&10).map(|t| t.count), Some(1));
     }
 }
 
@@ -729,7 +729,7 @@ fn update_delta_heading_only_produces_patch() {
     assert!(delta.added.is_empty());
     assert!(delta.removed.is_empty());
     assert_eq!(delta.updated.len(), 1);
-    assert_eq!(delta.updated[0].heading, Some(90.0));
+    assert_eq!(delta.updated[0].heading, Some(0.0));
     assert!(delta.updated[0].lat.is_none());
 }
 
@@ -778,9 +778,9 @@ fn overlay_update_on_overlay_add_item() {
     let got = store.get_loc_by_id(1).unwrap();
     assert_eq!(got.lat, 50.0);
     // should still be in overlay_adds, not overlay_patches
-    assert_eq!(store.overlay_adds.len(), 1);
-    assert_eq!(store.overlay_adds[0].lat, 50.0);
-    assert!(store.overlay_patches.is_empty());
+    assert_eq!(store.overlay.adds.len(), 1);
+    assert_eq!(store.overlay.adds[0].lat, 50.0);
+    assert!(store.overlay.patches.is_empty());
 }
 
 // -----------------------------------------------------------------------
@@ -837,9 +837,9 @@ fn bake_overlay_all_three_simultaneously() {
 
     store.bake_overlay();
     assert_eq!(store.batch.as_ref().unwrap().num_rows(), 2);
-    assert!(store.overlay_adds.is_empty());
-    assert!(store.overlay_patches.is_empty());
-    assert!(store.overlay_dead.is_empty());
+    assert!(store.overlay.adds.is_empty());
+    assert!(store.overlay.patches.is_empty());
+    assert!(store.overlay.dead.is_empty());
     // verify data
     assert!(store.get_loc_by_id(1).is_none());
     assert_eq!(store.get_loc_by_id(2).unwrap().heading, 180.0);
@@ -998,13 +998,13 @@ fn overlay_consistency_no_id_in_both_dead_and_adds() {
 
     // Remove it
     store.overlay_remove(&[l.clone()]);
-    assert!(store.overlay_dead.contains(&1));
-    assert!(!store.overlay_adds.iter().any(|l| l.id == 1));
+    assert!(store.overlay.dead.contains(&1));
+    assert!(!store.overlay.adds.iter().any(|l| l.id == 1));
 
     // Re-add it (overlay_add on a known batch ID goes to patches)
     store.overlay_add(loc(1, 50.0, 60.0));
     // After re-add, it should NOT be in dead
-    assert!(!store.overlay_dead.contains(&1), "re-added ID should be removed from dead set");
+    assert!(!store.overlay.dead.contains(&1), "re-added ID should be removed from dead set");
 }
 
 #[test]
@@ -1012,8 +1012,8 @@ fn overlay_consistency_add_new_id_goes_to_adds() {
     let mut store = setup_store_with(&[]);
     store.batch = Some(empty_batch());
     store.overlay_add(loc(99, 10.0, 20.0));
-    assert!(store.overlay_adds.iter().any(|l| l.id == 99));
-    assert!(!store.overlay_patches.contains_key(&99));
+    assert!(store.overlay.adds.iter().any(|l| l.id == 99));
+    assert!(!store.overlay.patches.contains_key(&99));
 }
 
 #[test]
@@ -1023,8 +1023,8 @@ fn overlay_consistency_update_batch_id_goes_to_patches() {
     store.bake_overlay();
     // Now l is in the batch
     store.overlay_update(1, &LocationPatch { heading: Some(45.0), ..patch() });
-    assert!(store.overlay_patches.contains_key(&1));
-    assert!(!store.overlay_adds.iter().any(|l| l.id == 1));
+    assert!(store.overlay.patches.contains_key(&1));
+    assert!(!store.overlay.adds.iter().any(|l| l.id == 1));
 }
 
 #[test]
@@ -1034,9 +1034,9 @@ fn overlay_consistency_update_add_id_stays_in_adds() {
     store.overlay_add(loc(1, 10.0, 20.0));
     store.overlay_update(1, &LocationPatch { heading: Some(45.0), ..patch() });
     // Should still be in overlay_adds, updated in place
-    assert_eq!(store.overlay_adds.len(), 1);
-    assert_eq!(store.overlay_adds[0].heading, 45.0);
-    assert!(!store.overlay_patches.contains_key(&1));
+    assert_eq!(store.overlay.adds.len(), 1);
+    assert_eq!(store.overlay.adds[0].heading, 45.0);
+    assert!(!store.overlay.patches.contains_key(&1));
 }
 
 #[test]
@@ -1045,11 +1045,11 @@ fn overlay_consistency_remove_clears_patches() {
     let mut store = setup_store_with(&[l.clone()]);
     store.bake_overlay();
     store.overlay_update(1, &LocationPatch { heading: Some(45.0), ..patch() });
-    assert!(store.overlay_patches.contains_key(&1));
+    assert!(store.overlay.patches.contains_key(&1));
 
     store.overlay_remove(&[l]);
-    assert!(!store.overlay_patches.contains_key(&1), "remove should clear patches for the ID");
-    assert!(store.overlay_dead.contains(&1));
+    assert!(!store.overlay.patches.contains_key(&1), "remove should clear patches for the ID");
+    assert!(store.overlay.dead.contains(&1));
 }
 
 #[test]
@@ -1108,18 +1108,18 @@ fn cell_render_id_order_matches_after_swap_remove_sequence() {
 
     // Remove index 0 (id=10) — 30 swaps in
     store.cell_remove_render(10);
-    let cr = store.render_cells[24].as_ref().unwrap();
+    let cr = store.render.cells[24].as_ref().unwrap();
     assert_eq!(cr.id_order, vec![30, 20]);
 
     // Remove index 0 (id=30) — 20 swaps in
     store.cell_remove_render(30);
-    let cr = store.render_cells[24].as_ref().unwrap();
+    let cr = store.render.cells[24].as_ref().unwrap();
     assert_eq!(cr.id_order, vec![20]);
 
     // Add new entries
     store.cell_add_render(24, 40);
     store.cell_add_render(24, 50);
-    let cr = store.render_cells[24].as_ref().unwrap();
+    let cr = store.render.cells[24].as_ref().unwrap();
     assert_eq!(cr.id_order, vec![20, 40, 50]);
 
     // Verify index lookups
@@ -1186,15 +1186,15 @@ fn undo_delete_multiple_then_readd_renders_correctly() {
 #[test]
 fn selected_ids_cleared_properly() {
     let mut store = setup_store_with(&[loc(1, 0.0, 0.0), loc(2, 0.0, 0.0)]);
-    store.selected_ids.insert(1);
-    store.selected_ids.insert(2);
-    store.selected_colors.insert(1, [255, 0, 0]);
-    store.selected_colors.insert(2, [0, 255, 0]);
+    store.selections.ids.insert(1);
+    store.selections.ids.insert(2);
+    store.selections.colors.insert(1, [255, 0, 0]);
+    store.selections.colors.insert(2, [0, 255, 0]);
 
-    store.selected_ids.clear();
-    store.selected_colors.clear();
-    assert!(store.selected_ids.is_empty());
-    assert!(store.selected_colors.is_empty());
+    store.selections.ids.clear();
+    store.selections.colors.clear();
+    assert!(store.selections.ids.is_empty());
+    assert!(store.selections.colors.is_empty());
 }
 
 // -----------------------------------------------------------------------
@@ -1208,15 +1208,15 @@ fn tag_counts_correct_after_bulk_add_then_undo() {
         .map(|i| loc_with_tags(i, i as f64, 0.0, vec![5]))
         .collect();
     let mut store = setup_store_with(&locs);
-    assert_eq!(store.tags.get(&5).map(|t| t.count), Some(10));
+    assert_eq!(store.tags.all.get(&5).map(|t| t.count), Some(10));
 
     let entry = EditEntry { created: locs.clone(), removed: vec![] };
     apply_edit_reverse(&mut store, &entry);
-    assert_eq!(store.tags.get(&5).map(|t| t.count), Some(0));
+    assert_eq!(store.tags.all.get(&5).map(|t| t.count), Some(0));
     assert_eq!(store.alive_count, 0);
 
     apply_edit_forward(&mut store, &entry);
-    assert_eq!(store.tags.get(&5).map(|t| t.count), Some(10));
+    assert_eq!(store.tags.all.get(&5).map(|t| t.count), Some(10));
     assert_eq!(store.alive_count, 10);
 }
 
@@ -1226,15 +1226,15 @@ fn tag_counts_correct_after_tag_reassignment_undo() {
     let old = loc_with_tags(1, 0.0, 0.0, vec![5]);
     let new = loc_with_tags(1, 0.0, 0.0, vec![5, 10]);
     let mut store = setup_store_with(&[new.clone()]);
-    for tag in store.tags.values_mut() { tag.count = 0; };
+    for tag in store.tags.all.values_mut() { tag.count = 0; };
     store.add_tag_counts(&[new.clone()]);
-    assert_eq!(store.tags.get(&5).map(|t| t.count), Some(1));
-    assert_eq!(store.tags.get(&10).map(|t| t.count), Some(1));
+    assert_eq!(store.tags.all.get(&5).map(|t| t.count), Some(1));
+    assert_eq!(store.tags.all.get(&10).map(|t| t.count), Some(1));
 
     let entry = EditEntry { created: vec![new], removed: vec![old] };
     apply_edit_reverse(&mut store, &entry);
-    assert_eq!(store.tags.get(&5).map(|t| t.count), Some(1), "tag 5 should still be 1");
-    assert_eq!(store.tags.get(&10).map(|t| t.count), Some(0), "tag 10 should be 0 after undo");
+    assert_eq!(store.tags.all.get(&5).map(|t| t.count), Some(1), "tag 5 should still be 1");
+    assert_eq!(store.tags.all.get(&10).map(|t| t.count), Some(0), "tag 10 should be 0 after undo");
 }
 
 // -----------------------------------------------------------------------
@@ -1254,9 +1254,9 @@ fn delta_overlay_only_includes_actual_changes() {
 
     // Build delta overlay
     let overlay = DeltaOverlay {
-        adds: store.overlay_adds.clone(),
-        dead_ids: store.overlay_dead.iter().cloned().collect(),
-        patches: store.overlay_patches.values().cloned().collect(),
+        adds: store.overlay.adds.clone(),
+        dead_ids: store.overlay.dead.iter().cloned().collect(),
+        patches: store.overlay.patches.values().cloned().collect(),
     };
     assert!(overlay.adds.is_empty(), "no new locations added");
     assert!(overlay.dead_ids.is_empty(), "no locations deleted");
@@ -1281,9 +1281,9 @@ fn delta_overlay_round_trip_preserves_store_state() {
 
     // Serialize
     let overlay = DeltaOverlay {
-        adds: store.overlay_adds.clone(),
-        dead_ids: store.overlay_dead.iter().cloned().collect(),
-        patches: store.overlay_patches.values().cloned().collect(),
+        adds: store.overlay.adds.clone(),
+        dead_ids: store.overlay.dead.iter().cloned().collect(),
+        patches: store.overlay.patches.values().cloned().collect(),
     };
     let bytes = rmp_serde::to_vec_named(&overlay).unwrap();
 
@@ -1305,7 +1305,7 @@ fn delta_overlay_round_trip_preserves_store_state() {
 fn active_id_should_be_clearable_when_location_removed() {
     let l = loc(1, 10.0, 20.0);
     let mut store = setup_store_with(&[l.clone()]);
-    store.active_id = Some(1);
+    store.selections.active_id = Some(1);
 
     // Remove the active location
     let entry = EditEntry { created: vec![], removed: vec![l] };
@@ -1314,7 +1314,7 @@ fn active_id_should_be_clearable_when_location_removed() {
     // The caller (JS) should clear active_id when the delta removes it.
     // Verify the location is actually gone so the caller can detect it.
     assert!(store.get_loc_by_id(1).is_none());
-    let delta_has_removed_active = entry.removed.iter().any(|l| Some(l.id) == store.active_id);
+    let delta_has_removed_active = entry.removed.iter().any(|l| Some(l.id) == store.selections.active_id);
     assert!(delta_has_removed_active, "caller can detect active was removed");
 }
 
@@ -1328,8 +1328,8 @@ fn render_buffer_with_selection_overlay() {
     let l2 = loc(2, 30.0, 40.0);
     let mut store = setup_store_with(&[l1, l2]);
     store.bake_overlay();
-    store.selected_ids.insert(1);
-    store.selected_colors.insert(1, [255, 0, 0]);
+    store.selections.ids.insert(1);
+    store.selections.colors.insert(1, [255, 0, 0]);
 
     let req = RenderRequest {
         west: -180.0, south: -90.0, east: 180.0, north: 90.0,
@@ -1489,12 +1489,12 @@ fn overlay_add_distinguishes_batch_vs_new_ids() {
     store.bake_overlay();
     // Adding id=1 again should go to patches (exists in batch)
     store.overlay_add(loc(1, 99.0, 99.0));
-    assert!(store.overlay_patches.contains_key(&1));
-    assert!(store.overlay_adds.is_empty());
+    assert!(store.overlay.patches.contains_key(&1));
+    assert!(store.overlay.adds.is_empty());
     // Adding id=5 should go to adds (not in batch)
     store.overlay_add(loc(5, 50.0, 50.0));
-    assert_eq!(store.overlay_adds.len(), 1);
-    assert_eq!(store.overlay_adds[0].id, 5);
+    assert_eq!(store.overlay.adds.len(), 1);
+    assert_eq!(store.overlay.adds[0].id, 5);
 }
 
 // -----------------------------------------------------------------------

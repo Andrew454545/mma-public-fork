@@ -883,15 +883,15 @@ fn add_parsed_to_store(
     store: &mut location_store::Store,
     parsed: &mut ParsedMap,
 ) -> Result<location_store::MutationResult, String> {
-    let existing_tags = store.tags.clone();
+    let existing_tags = store.tags.all.clone();
 
     let tag_id_remap = reconcile_tags(store, parsed, &existing_tags);
 
     if !parsed.tags.is_empty() {
         for tag in &parsed.tags {
-            store.tags.insert(tag.id, tag.clone());
+            store.tags.all.insert(tag.id, tag.clone());
         }
-        store.tags_dirty = true;
+        store.tags.dirty = true;
     }
 
     for loc in &mut parsed.locations {
@@ -945,16 +945,16 @@ fn add_parsed_to_store(
         let conn = fast_io::open_db(app)?;
         conn.execute("UPDATE maps SET location_count = ?1 WHERE id = ?2",
             rusqlite::params![store.alive_count, map_id]).map_err(|e| e.to_string())?;
-        store.dirty = false;
+        store.overlay.dirty = false;
 
-        store.undo_stack.clear();
+        store.edits.undo.clear();
     }
-    store.redo_stack.clear();
+    store.edits.redo.clear();
 
     let mut result = store.finish_mutation(
         location_store::ChangeSet { full_reset: true, ..Default::default() }
     );
-    result.tags = Some(store.tags.clone());
+    result.tags = Some(store.tags.all.clone());
 
     let extras: Vec<&serde_json::Map<String, serde_json::Value>> = parsed.locations.iter()
         .filter_map(|l| l.extra.as_ref())

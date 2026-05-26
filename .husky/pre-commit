@@ -2,22 +2,11 @@
 
 cd app
 
-# ESLint on staged .ts/.tsx files
-STAGED=$(git diff --cached --name-only --diff-filter=ACM -- '*.ts' '*.tsx' | sed 's|^app/||')
-if [ -n "$STAGED" ]; then
-  echo "[pre-commit] ESLint..."
-  npx eslint $STAGED || exit 1
-fi
+# Format + lint staged files
+npx lint-staged || exit 1
 
 # TypeScript type check
 echo "[pre-commit] TypeScript..."
 npx tsc --noEmit -p tsconfig.app.json || exit 1
-
-# Regenerate plugin types if API changed
-cd ..
-echo "[pre-commit] Plugin types..."
-node plugins/types/generate.js
-git add plugins/types/mma.d.ts
-cd app
 
 echo "[pre-commit] All checks passed."

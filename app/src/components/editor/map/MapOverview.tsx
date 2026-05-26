@@ -368,17 +368,7 @@ function SelectionRow({
 	);
 }
 
-const ALL_OPS: FilterOp[] = [
-	"eq",
-	"neq",
-	"gt",
-	"lt",
-	"gte",
-	"lte",
-	"between",
-	"has",
-	"nothas",
-];
+const ALL_OPS: FilterOp[] = ["eq", "neq", "gt", "lt", "gte", "lte", "between", "has", "nothas"];
 const EQUALITY_OPS: FilterOp[] = ["eq", "neq", "has", "nothas"];
 const OP_LABELS: Record<FilterOp, string> = {
 	eq: "=",
@@ -389,6 +379,7 @@ const OP_LABELS: Record<FilterOp, string> = {
 	lte: "<=",
 	between: "between",
 	between_anyyear: "between (any year)",
+	between_anytime: "between (any date)",
 	has: "has",
 	nothas: "does not have",
 };
@@ -436,7 +427,6 @@ function useExtraFieldKeys(): FieldEntry[] {
 	}, [defs]);
 }
 
-
 const TIMEZONE_VALUES = Intl.supportedValuesOf("timeZone");
 
 function useEnumValues(
@@ -470,6 +460,9 @@ function FilterValueInput({
 	anyYear,
 	onAnyYearToggle,
 	showAnyYear,
+	anyTime,
+	onAnyTimeToggle,
+	showAnyTime,
 }: {
 	fieldEntry: FieldEntry | undefined;
 	value: string;
@@ -478,6 +471,9 @@ function FilterValueInput({
 	anyYear?: boolean;
 	onAnyYearToggle?: (v: boolean) => void;
 	showAnyYear?: boolean;
+	anyTime?: boolean;
+	onAnyTimeToggle?: (v: boolean) => void;
+	showAnyTime?: boolean;
 }) {
 	const type = fieldEntry?.fieldType;
 	const def = fieldEntry?.fieldDef;
@@ -505,6 +501,10 @@ function FilterValueInput({
 				anyYear={anyYear}
 				onAnyYearToggle={onAnyYearToggle}
 				showAnyYear={showAnyYear}
+				showTime={type === "date"}
+				anyTime={anyTime}
+				onAnyTimeToggle={onAnyTimeToggle}
+				showAnyTime={showAnyTime}
 			/>
 		);
 	}
@@ -539,6 +539,7 @@ function FilterBuilder({ mapId }: { mapId: string }) {
 	const [value, setValue] = useState(saved?.value ?? "");
 	const [value2, setValue2] = useState(saved?.value2 ?? "");
 	const [anyYear, setAnyYear] = useState(false);
+	const [anyTime, setAnyTime] = useState(false);
 	useEffect(() => {
 		if (!field && fields.length > 0) setField(fields[0].key);
 	}, [field, fields]);
@@ -550,8 +551,9 @@ function FilterBuilder({ mapId }: { mapId: string }) {
 	const fieldEntry = fields.find((f) => f.key === field);
 	const isNumeric = fieldEntry?.fieldType === "number" || fieldEntry?.fieldType === "date";
 	const isDateLike = fieldEntry?.fieldType === "date" || fieldEntry?.fieldType === "month";
+	const isExactDate = fieldEntry?.fieldType === "date";
 	const availableOps = opsForType(fieldEntry?.fieldType);
-	const isBetween = op === "between" || op === "between_anyyear";
+	const isBetween = op === "between" || op === "between_anyyear" || op === "between_anytime";
 
 	const handleFieldChange = (key: string) => {
 		setField(key);
@@ -561,15 +563,29 @@ function FilterBuilder({ mapId }: { mapId: string }) {
 		setValue("");
 		setValue2("");
 		setAnyYear(false);
+		setAnyTime(false);
 	};
 
 	const handleOpChange = (newOp: FilterOp) => {
 		setOp(newOp);
-		if (newOp !== "between") setAnyYear(false);
+		if (newOp !== "between") {
+			setAnyYear(false);
+			setAnyTime(false);
+		}
 	};
 
 	const handleAnyYearToggle = (checked: boolean) => {
 		setAnyYear(checked);
+		if (checked) setAnyTime(false);
+	};
+
+	const handleAnyTimeToggle = (checked: boolean) => {
+		setAnyTime(checked);
+		if (checked) {
+			setAnyYear(false);
+			setValue("");
+			setValue2("");
+		}
 	};
 
 	const needsValue = op !== "has" && op !== "nothas";
@@ -589,17 +605,30 @@ function FilterBuilder({ mapId }: { mapId: string }) {
 	const handleAdd = () => {
 		if (!field) return;
 		if (needsValue && !value) return;
-		const finalOp = anyYear && isBetween ? "between_anyyear" as FilterOp : op;
+		let finalOp: FilterOp = op;
+		if (isBetween && anyYear) finalOp = "between_anyyear";
+		if (isBetween && anyTime) finalOp = "between_anytime";
 		let parsed: string | number | null;
 		let parsed2: string | number | undefined;
 		if (anyYear && isBetween) {
 			parsed = toMonthDay(value);
 			parsed2 = toMonthDay(value2);
+		} else if (anyTime && isBetween) {
+			parsed = value;
+			parsed2 = value2;
 		} else {
 			parsed = needsValue ? (isNumeric ? Number(value) : value) : null;
 			parsed2 = isBetween ? (isNumeric ? Number(value2) : value2) : undefined;
 		}
-		if (isBetween && !anyYear && isNumeric && parsed != null && parsed2 != null && Number(parsed) > Number(parsed2)) {
+		if (
+			isBetween &&
+			!anyYear &&
+			!anyTime &&
+			isNumeric &&
+			parsed != null &&
+			parsed2 != null &&
+			Number(parsed) > Number(parsed2)
+		) {
 			selectFilter(field, finalOp, parsed2, parsed);
 		} else {
 			selectFilter(field, finalOp, parsed, parsed2);
@@ -607,6 +636,7 @@ function FilterBuilder({ mapId }: { mapId: string }) {
 	};
 
 	const showAnyYear = isBetween && isDateLike;
+	const showAnyTime = isBetween && isExactDate;
 
 	return (
 		<div className="extra-filter-builder">
@@ -638,6 +668,9 @@ function FilterBuilder({ mapId }: { mapId: string }) {
 					anyYear={anyYear}
 					onAnyYearToggle={handleAnyYearToggle}
 					showAnyYear={showAnyYear}
+					anyTime={anyTime}
+					onAnyTimeToggle={handleAnyTimeToggle}
+					showAnyTime={showAnyTime}
 				/>
 			)}
 			{isBetween && (
@@ -647,6 +680,7 @@ function FilterBuilder({ mapId }: { mapId: string }) {
 					onChange={setValue2}
 					placeholder="Max"
 					anyYear={anyYear}
+					anyTime={anyTime}
 				/>
 			)}
 			<button className="button" type="button" onClick={handleAdd}>
@@ -656,21 +690,30 @@ function FilterBuilder({ mapId }: { mapId: string }) {
 	);
 }
 
-function TagFindReplaceDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
+function TagFindReplaceDialog({
+	open,
+	onOpenChange,
+}: {
+	open: boolean;
+	onOpenChange: (v: boolean) => void;
+}) {
 	const [find, setFind] = useState("");
 	const [replace, setReplace] = useState("");
 	const [applied, setApplied] = useState(false);
 
 	const tags = getVisibleTags();
-	const matches = find
-		? tags.filter((t) => t.name.toLowerCase().includes(find.toLowerCase()))
-		: [];
+	const matches = find ? tags.filter((t) => t.name.toLowerCase().includes(find.toLowerCase())) : [];
 
 	const handleApply = async () => {
 		if (!find || matches.length === 0) return;
 		const patches = matches.map((t) => ({
 			id: t.id,
-			patch: { name: t.name.replaceAll(new RegExp(find.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi"), replace) },
+			patch: {
+				name: t.name.replaceAll(
+					new RegExp(find.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi"),
+					replace,
+				),
+			},
 		}));
 		await updateTags(patches);
 		setApplied(true);
@@ -695,7 +738,10 @@ function TagFindReplaceDialog({ open, onOpenChange }: { open: boolean; onOpenCha
 							className="input"
 							style={{ flex: 1 }}
 							value={find}
-							onChange={(e) => { setFind(e.target.value); setApplied(false); }}
+							onChange={(e) => {
+								setFind(e.target.value);
+								setApplied(false);
+							}}
 							placeholder="Text to find..."
 							autoFocus
 						/>
@@ -706,7 +752,10 @@ function TagFindReplaceDialog({ open, onOpenChange }: { open: boolean; onOpenCha
 							className="input"
 							style={{ flex: 1 }}
 							value={replace}
-							onChange={(e) => { setReplace(e.target.value); setApplied(false); }}
+							onChange={(e) => {
+								setReplace(e.target.value);
+								setApplied(false);
+							}}
 							placeholder="Replace with..."
 						/>
 					</label>
@@ -715,11 +764,26 @@ function TagFindReplaceDialog({ open, onOpenChange }: { open: boolean; onOpenCha
 							<p style={{ margin: "0 0 0.25rem", fontSize: "0.85rem", color: "#888" }}>
 								{matches.length} tag{matches.length !== 1 ? "s" : ""} will be affected:
 							</p>
-							<div style={{ display: "flex", flexWrap: "wrap", gap: 4, maxHeight: 160, overflowY: "auto" }}>
+							<div
+								style={{
+									display: "flex",
+									flexWrap: "wrap",
+									gap: 4,
+									maxHeight: 160,
+									overflowY: "auto",
+								}}
+							>
 								{matches.map((t) => {
-									const newName = t.name.replaceAll(new RegExp(find.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi"), replace);
+									const newName = t.name.replaceAll(
+										new RegExp(find.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi"),
+										replace,
+									);
 									return (
-										<span key={t.id} className="tag is-small" style={{ backgroundColor: t.color, color: textColorFor(t.color) }}>
+										<span
+											key={t.id}
+											className="tag is-small"
+											style={{ backgroundColor: t.color, color: textColorFor(t.color) }}
+										>
 											<span className="tag__text">
 												{t.name} <span style={{ opacity: 0.5 }}>-&gt;</span> {newName}
 											</span>
@@ -729,7 +793,9 @@ function TagFindReplaceDialog({ open, onOpenChange }: { open: boolean; onOpenCha
 							</div>
 						</div>
 					)}
-					<p style={{ margin: 0, fontSize: "0.8rem", color: "#e5a33e" }}>Tag renames cannot be undone.</p>
+					<p style={{ margin: 0, fontSize: "0.8rem", color: "#e5a33e" }}>
+						Tag renames cannot be undone.
+					</p>
 					<div style={{ display: "flex", justifyContent: "flex-end", gap: "0.5rem" }}>
 						<button className="button" type="button" onClick={() => handleOpenChange(false)}>
 							{applied ? "Close" : "Cancel"}
@@ -744,7 +810,11 @@ function TagFindReplaceDialog({ open, onOpenChange }: { open: boolean; onOpenCha
 								Replace {matches.length} tag{matches.length !== 1 ? "s" : ""}
 							</button>
 						)}
-						{applied && <span style={{ alignSelf: "center", color: "#2fcc8b", fontSize: "0.85rem" }}>Done!</span>}
+						{applied && (
+							<span style={{ alignSelf: "center", color: "#2fcc8b", fontSize: "0.85rem" }}>
+								Done!
+							</span>
+						)}
 					</div>
 				</div>
 			</DialogContent>

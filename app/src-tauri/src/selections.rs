@@ -488,6 +488,11 @@ fn unix_to_month_day(ts: f64) -> (u32, u32) {
     (m, d)
 }
 
+fn unix_to_hour_min(ts: f64) -> (u32, u32) {
+    let secs = ((ts % 86400.0) + 86400.0) % 86400.0;
+    (secs as u32 / 3600, (secs as u32 % 3600) / 60)
+}
+
 fn iso_to_unix(s: &str) -> Option<f64> {
     let s = s.trim_end_matches('Z');
     let (date_part, time_part) = s.split_once('T')?;
@@ -624,6 +629,21 @@ fn compare_filter(field_val: &serde_json::Value, op: &str, value: &serde_json::V
                 fv_md.as_str() >= lo && fv_md.as_str() <= hi
             } else {
                 fv_md.as_str() >= lo || fv_md.as_str() <= hi
+            }
+        }
+        "between_anytime" => {
+            let lo = value.as_str().unwrap_or("00:00");
+            let hi = value2.and_then(|v| v.as_str()).unwrap_or("23:59");
+            let fv_hm = if let Some(ts) = as_f64(field_val) {
+                let (h, m) = unix_to_hour_min(ts);
+                format!("{:02}:{:02}", h, m)
+            } else {
+                return false;
+            };
+            if lo <= hi {
+                fv_hm.as_str() >= lo && fv_hm.as_str() <= hi
+            } else {
+                fv_hm.as_str() >= lo || fv_hm.as_str() <= hi
             }
         }
         _ => false,

@@ -27,6 +27,7 @@ export type FilterOp =
 	| "lte"
 	| "between"
 	| "between_anyyear"
+	| "between_anytime"
 	| "has"
 	| "nothas";
 
@@ -141,9 +142,11 @@ function composeSelectionGroup(
 	return [...others, buildSelection(map, { type, selections: dedupe(flat) })];
 }
 
-export const intersectSelections = (map: MapData, current: Selection[], keys: string[] | null) => composeSelectionGroup(map, current, keys, "Intersection");
+export const intersectSelections = (map: MapData, current: Selection[], keys: string[] | null) =>
+	composeSelectionGroup(map, current, keys, "Intersection");
 
-export const unionSelections = (map: MapData, current: Selection[], keys: string[] | null) => composeSelectionGroup(map, current, keys, "Union");
+export const unionSelections = (map: MapData, current: Selection[], keys: string[] | null) =>
+	composeSelectionGroup(map, current, keys, "Union");
 
 /** Invert targeted selections. Single target toggles in-place; multiple are wrapped in Union then Invert. */
 export function invertSelections(
@@ -420,6 +423,7 @@ export function selectionDisplayName(map: MapData, sel: Selection): string {
 				lte: "<=",
 				between: "between",
 				between_anyyear: "between (any year)",
+				between_anytime: "between (any date)",
 				has: "has",
 				nothas: "does not have",
 			};
@@ -447,6 +451,8 @@ export function selectionDisplayName(map: MapData, sel: Selection): string {
 			};
 			if (p.op === "between_anyyear")
 				return `${fieldLabel} ${OP_LABELS[p.op]} ${fmtMD(p.value)}..${fmtMD(p.value2)}`;
+			if (p.op === "between_anytime")
+				return `${fieldLabel} ${OP_LABELS[p.op]} ${p.value}..${p.value2}`;
 			if (p.op === "between")
 				return `${fieldLabel} ${OP_LABELS[p.op as FilterOp]} ${fmtVal(p.value)}..${fmtVal(p.value2)}`;
 			return `${fieldLabel} ${OP_LABELS[p.op as FilterOp]} ${fmtVal(p.value)}`;

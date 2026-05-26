@@ -2965,16 +2965,53 @@ summary.button {
 .date-picker__popover .rdp-month_caption {
 	justify-content: center;
 }
+.date-picker__time {
+	padding: 0.35rem 0.5rem;
+	border-top: 1px solid #eee;
+	margin-top: 0.25rem;
+}
+.date-picker__time label {
+	display: flex;
+	align-items: center;
+	gap: 0.5rem;
+	font-size: 0.85rem;
+}
+.date-picker__time input[type="time"] {
+	font: inherit;
+	padding: 2px 4px;
+	border: 1px solid #ccc;
+	border-radius: 3px;
+}
+.date-picker__time-only {
+	padding: 0.75rem;
+	width: 280px;
+}
+.date-picker__time-only label {
+	display: flex;
+	align-items: center;
+	gap: 0.5rem;
+	font-size: 0.85rem;
+}
+.date-picker__time-only input[type="time"] {
+	font: inherit;
+	padding: 2px 4px;
+	border: 1px solid #ccc;
+	border-radius: 3px;
+}
+.date-picker__toggles {
+	display: flex;
+	gap: 0.75rem;
+	border-top: 1px solid #eee;
+	margin-top: 0.25rem;
+	padding: 0.35rem 0.25rem 0;
+}
 .date-picker__any-year {
 	display: flex;
 	align-items: center;
 	gap: 0.35rem;
-	padding: 0.35rem 0.25rem 0;
 	font-size: 0.85rem;
 	cursor: pointer;
 	user-select: none;
-	border-top: 1px solid #eee;
-	margin-top: 0.25rem;
 }
 .month-grid {
 	width: 280px;
@@ -3633,8 +3670,12 @@ summary.button {
 	animation: palette-in 100ms ease-out;
 }
 @keyframes palette-in {
-	from { opacity: 0; }
-	to { opacity: 1; }
+	from {
+		opacity: 0;
+	}
+	to {
+		opacity: 1;
+	}
 }
 .command-palette__input {
 	background: inherit;
@@ -4864,6 +4905,12 @@ body {
 	animation: toast-in 150ms ease-out;
 }
 @keyframes toast-in {
-	from { opacity: 0; transform: translateY(8px); }
-	to { opacity: 1; transform: translateY(0); }
+	from {
+		opacity: 0;
+		transform: translateY(8px);
+	}
+	to {
+		opacity: 1;
+		transform: translateY(0);
+	}
 }

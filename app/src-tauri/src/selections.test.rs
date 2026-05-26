@@ -169,6 +169,48 @@ fn filter_between_anyyear_string_field() {
 }
 
 #[test]
+fn filter_between_anytime_normal_range() {
+    // 2023-04-15 14:30 UTC = 1681567800
+    let ts_1430 = serde_json::json!(1681567800.0);
+    // 2021-05-01 08:00 UTC = 1619856000
+    let ts_0800 = serde_json::json!(1619856000.0);
+    // 2020-06-10 22:00 UTC = 1591826400
+    let ts_2200 = serde_json::json!(1591826400.0);
+
+    let lo = serde_json::json!("08:00");
+    let hi = serde_json::json!("15:00");
+
+    assert!(compare_filter(&ts_1430, "between_anytime", &lo, Some(&hi)));
+    assert!(compare_filter(&ts_0800, "between_anytime", &lo, Some(&hi)));
+    assert!(!compare_filter(&ts_2200, "between_anytime", &lo, Some(&hi)));
+}
+
+#[test]
+fn filter_between_anytime_wrapping_range() {
+    // 2023-01-01 23:00 UTC = 1672614000
+    let ts_2300 = serde_json::json!(1672614000.0);
+    // 2023-01-01 02:00 UTC = 1672538400
+    let ts_0200 = serde_json::json!(1672538400.0);
+    // 2023-01-01 12:00 UTC = 1672574400
+    let ts_1200 = serde_json::json!(1672574400.0);
+
+    let lo = serde_json::json!("22:00");
+    let hi = serde_json::json!("06:00");
+
+    assert!(compare_filter(&ts_2300, "between_anytime", &lo, Some(&hi)));
+    assert!(compare_filter(&ts_0200, "between_anytime", &lo, Some(&hi)));
+    assert!(!compare_filter(&ts_1200, "between_anytime", &lo, Some(&hi)));
+}
+
+#[test]
+fn filter_between_anytime_string_field_returns_false() {
+    let ym = serde_json::json!("2023-04");
+    let lo = serde_json::json!("08:00");
+    let hi = serde_json::json!("15:00");
+    assert!(!compare_filter(&ym, "between_anytime", &lo, Some(&hi)));
+}
+
+#[test]
 fn filter_has_nothas() {
     assert!(compare_filter(&serde_json::json!("anything"), "has", &serde_json::json!(null), None));
     assert!(!compare_filter(&serde_json::json!("anything"), "nothas", &serde_json::json!(null), None));

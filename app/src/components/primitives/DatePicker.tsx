@@ -10,11 +10,25 @@ interface DatePickerProps {
 	anyYear?: boolean;
 	onAnyYearToggle?: (v: boolean) => void;
 	showAnyYear?: boolean;
+	showTime?: boolean;
+	anyTime?: boolean;
+	onAnyTimeToggle?: (v: boolean) => void;
+	showAnyTime?: boolean;
 }
 
 const MONTHS_SHORT = [
-	"Jan", "Feb", "Mar", "Apr", "May", "Jun",
-	"Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+	"Jan",
+	"Feb",
+	"Mar",
+	"Apr",
+	"May",
+	"Jun",
+	"Jul",
+	"Aug",
+	"Sep",
+	"Oct",
+	"Nov",
+	"Dec",
 ];
 
 function pad2(n: number): string {
@@ -35,8 +49,16 @@ function parseToDate(value: string): Date | null {
 	return null;
 }
 
-function formatDisplay(value: string, mode: "date" | "month", anyYear?: boolean): string {
+function formatDisplay(
+	value: string,
+	mode: "date" | "month",
+	anyYear?: boolean,
+	anyTime?: boolean,
+): string {
 	if (!value) return "Select...";
+	if (anyTime) {
+		return /^\d{2}:\d{2}$/.test(value) ? value : "Select...";
+	}
 	const d = parseToDate(value);
 	if (!d) return "Select...";
 	if (anyYear) {
@@ -48,10 +70,24 @@ function formatDisplay(value: string, mode: "date" | "month", anyYear?: boolean)
 	if (mode === "month") {
 		return `${MONTHS_SHORT[d.getMonth()]} ${d.getFullYear()}`;
 	}
-	return d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+	const hasTime = d.getUTCHours() !== 0 || d.getUTCMinutes() !== 0;
+	const dateStr = d.toLocaleDateString(undefined, {
+		year: "numeric",
+		month: "short",
+		day: "numeric",
+	});
+	if (hasTime) {
+		const timeStr = `${pad2(d.getUTCHours())}:${pad2(d.getUTCMinutes())}`;
+		return `${dateStr} ${timeStr}`;
+	}
+	return dateStr;
 }
 
-function MonthGrid({ value, onChange, anyYear }: {
+function MonthGrid({
+	value,
+	onChange,
+	anyYear,
+}: {
 	value: string;
 	onChange: (v: string) => void;
 	anyYear?: boolean;
@@ -73,9 +109,13 @@ function MonthGrid({ value, onChange, anyYear }: {
 		<div className="month-grid">
 			{!anyYear && (
 				<div className="month-grid__nav">
-					<button type="button" onClick={() => setYear(y => y - 1)}>&lt;</button>
+					<button type="button" onClick={() => setYear((y) => y - 1)}>
+						&lt;
+					</button>
 					<span>{year}</span>
-					<button type="button" onClick={() => setYear(y => y + 1)}>&gt;</button>
+					<button type="button" onClick={() => setYear((y) => y + 1)}>
+						&gt;
+					</button>
 				</div>
 			)}
 			<div className="month-grid__months">
@@ -98,24 +138,63 @@ function MonthGrid({ value, onChange, anyYear }: {
 }
 
 export function DatePicker({
-	mode, value, onChange, anyYear, onAnyYearToggle, showAnyYear,
+	mode,
+	value,
+	onChange,
+	anyYear,
+	onAnyYearToggle,
+	showAnyYear,
+	showTime,
+	anyTime,
+	onAnyTimeToggle,
+	showAnyTime,
 }: DatePickerProps) {
 	const [open, setOpen] = useState(false);
 
 	const selectedDate = parseToDate(value) ?? undefined;
 	const [navMonth, setNavMonth] = useState<Date>(() => selectedDate ?? new Date());
+	const [pendingDate, setPendingDate] = useState<Date | null>(null);
+	const [time, setTime] = useState("00:00");
+
+	const commitValue = useCallback(
+		(date: Date, timeStr: string) => {
+			if (anyYear) {
+				onChange(`${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`);
+			} else {
+				const [h, m] = timeStr.split(":").map(Number);
+				const ts =
+					Date.UTC(date.getFullYear(), date.getMonth(), date.getDate(), h || 0, m || 0) / 1000;
+				onChange(String(Math.floor(ts)));
+			}
+		},
+		[anyYear, onChange],
+	);
 
 	const handleDaySelect = useCallback(
 		(date: Date | undefined) => {
 			if (!date) return;
-			if (anyYear) {
-				onChange(`${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`);
+			if (showTime && !anyYear) {
+				setPendingDate(date);
+				commitValue(date, time);
 			} else {
-				onChange(String(Math.floor(date.getTime() / 1000)));
+				if (anyYear) {
+					onChange(`${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`);
+				} else {
+					onChange(String(Math.floor(date.getTime() / 1000)));
+				}
+				setOpen(false);
 			}
-			setOpen(false);
 		},
-		[anyYear, onChange],
+		[anyYear, onChange, showTime, time, commitValue],
+	);
+
+	const handleTimeChange = useCallback(
+		(newTime: string) => {
+			setTime(newTime);
+			const date = pendingDate ?? selectedDate;
+			if (date) commitValue(date, newTime);
+		},
+		[pendingDate, selectedDate, commitValue],
 	);
 
 	const handleMonthSelect = useCallback(
@@ -126,11 +205,27 @@ export function DatePicker({
 		[onChange],
 	);
 
+	const handleOpenChange = useCallback(
+		(isOpen: boolean) => {
+			if (isOpen) {
+				const existing = parseToDate(value);
+				if (existing) {
+					setTime(`${pad2(existing.getUTCHours())}:${pad2(existing.getUTCMinutes())}`);
+				} else {
+					setTime("00:00");
+				}
+				setPendingDate(null);
+			}
+			setOpen(isOpen);
+		},
+		[value],
+	);
+
 	return (
-		<Popover.Root open={open} onOpenChange={setOpen}>
+		<Popover.Root open={open} onOpenChange={handleOpenChange}>
 			<Popover.Trigger asChild>
 				<button type="button" className="date-picker__trigger">
-					{formatDisplay(value, mode, anyYear)}
+					{formatDisplay(value, mode, anyYear, anyTime)}
 				</button>
 			</Popover.Trigger>
 			<Popover.Portal>
@@ -141,30 +236,69 @@ export function DatePicker({
 					collisionPadding={8}
 					onOpenAutoFocus={(e) => e.preventDefault()}
 				>
-					{mode === "month" ? (
+					{anyTime ? (
+						<div className="date-picker__time-only">
+							<label>
+								Time of day:
+								<input
+									type="time"
+									value={/^\d{2}:\d{2}$/.test(value) ? value : ""}
+									onChange={(e) => onChange(e.target.value)}
+								/>
+							</label>
+						</div>
+					) : mode === "month" ? (
 						<MonthGrid value={value} onChange={handleMonthSelect} anyYear={anyYear} />
 					) : (
-						<DayPicker
-							mode="single"
-							selected={selectedDate}
-							onSelect={handleDaySelect}
-							month={navMonth}
-							onMonthChange={setNavMonth}
-							captionLayout="dropdown"
-							navLayout="around"
-							startMonth={new Date(2007, 0)}
-							endMonth={new Date(new Date().getFullYear() + 1, 11)}
-						/>
-					)}
-					{showAnyYear && (
-						<label className="date-picker__any-year">
-							<input
-								type="checkbox"
-								checked={anyYear ?? false}
-								onChange={(e) => onAnyYearToggle?.(e.target.checked)}
+						<>
+							<DayPicker
+								mode="single"
+								selected={pendingDate ?? selectedDate}
+								onSelect={handleDaySelect}
+								month={navMonth}
+								onMonthChange={setNavMonth}
+								captionLayout="dropdown"
+								navLayout="around"
+								startMonth={new Date(2007, 0)}
+								endMonth={new Date(new Date().getFullYear() + 1, 11)}
 							/>
-							Any year
-						</label>
+							{showTime && !anyYear && (
+								<div className="date-picker__time">
+									<label>
+										Time (UTC):
+										<input
+											type="time"
+											value={time}
+											onChange={(e) => handleTimeChange(e.target.value)}
+										/>
+									</label>
+								</div>
+							)}
+						</>
+					)}
+					{(showAnyYear || showAnyTime) && (
+						<div className="date-picker__toggles">
+							{showAnyYear && (
+								<label className="date-picker__any-year">
+									<input
+										type="checkbox"
+										checked={anyYear ?? false}
+										onChange={(e) => onAnyYearToggle?.(e.target.checked)}
+									/>
+									Any year
+								</label>
+							)}
+							{showAnyTime && (
+								<label className="date-picker__any-year">
+									<input
+										type="checkbox"
+										checked={anyTime ?? false}
+										onChange={(e) => onAnyTimeToggle?.(e.target.checked)}
+									/>
+									Any date
+								</label>
+							)}
+						</div>
 					)}
 				</Popover.Content>
 			</Popover.Portal>

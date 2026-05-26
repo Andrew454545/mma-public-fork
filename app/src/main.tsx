@@ -7,6 +7,7 @@ import App from "@/App.tsx";
 import { initLogging, log } from "@/lib/util/log";
 import { initStore, openMap, flushSave } from "@/store/useMapStore";
 import { cmd } from "@/lib/commands";
+import { checkForUpdateOnStartup } from "@/lib/util/updateCheck";
 import "@/api";
 import "@/store/commandDefs.add";
 
@@ -46,6 +47,8 @@ async function boot() {
 	createRoot(document.getElementById("root")!).render(<App />);
 
 	getCurrentWindow().show();
+
+	setTimeout(checkForUpdateOnStartup, 5000);
 }
 
 boot();

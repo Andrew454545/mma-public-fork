@@ -11,7 +11,7 @@ import {
 	importPaste,
 } from "@/store/useMapStore";
 import { activatePlugins, deactivatePlugins } from "@/plugins/registry";
-import { getGoogleMap as getGoogleMapInstance } from "@/lib/map/mapState";
+import { getGoogleMap as getGoogleMapInstance, waitForGoogleMap } from "@/lib/map/mapState";
 import { pluginsReady } from "@/plugins";
 import { MapEmbed } from "@/components/editor/map/MapEmbed";
 import { MapMetaBar } from "@/components/editor/map/MapMetaBar";
@@ -132,7 +132,7 @@ export function MapEditor() {
 
 	useEffect(() => {
 		let cancelled = false;
-		pluginsReady.then(() => {
+		Promise.all([pluginsReady, waitForGoogleMap()]).then(() => {
 			if (cancelled) return;
 			activatePlugins();
 		});

@@ -964,7 +964,8 @@ function rebuild() {
     radiusPixels: settings.radiusPixels,
     intensity: settings.intensity,
     threshold: settings.threshold,
-    opacity: settings.opacity
+    opacity: settings.opacity,
+    debounceTimeout: 100
   });
   overlay.setProps({ layers: [layer] });
 }

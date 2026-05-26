@@ -18,7 +18,7 @@ import { registerEnrichFields, registerEnrichmentProvider } from "@/lib/data/fie
 import { invoke } from "@tauri-apps/api/core";
 import { Command } from "@tauri-apps/plugin-shell";
 import { open as dialogOpen, save as dialogSave } from "@tauri-apps/plugin-dialog";
-import { getGoogleMap } from "@/lib/map/mapState";
+import { getGoogleMap, waitForGoogleMap } from "@/lib/map/mapState";
 import { subscribe, type EditorEvent } from "@/lib/events";
 import { setSetting, getSettings } from "@/store/settings.add";
 import { getSeenEntries, getSeenCount, clearSeen } from "@/lib/seen/seen.add";
@@ -55,6 +55,7 @@ const mma = {
 
 	// --- Google Maps ---
 	getGoogleMap: () => getGoogleMap(),
+	waitForGoogleMap: () => waitForGoogleMap(),
 
 	// --- Settings ---
 	setSetting,

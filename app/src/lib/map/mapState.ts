@@ -1,11 +1,28 @@
 let googleMap: google.maps.Map | null = null;
+let mapReadyResolve: ((map: google.maps.Map) => void) | null = null;
+let mapReadyPromise: Promise<google.maps.Map> | null = null;
 
 export function setGoogleMap(map: google.maps.Map | null) {
 	googleMap = map;
+	if (map && mapReadyResolve) {
+		mapReadyResolve(map);
+		mapReadyResolve = null;
+	}
+	if (!map) {
+		mapReadyPromise = null;
+	}
 }
 
 export function getGoogleMap(): google.maps.Map | null {
 	return googleMap;
+}
+
+export function waitForGoogleMap(): Promise<google.maps.Map> {
+	if (googleMap) return Promise.resolve(googleMap);
+	if (!mapReadyPromise) {
+		mapReadyPromise = new Promise((resolve) => { mapReadyResolve = resolve; });
+	}
+	return mapReadyPromise;
 }
 
 type ClickInterceptor = (lat: number, lng: number) => boolean;

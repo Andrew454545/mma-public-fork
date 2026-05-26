@@ -74,6 +74,7 @@ export function registerPlugin(plugin: Plugin | PluginBehavior) {
 	} else {
 		plugins.set((plugin as Plugin).id, plugin as Plugin);
 	}
+	notifyRegistry();
 }
 
 export function getPlugins(): Plugin[] {

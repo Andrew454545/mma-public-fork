@@ -18,7 +18,8 @@ export function PluginToolbar() {
 
 	if (plugins.length === 0) return null;
 
-	const toolbarPlugins = plugins.filter((p) => p.modal || p.sidebar);
+	const toolbarPlugins = plugins.filter((p) => p.modal || p.sidebar)
+		.sort((a, b) => a.name.localeCompare(b.name));
 	const modalPlugin = modalId ? plugins.find((p) => p.id === modalId && p.modal) : null;
 
 	if (toolbarPlugins.length === 0 && !modalPlugin) return null;

@@ -65,6 +65,7 @@ function rebuild() {
 		intensity: settings.intensity,
 		threshold: settings.threshold,
 		opacity: settings.opacity,
+		debounceTimeout: 100,
 	});
 
 	overlay.setProps({ layers: [layer] });

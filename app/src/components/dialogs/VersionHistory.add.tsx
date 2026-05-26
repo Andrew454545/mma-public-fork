@@ -40,6 +40,7 @@ export function VersionHistory({ onClose }: { onClose: () => void }) {
 	const [commits, setCommits] = useState<CommitInfo[]>([]);
 	const [loading, setLoading] = useState(true);
 	const [restoring, setRestoring] = useState<string | null>(null);
+	const [confirmingId, setConfirmingId] = useState<string | null>(null);
 
 	useEffect(() => {
 		if (!map) return;
@@ -51,10 +52,12 @@ export function VersionHistory({ onClose }: { onClose: () => void }) {
 
 	if (!map || loading) return null;
 
-	const handleRestore = async (commit: CommitInfo, isLatest: boolean) => {
-		const label = commit.id.slice(0, 7);
-		const action = isLatest ? "Discard uncommitted changes?" : `Restore to ${label}?`;
-		if (!confirm(`${action} Current state will be saved as a new commit.`)) return;
+	const handleRestore = async (commit: CommitInfo) => {
+		if (confirmingId !== commit.id) {
+			setConfirmingId(commit.id);
+			return;
+		}
+		setConfirmingId(null);
 		setRestoring(commit.id);
 		await checkoutCommit(commit.id);
 		setRestoring(null);
@@ -118,11 +121,18 @@ export function VersionHistory({ onClose }: { onClose: () => void }) {
 											</td>
 											<td style={{ padding: "6px 8px" }}>
 												<button
-													className="button"
+													className={`button${confirmingId === c.id ? " button--destructive" : ""}`}
 													disabled={restoring !== null}
-													onClick={() => handleRestore(c, i === 0)}
+													onClick={() => handleRestore(c)}
+													onBlur={() => confirmingId === c.id && setConfirmingId(null)}
 												>
-													{restoring === c.id ? "Restoring..." : i === 0 ? "Revert" : "Restore"}
+													{restoring === c.id
+														? "Restoring..."
+														: confirmingId === c.id
+															? "Are you sure?"
+															: i === 0
+																? "Revert"
+																: "Restore"}
 												</button>
 											</td>
 										</tr>

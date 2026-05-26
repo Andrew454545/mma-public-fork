@@ -68,6 +68,7 @@ export function SeenDialog({
 	const [page, setPage] = useState(0);
 	const [loading, setLoading] = useState(false);
 	const [ready, setReady] = useState(false);
+	const [confirmingClear, setConfirmingClear] = useState(false);
 
 	const [countries, setCountries] = useState<string[]>([]);
 	const [maps, setMaps] = useState<{ id: string; name: string }[]>([]);
@@ -131,7 +132,11 @@ export function SeenDialog({
 	};
 
 	const handleClear = async () => {
-		if (!confirm("Clear all seen history?")) return;
+		if (!confirmingClear) {
+			setConfirmingClear(true);
+			return;
+		}
+		setConfirmingClear(false);
 		await clearSeen();
 		setEntries([]);
 		setTotal(0);
@@ -183,8 +188,12 @@ export function SeenDialog({
 					)}
 				</div>
 				<div className="seen-dialog__footer">
-					<button className="button button--danger" onClick={handleClear}>
-						Clear
+					<button
+						className="button button--danger"
+						onClick={handleClear}
+						onBlur={() => setConfirmingClear(false)}
+					>
+						{confirmingClear ? "Are you sure?" : "Clear"}
 					</button>
 					<div className="seen-dialog__pagination">
 						<button

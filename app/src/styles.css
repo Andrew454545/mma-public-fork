@@ -3562,6 +3562,10 @@ summary.button {
 	padding-inline: 0.25rem;
 	display: grid;
 	overflow-y: auto;
+	scrollbar-width: none;
+}
+.map-overview::-webkit-scrollbar {
+	display: none;
 }
 .sv-opacity-control {
 	align-content: center;

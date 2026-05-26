@@ -446,7 +446,8 @@ function syncMutationResult(r: MutationResult) {
 		currentMap.meta.locationCount !== r.locationCount ||
 		undoRedoState.canUndo !== r.canUndo ||
 		undoRedoState.canRedo !== r.canRedo ||
-		r.newFieldDefs != null;
+		r.newFieldDefs != null ||
+		r.tags != null;
 	currentMap = {
 		...currentMap,
 		meta: {

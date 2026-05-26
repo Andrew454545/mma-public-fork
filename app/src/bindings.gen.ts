@@ -93,8 +93,8 @@ export const commands = {
 	 */
 	storeUpdateTag: (tagId: number, name: string | null, color: string | null) => typedError<MutationResult_Serialize, string>(__TAURI_INVOKE("store_update_tag", { tagId, name, color })).then((v) => ((v.status === "ok" ? { ...v, data: ({...v.data,delta:({...v.data.delta,added:v.data.delta.added.map(i=>i),updated:v.data.delta.updated.map(i=>({...i,lng:i.lng==null?i.lng:i.lng,lat:i.lat==null?i.lat:i.lat,heading:i.heading==null?i.heading:i.heading}))})}) } : v) as typeof v)),
 	/**
-	 *  Remove tags from all locations AND from the tag map. Full delete, not soft.
-	 *  Returns MutationResult with `tags` populated.
+	 *  Strip tags from all locations. Tags stay in `store.tags` with count=0 /
+	 *  visible=false so undo can revive them. Returns MutationResult with `tags`.
 	 */
 	storeDeleteTags: (tagIds: number[]) => typedError<MutationResult_Serialize, string>(__TAURI_INVOKE("store_delete_tags", { tagIds })).then((v) => ((v.status === "ok" ? { ...v, data: ({...v.data,delta:({...v.data.delta,added:v.data.delta.added.map(i=>i),updated:v.data.delta.updated.map(i=>({...i,lng:i.lng==null?i.lng:i.lng,lat:i.lat==null?i.lat:i.lat,heading:i.heading==null?i.heading:i.heading}))})}) } : v) as typeof v)),
 	/**  Remove the given tag IDs from every location that has them. Returns a MutationResult. */

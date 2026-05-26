@@ -194,8 +194,8 @@ registerCommand({
 	label: "Delete selected tags",
 	icon: mdiTagRemove,
 	group: "Tags",
-	execute: () => {
-		deleteTags(getSelections().filter((s) => s.props.type === "Tag").map((s) => (s.props as { type: "Tag"; tagId: number }).tagId));
+	execute: async () => {
+		await deleteTags(getSelections().filter((s) => s.props.type === "Tag").map((s) => (s.props as { type: "Tag"; tagId: number }).tagId));
 	},
 	enabled: () => getSelections().some((s) => s.props.type === "Tag"),
 });

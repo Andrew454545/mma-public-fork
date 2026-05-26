@@ -258,6 +258,9 @@ impl Store {
 
         let mut tags = None;
         let mut vis_changed = false;
+        // NOTE: tags created with count=0 (via store_create_tags) will be
+        // flipped to visible=false here on the next unrelated mutation.
+        // Create is followed by assign so this shouldn't matter.
         for tag in self.tags.values_mut() {
             let should = tag.count > 0;
             if tag.visible != should {
@@ -1501,8 +1504,8 @@ pub fn store_update_tag(
     Ok(result)
 }
 
-/// Remove tags from all locations AND from the tag map. Full delete, not soft.
-/// Returns MutationResult with `tags` populated.
+/// Strip tags from all locations. Tags stay in `store.tags` with count=0 /
+/// visible=false so undo can revive them. Returns MutationResult with `tags`.
 #[tauri::command]
 #[specta::specta]
 pub fn store_delete_tags(

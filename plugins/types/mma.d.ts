@@ -189,6 +189,13 @@ export type MutationResult_Serialize = {
 		[key in number]: Tag;
 	} | null;
 } & StoreStatus;
+export type PastePreviewResult = {
+	preview: EditorImportPreview;
+	positions: ([
+		number,
+		number
+	])[];
+};
 export type PluginManifest = {
 	id: string;
 	name: string;
@@ -387,11 +394,33 @@ export type Tag = {
 };
 type Location$1 = Location_Serialize;
 type Tag$1 = Tag;
+export type ImportPreview = EditorImportPreview;
 declare function createLocation(partial: Partial<Location$1> & {
 	lat: number;
 	lng: number;
 }): Location$1;
 export type WorkArea = "overview" | "location" | "duplicates" | "import" | "plugin";
+export type RenderDelta = RenderDelta_Serialize;
+declare enum ValidationState {
+	Ok = 0,
+	UpdateAvailable = 1,
+	UpdateApplied = 2,
+	NotFound = 3,
+	PanoIdBroke = 4,
+	Unofficial = 5,
+	GoodcamAvailable = 6
+}
+export type FilterOp = "eq" | "neq" | "gt" | "lt" | "gte" | "lte" | "between" | "between_anyyear" | "has" | "nothas";
+export interface StagedImport {
+	name: string;
+	locationCount: number;
+	preview: ImportPreview;
+	positions: Float32Array;
+	droppedFields: Set<string>;
+	tagName: string;
+	source: "file" | "paste";
+	pasteText?: string;
+}
 export interface PluginSettingDef {
 	key: string;
 	label: string;
@@ -804,16 +833,6 @@ export type OpenDialogReturn<T extends OpenDialogOptions> = T["directory"] exten
 declare function open$1<T extends OpenDialogOptions>(options?: T): Promise<OpenDialogReturn<T>>;
 declare function save(options?: SaveDialogOptions): Promise<string | null>;
 export type EditorEvent = "location:add" | "location:remove" | "location:update" | "selection:change" | "map:open" | "map:close";
-declare enum ValidationState {
-	Ok = 0,
-	UpdateAvailable = 1,
-	UpdateApplied = 2,
-	NotFound = 3,
-	PanoIdBroke = 4,
-	Unofficial = 5,
-	GoodcamAvailable = 6
-}
-export type FilterOp = "eq" | "neq" | "gt" | "lt" | "gte" | "lte" | "between" | "between_anyyear" | "has" | "nothas";
 export interface SavedSelectionItem {
 	props: SavedSelectionProps;
 	color: [
@@ -930,7 +949,6 @@ export interface EnrichResult {
 	dateSuccess: number[];
 	dateFailed: number[];
 }
-export type RenderDelta = RenderDelta_Serialize;
 export type Handler = (...args: unknown[]) => void;
 declare const mma: {
 	cmd: {
@@ -1022,6 +1040,11 @@ declare const mma: {
 		bulkImportPreview: (path: string) => Promise<ImportPreviewEntry[]>;
 		bulkImportConfirm: (path: string, selectedIndices: number[]) => Promise<ImportedMapInfo[]>;
 		storeImportPreview: (path: string) => Promise<EditorImportPreview>;
+		storeImportPreviewLocations: () => Promise<[
+			number,
+			number
+		][]>;
+		storePastePreview: (text: string) => Promise<PastePreviewResult>;
 		storeImportFile: (droppedFields: string[]) => Promise<EditorImportResult_Serialize>;
 		storeImportPaste: (text: string) => Promise<[
 			EditorImportResult_Serialize,
@@ -1232,6 +1255,14 @@ declare const mma: {
 		EditorImportResult_Serialize,
 		number | null
 	]>;
+	useStagedImport(): StagedImport | null;
+	getStagedImport(): StagedImport | null;
+	stageFileImport(): Promise<void>;
+	stagePasteImport(text: string): Promise<void>;
+	updateStagedDroppedFields(fields: Set<string>): void;
+	updateStagedTag(tagName: string): void;
+	commitStagedImport(): Promise<void>;
+	discardStagedImport(): void;
 	beginReview(locationIds: number[]): Promise<void>;
 	cancelReview(): void;
 	reviewNext(): Promise<void>;

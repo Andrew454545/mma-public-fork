@@ -1,0 +1,141 @@
+.pivot-sidebar__header {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 12px;
+	border-bottom: 1px solid var(--border-color);
+}
+
+.pivot-sidebar__title {
+	font-size: 14px;
+	font-weight: 600;
+	margin: 0;
+}
+
+.pivot-sidebar__controls {
+	padding: 12px;
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	border-bottom: 1px solid var(--border-color);
+}
+
+.pivot-sidebar__control {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+}
+
+.pivot-sidebar__control-label {
+	font-size: 11px;
+	color: var(--text-secondary);
+}
+
+.pivot-sidebar__body {
+	flex: 1;
+	overflow: hidden;
+	display: flex;
+	flex-direction: column;
+}
+
+.pivot-sidebar__empty {
+	padding: 24px 12px;
+	font-size: 12px;
+	color: var(--text-secondary);
+	text-align: center;
+}
+
+.pivot-sidebar__table-wrap {
+	overflow: auto;
+	flex: 1;
+}
+
+.pivot-sidebar__table {
+	border-collapse: collapse;
+	font-size: 11px;
+	min-width: 100%;
+}
+
+.pivot-sidebar__table thead th {
+	position: sticky;
+	top: 0;
+	background: var(--bg-primary);
+	text-align: right;
+	padding: 6px 8px;
+	white-space: nowrap;
+	color: var(--text-secondary);
+	font-weight: 500;
+	border-bottom: 1px solid var(--border-color);
+	z-index: 1;
+}
+
+.pivot-sidebar__th-sort {
+	cursor: pointer;
+	user-select: none;
+}
+
+.pivot-sidebar__th-sort:hover {
+	color: var(--text-primary);
+}
+
+.pivot-sidebar__th-corner {
+	text-align: left !important;
+	position: sticky;
+	left: 0;
+	z-index: 3 !important;
+}
+
+.pivot-sidebar__table tbody td {
+	padding: 5px 8px;
+	text-align: right;
+	font-variant-numeric: tabular-nums;
+	color: var(--text-primary);
+	border-bottom: 1px solid var(--border-color-subtle, rgba(255, 255, 255, 0.04));
+}
+
+.pivot-sidebar__row-label {
+	text-align: left !important;
+	position: sticky;
+	left: 0;
+	background: var(--bg-primary);
+	z-index: 2;
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	white-space: nowrap;
+}
+
+.pivot-sidebar__row-name {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	max-width: 120px;
+}
+
+.pivot-sidebar__swatch {
+	width: 8px;
+	height: 8px;
+	border-radius: 2px;
+	flex-shrink: 0;
+}
+
+.pivot-sidebar__cell--zero {
+	opacity: 0.25;
+}
+
+.pivot-sidebar__cell--total {
+	font-weight: 600;
+}
+
+.pivot-sidebar__table tfoot td {
+	font-weight: 600;
+	border-top: 1px solid var(--border-color);
+	padding: 6px 8px;
+	text-align: right;
+	position: sticky;
+	bottom: 0;
+	background: var(--bg-primary);
+}
+
+.pivot-sidebar__table tfoot .pivot-sidebar__row-label {
+	z-index: 3;
+}

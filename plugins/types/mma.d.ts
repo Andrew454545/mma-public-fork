@@ -6,6 +6,33 @@ import { ComponentType } from 'react';
 
 declare function preloadModules(ids: string[]): Promise<void>;
 declare function getAvailableExternals(): string[];
+export interface PluginSettingDef {
+	key: string;
+	label: string;
+	type: "boolean" | "string" | "number";
+	default: unknown;
+}
+interface Plugin$1 {
+	id: string;
+	name: string;
+	description?: string;
+	icon: string;
+	comingSoon?: boolean;
+	core?: boolean;
+	settings?: PluginSettingDef[];
+	activate(): void | (() => void);
+	modal?: ComponentType<{
+		onClose: () => void;
+	}>;
+	sidebar?: ComponentType<{
+		onClose: () => void;
+	}>;
+	locationPanel?: ComponentType;
+}
+export type PluginBehavior = Partial<Plugin$1> & {
+	activate(): void | (() => void);
+};
+declare function registerPlugin(plugin: Plugin$1 | PluginBehavior): void;
 export type CellRemoval = {
 	cell: string;
 	cellIndex: number;
@@ -199,14 +226,14 @@ export type PluginManifest = {
 	main: string;
 };
 export type PolygonGeometry = {
-	coordinates: (([
+	coordinates: [
 		number,
 		number
-	])[])[];
-	extraPolygons?: ((([
+	][][];
+	extraPolygons?: [
 		number,
 		number
-	])[])[])[] | null;
+	][][][] | null;
 	properties?: any | null;
 };
 export type RenderDelta_Serialize = {
@@ -394,32 +421,6 @@ declare function createLocation(partial: Partial<Location$1> & {
 	lng: number;
 }): Location$1;
 export type WorkArea = "overview" | "location" | "duplicates" | "import" | "plugin";
-export interface PluginSettingDef {
-	key: string;
-	label: string;
-	type: "boolean" | "string" | "number";
-	default: unknown;
-}
-interface Plugin$1 {
-	id: string;
-	name: string;
-	description?: string;
-	icon: string;
-	comingSoon?: boolean;
-	settings?: PluginSettingDef[];
-	activate(): void | (() => void);
-	modal?: ComponentType<{
-		onClose: () => void;
-	}>;
-	sidebar?: ComponentType<{
-		onClose: () => void;
-	}>;
-	locationPanel?: ComponentType;
-}
-export type PluginBehavior = Partial<Plugin$1> & {
-	activate(): void | (() => void);
-};
-declare function registerPlugin(plugin: Plugin$1 | PluginBehavior): void;
 export interface EnrichFieldOption {
 	key: string;
 	label: string;
@@ -941,6 +942,8 @@ declare const mma: {
 		getAppDataDir: () => Promise<string>;
 		openDataFolder: () => Promise<null>;
 		listUserPlugins: () => Promise<PluginManifest[]>;
+		installPlugin: (id: string) => Promise<PluginManifest>;
+		uninstallPlugin: (id: string) => Promise<null>;
 		reverseGeocode: (lat: number, lng: number) => Promise<{
 			city: string;
 			admin: string;
@@ -1072,6 +1075,7 @@ declare const mma: {
 	getAvailableExternals: typeof getAvailableExternals;
 	createLocation: typeof createLocation;
 	getGoogleMap: () => google.maps.Map | null;
+	waitForGoogleMap: () => Promise<google.maps.Map>;
 	setSetting: typeof setSetting;
 	getSettings: () => {
 		showCameraBadges: boolean;
@@ -1184,8 +1188,8 @@ declare const mma: {
 	}[]): Promise<void | MutationResult_Serialize>;
 	patchLocationExtra(locId: number, extraPatch: Record<string, unknown>, replace?: boolean): void;
 	useSelections(): Selection$1[];
-	addSelection(props: SelectionProps): Promise<void>;
-	removeSelection(key: string): Promise<void>;
+	addSelections(props: SelectionProps[]): Promise<void>;
+	removeSelections(keys: string[]): Promise<void>;
 	resetSelections(): Promise<void>;
 	selectIntersection(keys?: string[] | null): Promise<void>;
 	selectUnion(keys?: string[] | null): Promise<void>;
@@ -1201,11 +1205,14 @@ declare const mma: {
 	selectPolygon(polygon: PolygonGeometry, includeInformational?: boolean): Promise<void>;
 	selectFilter(field: string, op: FilterOp, value: unknown, value2?: unknown): Promise<void>;
 	setPolygonName(key: string, name: string): Promise<void>;
-	setSelectionColor(key: string, color: [
-		number,
-		number,
-		number
-	]): void;
+	setSelectionColors(entries: {
+		key: string;
+		color: [
+			number,
+			number,
+			number
+		];
+	}[]): void;
 	reorderSelection(fromKey: string, toKey: string, position: "before" | "after"): void;
 	composeSelections(dragKey: string, dropKey: string, mode: "intersection" | "union", dragParent: string | null, dropParent: string | null): void;
 	decomposeChild(parentKey: string, childKey: string): void;

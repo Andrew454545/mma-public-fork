@@ -4,21 +4,40 @@ import { invoke as __TAURI_INVOKE } from "@tauri-apps/api/core";
 
 /** Commands */
 export const commands = {
+	/**
+	 *  Write arbitrary text content to a named temp file (`mma_{name}`). Returns the path.
+	 *  Used by JS to pass large payloads via file instead of IPC serialization.
+	 */
 	writeTempFile: (name: string, content: string) =>
 		typedError<string, string>(__TAURI_INVOKE("write_temp_file", { name, content })),
+	/**  Read a file from disk as UTF-8 text. Used by JS to read temp files and plugin sources. */
 	readFile: (path: string) => typedError<string, string>(__TAURI_INVOKE("read_file", { path })),
+	/**  Return the platform-specific app data directory path (e.g., `%LOCALAPPDATA%/app.map-making.local`). */
 	getAppDataDir: () => typedError<string, string>(__TAURI_INVOKE("get_app_data_dir")),
+	/**  Open the app data directory in the OS file explorer. */
 	openDataFolder: () => typedError<null, string>(__TAURI_INVOKE("open_data_folder")),
+	/**  Scan the `plugins/` directory under app data and return manifests for all installed plugins. */
 	listUserPlugins: () => __TAURI_INVOKE<PluginManifest[]>("list_user_plugins"),
+	/**
+	 *  Download a plugin from the GitHub plugin repository and install it to the local plugins directory.
+	 *  Fetches `manifest.json` and the main JS file specified in the manifest.
+	 */
 	installPlugin: (id: string) =>
 		typedError<PluginManifest, string>(__TAURI_INVOKE("install_plugin", { id })),
+	/**  Remove a plugin by deleting its directory from the local plugins folder. */
 	uninstallPlugin: (id: string) =>
 		typedError<null, string>(__TAURI_INVOKE("uninstall_plugin", { id })),
+	/**
+	 *  Finds the nearest city/country for a coordinate. O(log n) k-d tree lookup.
+	 *  Always returns `Some` -- the GeoNames dataset covers every landmass.
+	 */
 	reverseGeocode: (lat: number, lng: number) =>
 		__TAURI_INVOKE<{
 			city: string;
+			/**  First-level administrative division (state, province, region). */
 			admin: string;
 			country: string;
+			/**  ISO 3166-1 alpha-2 (e.g. "US", "FR"). */
 			country_code: string;
 		} | null>("reverse_geocode", { lat, lng }),
 	/**
@@ -27,6 +46,10 @@ export const commands = {
 	 */
 	storeOpenMap: (mapId: string) =>
 		typedError<StoreStatus, string>(__TAURI_INVOKE("store_open_map", { mapId })),
+	/**
+	 *  Close the current map: bake overlay, flush Arrow + tags + edit history to disk, then
+	 *  release all in-memory state (batch, mmap, indexes, selections, undo stacks).
+	 */
 	storeCloseMap: () => typedError<null, string>(__TAURI_INVOKE("store_close_map")),
 	/**
 	 *  Delta-only autosave: writes only dirty geohash chunks to disk (~17ms).
@@ -38,7 +61,9 @@ export const commands = {
 	 *  Expensive at 10M+ rows — only called on commit, not on autosave.
 	 */
 	storeBakeAndSave: () => typedError<null, string>(__TAURI_INVOKE("store_bake_and_save")),
+	/**  Lightweight status query: location count, version, and dirty flag. */
 	storeGetSummary: () => typedError<SummaryResult, string>(__TAURI_INVOKE("store_get_summary")),
+	/**  Return metadata for every map in the database. */
 	storeListMaps: () =>
 		typedError<MapMeta[], string>(__TAURI_INVOKE("store_list_maps")).then(
 			(v) =>
@@ -58,6 +83,7 @@ export const commands = {
 						}
 					: v) as typeof v,
 		),
+	/**  Fetch a single map's metadata by ID. Returns `None` if not found. */
 	storeGetMap: (id: string) =>
 		typedError<
 			{
@@ -88,6 +114,10 @@ export const commands = {
 						}
 					: v) as typeof v,
 		),
+	/**
+	 *  Create a new empty map with default settings. Returns the full metadata
+	 *  (including the generated UUID) so the frontend can navigate to it immediately.
+	 */
 	storeCreateMap: (name: string, folder: string | null) =>
 		typedError<MapData, string>(__TAURI_INVOKE("store_create_map", { name, folder })).then(
 			(v) =>
@@ -110,8 +140,18 @@ export const commands = {
 						}
 					: v) as typeof v,
 		),
+	/**
+	 *  Delete a map and all associated data: SQLite rows (maps, edit_history,
+	 *  commits, orphaned commit_trees) and Arrow IPC files on disk.
+	 */
 	storeDeleteMap: (id: string) =>
 		typedError<null, string>(__TAURI_INVOKE("store_delete_map", { id })),
+	/**
+	 *  Apply a partial update to a map's metadata. Dynamically builds the SQL
+	 *  UPDATE from non-`None` fields in the patch. Also syncs `known_field_keys`
+	 *  on the in-memory store when extra fields change, so auto-registration
+	 *  doesn't re-discover fields the user explicitly defined.
+	 */
 	storeUpdateMapMeta: (id: string, patch: MapMetaPatch) =>
 		typedError<null, string>(
 			__TAURI_INVOKE("store_update_map_meta", {
@@ -132,17 +172,34 @@ export const commands = {
 				},
 			}),
 		),
+	/**
+	 *  Update `last_opened_at` to the current timestamp. Used to sort the map
+	 *  list by recency in the dashboard.
+	 */
 	storeTouchMapOpened: (mapId: string) =>
 		typedError<null, string>(__TAURI_INVOKE("store_touch_map_opened", { mapId })),
+	/**  Rename a folder across all maps that reference it. */
 	storeRenameFolder: (from: string, to: string) =>
 		typedError<null, string>(__TAURI_INVOKE("store_rename_folder", { from, to })),
+	/**  Delete a folder by setting all its maps' folder to `NULL` (moves them to root). */
 	storeDeleteFolder: (name: string) =>
 		typedError<null, string>(__TAURI_INVOKE("store_delete_folder", { name })),
+	/**
+	 *  Look up a cached exact pano capture timestamp. Returns `None` on cache miss.
+	 *  The `pano_date_cache` table avoids re-running the expensive binary search
+	 *  RPC in `resolveExactTimestamp` for panos we've already resolved.
+	 */
 	storeGetPanoDate: (panoId: string) =>
 		typedError<number | null, string>(__TAURI_INVOKE("store_get_pano_date", { panoId })),
+	/**  Cache an exact pano capture timestamp (unix millis) for future lookups. */
 	storeSetPanoDate: (panoId: string, timestamp: number) =>
 		typedError<null, string>(__TAURI_INVOKE("store_set_pano_date", { panoId, timestamp })),
+	/**  List all user-created tables with their row counts. Excludes SQLite internals. */
 	storeDbTableInfo: () => typedError<DbTableInfo[], string>(__TAURI_INVOKE("store_db_table_info")),
+	/**
+	 *  Add new locations. IDs are allocated server-side (monotonic). Records an undo entry
+	 *  and clears the redo stack.
+	 */
 	storeAddLocations: (locations: Location_Deserialize[]) =>
 		typedError<MutationResult_Serialize, string>(
 			__TAURI_INVOKE("store_add_locations", { locations: locations.map((i) => i) }),
@@ -167,6 +224,7 @@ export const commands = {
 						}
 					: v) as typeof v,
 		),
+	/**  Remove locations by ID. Snapshots the full location data for undo before deleting. */
 	storeRemoveLocations: (ids: number[]) =>
 		typedError<MutationResult_Serialize, string>(
 			__TAURI_INVOKE("store_remove_locations", { ids }),
@@ -191,6 +249,11 @@ export const commands = {
 						}
 					: v) as typeof v,
 		),
+	/**
+	 *  Apply partial patches to existing locations. `record_undo` defaults to true;
+	 *  set to false for ephemeral updates (e.g., plugin-driven batch modifications
+	 *  that manage their own undo).
+	 */
 	storeUpdateLocations: (
 		updates: [number, LocationPatch_Deserialize][],
 		recordUndo: boolean | null,
@@ -231,21 +294,38 @@ export const commands = {
 						}
 					: v) as typeof v,
 		),
+	/**
+	 *  Set (or clear) the active location. Fire-and-forget from JS; no re-render triggered.
+	 *  JS patches the cell buffer synchronously to hide/show the active marker.
+	 */
 	storeSetActive: (id: number | null) =>
 		typedError<null, string>(__TAURI_INVOKE("store_set_active", { id })),
+	/**  Fetch a single location by ID. Returns `None` if the ID is dead or doesn't exist. */
 	storeGetLocation: (id: number) =>
 		typedError<
 			{
+				/**
+				 *  Monotonically increasing within a map. Zero is a sentinel meaning
+				 *  "not yet assigned" (used during import before IDs are allocated).
+				 */
 				id: number;
 				lat: number;
 				lng: number;
 				heading: number;
 				pitch: number;
+				/**  Street View zoom level (0-5), not map zoom. */
 				zoom: number;
 				panoId: string | null;
+				/**  Bitfield: bit 1 = LoadAsPanoId, bit 2 = Informational. */
 				flags: number;
+				/**  Tag IDs applied to this location. References `Tag.id`. */
 				tags: number[];
+				/**
+				 *  Arbitrary key-value metadata from imports (e.g. GeoGuessr extra fields).
+				 *  Not populated by the editor itself -- preserved round-trip from import data.
+				 */
 				extra?: any | null;
+				/**  ISO 8601 timestamp, generated via `util::now_iso()`. */
 				createdAt: string;
 				modifiedAt?: string | null;
 			} | null,
@@ -259,12 +339,19 @@ export const commands = {
 	 */
 	storeGetLocationFile: (id: number) =>
 		typedError<string | null, string>(__TAURI_INVOKE("store_get_location_file", { id })),
+	/**  Fetch multiple locations by ID. Silently skips IDs that don't exist. */
 	storeGetLocationsByIds: (ids: number[]) =>
 		typedError<Location_Serialize[], string>(
 			__TAURI_INVOKE("store_get_locations_by_ids", { ids }),
 		).then((v) => (v.status === "ok" ? { ...v, data: v.data.map((i) => i) } : v) as typeof v),
+	/**
+	 *  Dump every alive location to a temp JSON file. Returns the file path.
+	 *  Used by export and plugins that need the full dataset.
+	 */
 	storeGetAllLocations: () => typedError<string, string>(__TAURI_INVOKE("store_get_all_locations")),
+	/**  Return the number of alive locations (batch + adds - dead). */
 	storeLocationCount: () => typedError<number, string>(__TAURI_INVOKE("store_location_count")),
+	/**  Compute the bounding box [west, south, east, north] of all alive locations. O(N). */
 	storeBounds: () =>
 		typedError<[number, number, number, number] | null, string>(
 			__TAURI_INVOKE("store_bounds"),
@@ -274,6 +361,7 @@ export const commands = {
 					? { ...v, data: v.data == null ? v.data : v.data.map((i) => i) }
 					: v) as typeof v,
 		),
+	/**  Compute the bounding box of currently selected locations only. O(N). */
 	storeSelectionBounds: () =>
 		typedError<[number, number, number, number] | null, string>(
 			__TAURI_INVOKE("store_selection_bounds"),
@@ -294,8 +382,16 @@ export const commands = {
 		typedError<Location_Serialize[], string>(
 			__TAURI_INVOKE("store_find_nearby", { lat, lng, radiusM }),
 		).then((v) => (v.status === "ok" ? { ...v, data: v.data.map((i) => i) } : v) as typeof v),
+	/**
+	 *  Collect all distinct values for an `extra` field across all alive locations. O(N).
+	 *  Used by the filter UI to populate dropdown options.
+	 */
 	storeExtraFieldValues: (field: string) =>
 		typedError<string[], string>(__TAURI_INVOKE("store_extra_field_values", { field })),
+	/**
+	 *  Create tags by name. Deduplicates case-insensitively: if a tag with the same name
+	 *  already exists, it is made visible instead of creating a duplicate.
+	 */
 	storeCreateTags: (names: string[]) =>
 		typedError<MutationResult_Serialize, string>(
 			__TAURI_INVOKE("store_create_tags", { names }),
@@ -405,6 +501,7 @@ export const commands = {
 						}
 					: v) as typeof v,
 		),
+	/**  Pop the undo stack and reverse the last edit. Pushes the entry onto the redo stack. */
 	storeUndo: () =>
 		typedError<MutationResult_Serialize, string>(__TAURI_INVOKE("store_undo")).then(
 			(v) =>
@@ -427,6 +524,7 @@ export const commands = {
 						}
 					: v) as typeof v,
 		),
+	/**  Pop the redo stack and replay the edit forward. Pushes the entry back onto undo. */
 	storeRedo: () =>
 		typedError<MutationResult_Serialize, string>(__TAURI_INVOKE("store_redo")).then(
 			(v) =>
@@ -449,7 +547,12 @@ export const commands = {
 						}
 					: v) as typeof v,
 		),
+	/**  Clear both undo and redo stacks. Called after a commit to start fresh. */
 	storeResetUndo: () => typedError<null, string>(__TAURI_INVOKE("store_reset_undo")),
+	/**
+	 *  Compute the net diff since last commit by walking the undo stack.
+	 *  Returns (added, removed, modified) counts for the commit dialog.
+	 */
 	storeCommitDiff: () =>
 		typedError<[number, number, number], string>(__TAURI_INVOKE("store_commit_diff")),
 	/**
@@ -458,8 +561,13 @@ export const commands = {
 	 */
 	storeSyncSelections: (sels: SelectionInput[]) =>
 		typedError<SyncSelectionsResult, string>(__TAURI_INVOKE("store_sync_selections", { sels })),
+	/**  Return the union of all currently selected location IDs. */
 	storeGetSelectedIdsList: () =>
 		typedError<number[], string>(__TAURI_INVOKE("store_get_selected_ids_list")),
+	/**
+	 *  Resolve a single selection to its matching location IDs without persisting it.
+	 *  Used by plugins and one-off queries (e.g., tag merge, export filtered).
+	 */
 	storeResolveSelection: (props: SelectionProps) =>
 		typedError<number[], string>(__TAURI_INVOKE("store_resolve_selection", { props })),
 	/**
@@ -468,16 +576,40 @@ export const commands = {
 	 */
 	storeFillRenderFile: (req: RenderRequest) =>
 		typedError<string, string>(__TAURI_INVOKE("store_fill_render_file", { req })),
+	/**
+	 *  Resolve a deck.gl pick result (cell key + index within cell) to a location ID.
+	 *  Called on marker click to map the GPU pick back to a logical location.
+	 */
 	storeResolvePick: (cell: string, cellIndex: number) =>
 		typedError<number | null, string>(__TAURI_INVOKE("store_resolve_pick", { cell, cellIndex })),
+	/**
+	 *  Parse a file (JSON or ZIP of JSONs) and return previews without persisting.
+	 *  Results are cached in `CACHED_PARSE` so `bulk_import_confirm` can skip re-parsing.
+	 *  ZIP files have each `.json` entry parsed in parallel via rayon.
+	 */
 	bulkImportPreview: (path: string) =>
 		typedError<ImportPreviewEntry[], string>(__TAURI_INVOKE("bulk_import_preview", { path })),
+	/**
+	 *  Persist selected maps from a previously previewed import.
+	 *  Uses the cached parse if available; otherwise re-parses the file.
+	 *  Each map gets a new UUID, Arrow IPC file, and SQLite row.
+	 *  Emits `bulk-import-progress` events per map for UI feedback.
+	 */
 	bulkImportConfirm: (path: string, selectedIndices: number[]) =>
 		typedError<ImportedMapInfo[], string>(
 			__TAURI_INVOKE("bulk_import_confirm", { path, selectedIndices }),
 		),
+	/**
+	 *  Parse a file and return field-level statistics for the editor import dialog.
+	 *  Caches the parse result for `store_import_file` to consume.
+	 */
 	storeImportPreview: (path: string) =>
 		typedError<EditorImportPreview, string>(__TAURI_INVOKE("store_import_preview", { path })),
+	/**
+	 *  Commit a previously previewed editor import, optionally dropping fields.
+	 *  Consumes the cached parse from `store_import_preview`. Fields in
+	 *  `dropped_fields` (e.g. `"heading"`, `"extra.countryCode"`) are zeroed/removed.
+	 */
 	storeImportFile: (droppedFields: string[]) =>
 		typedError<EditorImportResult_Serialize, string>(
 			__TAURI_INVOKE("store_import_file", { droppedFields }),
@@ -533,18 +665,55 @@ export const commands = {
 						}
 					: v) as typeof v,
 		),
+	/**
+	 *  Export locations as a map-making.app-compatible JSON file.
+	 *
+	 *  Produces `{name, customCoordinates: [...]}` with optional `extra` block
+	 *  containing tags (with colors as RGB arrays) and field definitions.
+	 *  Heading of exactly 0 is written as 0.001 when `export_unpanned` is set,
+	 *  matching the original app's convention for "no heading specified".
+	 */
 	storeExportJson: (opts: ExportOpts) =>
 		typedError<string, string>(__TAURI_INVOKE("store_export_json", { opts })),
+	/**  Export locations as a minimal lat/lng CSV file. */
 	storeExportCsv: (scope: number[] | null) =>
 		typedError<string, string>(__TAURI_INVOKE("store_export_csv", { scope })),
+	/**
+	 *  Export locations as a GeoJSON FeatureCollection of Point features.
+	 *  Each feature carries its tag names in `properties.tags`.
+	 */
 	storeExportGeojson: (scope: number[] | null, tagsJson: string) =>
 		typedError<string, string>(__TAURI_INVOKE("store_export_geojson", { scope, tagsJson })),
+	/**
+	 *  Export every map in the database as a deflate-compressed ZIP of JSON files.
+	 *
+	 *  Each map becomes one `{name}.json` file in the archive, with full location
+	 *  data, tags, and extra fields. Reads Arrow IPC files directly from disk
+	 *  (bypasses the in-memory store). Duplicate map names get a numeric suffix.
+	 *  Runs on a blocking thread to avoid starving the async runtime.
+	 */
 	storeExportBulkZip: () => typedError<string, string>(__TAURI_INVOKE("store_export_bulk_zip")),
+	/**
+	 *  Delete all rows from a table. Returns the number of deleted rows.
+	 *  Used in the debug panel for cache/history cleanup.
+	 */
 	storeDbClearTable: (table: string) =>
 		typedError<number, string>(__TAURI_INVOKE("store_db_clear_table", { table })),
+	/**
+	 *  Compute aggregate database statistics (map/location/tag/commit counts,
+	 *  database file size, journal mode). Tag count is summed across all maps
+	 *  by parsing each map's tags JSON column.
+	 */
 	storeDbStats: () => typedError<DbStats, string>(__TAURI_INVOKE("store_db_stats")),
+	/**
+	 *  Records a panorama visit and evicts excess entries beyond `MAX_SEEN`.
+	 *
+	 *  Eviction deletes the oldest rows by `entered_at`, so the table acts as a
+	 *  bounded ring buffer without requiring explicit rotation.
+	 */
 	storeSeenWrite: (entry: SeenWriteEntry) =>
 		typedError<null, string>(__TAURI_INVOKE("store_seen_write", { entry })),
+	/**  Returns a page of seen entries, newest first, with optional filtering. */
 	storeSeenList: (
 		limit: number,
 		offset: number,
@@ -557,6 +726,7 @@ export const commands = {
 		typedError<SeenEntry[], string>(
 			__TAURI_INVOKE("store_seen_list", { limit, offset, filter }),
 		).then((v) => (v.status === "ok" ? { ...v, data: v.data.map((i) => i) } : v) as typeof v),
+	/**  Returns the total number of seen entries matching the filter (for pagination). */
 	storeSeenCount: (
 		filter: {
 			country?: string | null;
@@ -564,9 +734,30 @@ export const commands = {
 			search?: string | null;
 		} | null,
 	) => typedError<number, string>(__TAURI_INVOKE("store_seen_count", { filter })),
+	/**
+	 *  Returns all distinct country codes present in the seen table, sorted alphabetically.
+	 *  Used to populate the country filter dropdown.
+	 */
 	storeSeenCountries: () => typedError<string[], string>(__TAURI_INVOKE("store_seen_countries")),
+	/**
+	 *  Returns all distinct maps that have seen entries, with resolved display names.
+	 *  Joins against the `maps` table for human-readable names; falls back to the raw
+	 *  map id if the map has been deleted.
+	 */
 	storeSeenMaps: () => typedError<SeenMapInfo[], string>(__TAURI_INVOKE("store_seen_maps")),
+	/**  Deletes all seen history entries. */
 	storeSeenClear: () => typedError<null, string>(__TAURI_INVOKE("store_seen_clear")),
+	/**
+	 *  Create a new commit for a map.
+	 *
+	 *  1. Finds the current HEAD commit (parent).
+	 *  2. Bakes the overlay and snapshots all geohash blobs to the blob store.
+	 *  3. Computes a SHA-256 tree hash over sorted `(geohash, blob_hash)` pairs.
+	 *  4. Derives the commit ID from `tree_hash + parent + timestamp`.
+	 *  5. Batch-inserts `commit_trees` entries (200 per INSERT for SQLite perf).
+	 *
+	 *  Returns the new commit ID.
+	 */
 	storeCreateCommit: (
 		mapId: string,
 		message: string | null,
@@ -576,19 +767,35 @@ export const commands = {
 			modified?: number;
 		} | null,
 	) => typedError<string, string>(__TAURI_INVOKE("store_create_commit", { mapId, message, diff })),
+	/**  List all commits for a map, newest first. */
 	storeListCommits: (mapId: string) =>
 		typedError<CommitInfo[], string>(__TAURI_INVOKE("store_list_commits", { mapId })),
+	/**
+	 *  Restore a map to the state captured by a previous commit.
+	 *
+	 *  Reads the commit's blob entries from `commit_trees`, then delegates to
+	 *  `location_store::restore_inner` which reassembles the Arrow base batch
+	 *  from the blob store and resets the overlay. Clears undo/redo history.
+	 */
 	storeCheckoutCommit: (mapId: string, commitId: string) =>
 		typedError<null, string>(__TAURI_INVOKE("store_checkout_commit", { mapId, commitId })),
 };
 
 /* Types */
+/**
+ *  A swap-removal from a render cell. JS must move the last element into `cell_index`
+ *  and pop the array to mirror the Rust-side swap-remove.
+ */
 export type CellRemoval = {
 	cell: string;
 	cellIndex: number;
 	id: number;
 };
 
+/**
+ *  Override the RGBA color of a single marker within a cell (used when selection
+ *  membership changes without a position change).
+ */
 export type ColorPatchEntry = {
 	cell: string;
 	cellIndex: number;
@@ -598,12 +805,18 @@ export type ColorPatchEntry = {
 	a: number;
 };
 
+/**
+ *  Diff statistics passed from the frontend at commit time.
+ *  The frontend tracks add/remove/modify counts through the undo stack
+ *  and provides them here so the commit can store them without recomputing.
+ */
 export type CommitDiff = {
 	added?: number;
 	removed?: number;
 	modified?: number;
 };
 
+/**  Metadata for a single commit, returned to the frontend for the commit history UI. */
 export type CommitInfo = {
 	id: string;
 	mapId: string;
@@ -617,6 +830,7 @@ export type CommitInfo = {
 	createdAt: string;
 };
 
+/**  Aggregate database statistics for the debug panel. */
 export type DbStats = {
 	maps: number;
 	locations: number;
@@ -627,11 +841,17 @@ export type DbStats = {
 	foreignKeys: boolean;
 };
 
+/**  Row count for a single SQLite table, used in the debug diagnostics panel. */
 export type DbTableInfo = {
 	name: string;
 	rows: number;
 };
 
+/**
+ *  Preview data for importing a file into the currently open map.
+ *  Unlike bulk import, this shows per-field counts so the user can
+ *  selectively drop fields (heading, panoId, etc.) before importing.
+ */
 export type EditorImportPreview = {
 	locationCount: number;
 	tags: Tag[];
@@ -639,28 +859,54 @@ export type EditorImportPreview = {
 	warnings: string[];
 };
 
+/**
+ *  Combined result of an editor import: the mutation delta (for render pipeline)
+ *  plus import-specific metadata.
+ */
 export type EditorImportResult = EditorImportResult_Serialize | EditorImportResult_Deserialize;
 
+/**
+ *  Combined result of an editor import: the mutation delta (for render pipeline)
+ *  plus import-specific metadata.
+ */
 export type EditorImportResult_Deserialize = {
 	importedCount: number;
 	warnings: string[];
 } & MutationResult_Deserialize;
 
+/**
+ *  Combined result of an editor import: the mutation delta (for render pipeline)
+ *  plus import-specific metadata.
+ */
 export type EditorImportResult_Serialize = {
 	importedCount: number;
 	warnings: string[];
 } & MutationResult_Serialize;
 
+/**
+ *  Configuration for JSON export. Controls which fields are included and
+ *  whether the export covers all locations or a specific selection.
+ */
 export type ExportOpts = {
 	exportZoom: boolean;
 	exportUnpanned: boolean;
 	exportExtras: boolean;
+	/**  When `Some`, restricts export to these location IDs (e.g. current selection). */
 	scope: number[] | null;
 	mapName: string;
+	/**
+	 *  Serialized `{id: {name, color}}` tag definitions from the store, used to
+	 *  convert numeric tag IDs back to human-readable names in the output.
+	 */
 	tagsJson: string;
 	extraFieldsJson: string | null;
 };
 
+/**
+ *  Schema definition for a single `Location.extra` field. Stored in the map's
+ *  `extra.fields` JSON. For enum types, `values` lists valid options and `labels`
+ *  provides display names.
+ */
 export type ExtraFieldDef = {
 	type: ExtraFieldType;
 	label?: string | null;
@@ -668,20 +914,35 @@ export type ExtraFieldDef = {
 	labels?: { [key in string]: string } | null;
 };
 
+/**
+ *  Type discriminant for `Location.extra` field definitions.
+ *  Determines how the field is displayed and filtered in the UI.
+ */
 export type ExtraFieldType = "string" | "number" | "date" | "month" | "enum";
 
+/**
+ *  Field presence count for the editor import preview dialog, letting
+ *  the user see which optional fields exist and decide which to keep/drop.
+ */
 export type FieldCount = {
 	key: string;
 	count: number;
 };
 
+/**  Reverse geocode result: nearest populated place to a coordinate. */
 export type GeoResult = {
 	city: string;
+	/**  First-level administrative division (state, province, region). */
 	admin: string;
 	country: string;
+	/**  ISO 3166-1 alpha-2 (e.g. "US", "FR"). */
 	country_code: string;
 };
 
+/**
+ *  Summary of a single map found during bulk import preview.
+ *  Shown in the import dialog so the user can select which maps to import.
+ */
 export type ImportPreviewEntry = {
 	name: string;
 	folder: string | null;
@@ -690,6 +951,7 @@ export type ImportPreviewEntry = {
 	warnings: string[];
 };
 
+/**  Result returned per map after a successful bulk import. */
 export type ImportedMapInfo = {
 	id: string;
 	name: string;
@@ -697,10 +959,25 @@ export type ImportedMapInfo = {
 	tagCount: number;
 };
 
+/**
+ *  A single Street View location on a map.
+ *
+ *  This is the atomic unit of data in the system. Locations are stored columnar
+ *  in Arrow IPC on disk and addressed by `id` everywhere. The `id` is unique
+ *  within a map and assigned by the store's monotonic allocator.
+ */
 export type Location = Location_Serialize | Location_Deserialize;
 
+/**
+ *  Partial location update from JS. `None` fields are unchanged; `Some(None)` on
+ *  nullable fields (panoId, extra, modifiedAt) explicitly sets the field to null.
+ */
 export type LocationPatch = LocationPatch_Serialize | LocationPatch_Deserialize;
 
+/**
+ *  Partial location update from JS. `None` fields are unchanged; `Some(None)` on
+ *  nullable fields (panoId, extra, modifiedAt) explicitly sets the field to null.
+ */
 export type LocationPatch_Deserialize = {
 	lat?: number | null;
 	lng?: number | null;
@@ -715,6 +992,10 @@ export type LocationPatch_Deserialize = {
 	modifiedAt?: string | null;
 };
 
+/**
+ *  Partial location update from JS. `None` fields are unchanged; `Some(None)` on
+ *  nullable fields (panoId, extra, modifiedAt) explicitly sets the field to null.
+ */
 export type LocationPatch_Serialize = {
 	lat: number | null;
 	lng: number | null;
@@ -729,32 +1010,70 @@ export type LocationPatch_Serialize = {
 	modifiedAt: string | null;
 };
 
+/**
+ *  A single Street View location on a map.
+ *
+ *  This is the atomic unit of data in the system. Locations are stored columnar
+ *  in Arrow IPC on disk and addressed by `id` everywhere. The `id` is unique
+ *  within a map and assigned by the store's monotonic allocator.
+ */
 export type Location_Deserialize = {
+	/**
+	 *  Monotonically increasing within a map. Zero is a sentinel meaning
+	 *  "not yet assigned" (used during import before IDs are allocated).
+	 */
 	id?: number;
 	lat: number;
 	lng: number;
 	heading: number;
 	pitch: number;
+	/**  Street View zoom level (0-5), not map zoom. */
 	zoom: number;
 	panoId: string | null;
+	/**  Bitfield: bit 1 = LoadAsPanoId, bit 2 = Informational. */
 	flags: number;
+	/**  Tag IDs applied to this location. References `Tag.id`. */
 	tags: number[];
+	/**
+	 *  Arbitrary key-value metadata from imports (e.g. GeoGuessr extra fields).
+	 *  Not populated by the editor itself -- preserved round-trip from import data.
+	 */
 	extra?: any | null;
+	/**  ISO 8601 timestamp, generated via `util::now_iso()`. */
 	createdAt: string;
 	modifiedAt?: string | null;
 };
 
+/**
+ *  A single Street View location on a map.
+ *
+ *  This is the atomic unit of data in the system. Locations are stored columnar
+ *  in Arrow IPC on disk and addressed by `id` everywhere. The `id` is unique
+ *  within a map and assigned by the store's monotonic allocator.
+ */
 export type Location_Serialize = {
+	/**
+	 *  Monotonically increasing within a map. Zero is a sentinel meaning
+	 *  "not yet assigned" (used during import before IDs are allocated).
+	 */
 	id: number;
 	lat: number;
 	lng: number;
 	heading: number;
 	pitch: number;
+	/**  Street View zoom level (0-5), not map zoom. */
 	zoom: number;
 	panoId: string | null;
+	/**  Bitfield: bit 1 = LoadAsPanoId, bit 2 = Informational. */
 	flags: number;
+	/**  Tag IDs applied to this location. References `Tag.id`. */
 	tags: number[];
+	/**
+	 *  Arbitrary key-value metadata from imports (e.g. GeoGuessr extra fields).
+	 *  Not populated by the editor itself -- preserved round-trip from import data.
+	 */
 	extra?: any | null;
+	/**  ISO 8601 timestamp, generated via `util::now_iso()`. */
 	createdAt: string;
 	modifiedAt?: string | null;
 };
@@ -763,10 +1082,18 @@ export type MapData = {
 	meta: MapMeta;
 };
 
+/**
+ *  Top-level `extra` JSON blob on a map row. Currently only holds field definitions,
+ *  but structured as an object to allow future extensions.
+ */
 export type MapExtra = {
 	fields?: { [key in string]: ExtraFieldDef } | null;
 };
 
+/**
+ *  Full metadata for a map, deserialized from the SQLite `maps` row.
+ *  JSON columns (settings, tags, extra, etc.) are parsed into typed structs.
+ */
 export type MapMeta = {
 	id: string;
 	name: string;
@@ -783,6 +1110,10 @@ export type MapMeta = {
 	lastOpenedAt: string | null;
 };
 
+/**
+ *  Partial update for map metadata. Only non-`None` fields are written.
+ *  `folder: Some(None)` explicitly unsets the folder (moves to root).
+ */
 export type MapMetaPatch = {
 	name?: string | null;
 	description?: string | null;
@@ -794,6 +1125,10 @@ export type MapMetaPatch = {
 	labels?: string[] | null;
 };
 
+/**
+ *  Per-map editor preferences. Controls Street View lookup behavior (official vs
+ *  unofficial, camera type filters), export defaults, and metadata enrichment.
+ */
 export type MapSettings = {
 	pointAlongRoad: boolean;
 	preferDirection: number | null;
@@ -809,8 +1144,18 @@ export type MapSettings = {
 	generatedLocationTag: string | null;
 };
 
+/**
+ *  Unified response for every mutation IPC. Bundles the store status, render delta,
+ *  optional selection sync, optional new field definitions, and optional updated tags.
+ *  JS applies all of these atomically to stay in sync with the Rust state.
+ */
 export type MutationResult = MutationResult_Serialize | MutationResult_Deserialize;
 
+/**
+ *  Unified response for every mutation IPC. Bundles the store status, render delta,
+ *  optional selection sync, optional new field definitions, and optional updated tags.
+ *  JS applies all of these atomically to stay in sync with the Rust state.
+ */
 export type MutationResult_Deserialize = {
 	delta: RenderDelta_Deserialize;
 	selectionSync: SelectionSync | null;
@@ -818,6 +1163,11 @@ export type MutationResult_Deserialize = {
 	tags: { [key in number]: Tag } | null;
 } & StoreStatus;
 
+/**
+ *  Unified response for every mutation IPC. Bundles the store status, render delta,
+ *  optional selection sync, optional new field definitions, and optional updated tags.
+ *  JS applies all of these atomically to stay in sync with the Rust state.
+ */
 export type MutationResult_Serialize = {
 	delta: RenderDelta_Serialize;
 	selectionSync: SelectionSync | null;
@@ -825,6 +1175,7 @@ export type MutationResult_Serialize = {
 	tags: { [key in number]: Tag } | null;
 } & StoreStatus;
 
+/**  Metadata for a user-installed plugin, read from `plugins/{id}/manifest.json`. */
 export type PluginManifest = {
 	id: string;
 	name: string;
@@ -833,14 +1184,28 @@ export type PluginManifest = {
 	main: string;
 };
 
+/**
+ *  GeoJSON-like polygon geometry. `coordinates` is the primary polygon (outer ring +
+ *  optional holes). `extra_polygons` allows multipolygon selections (e.g., from GeoJSON import).
+ */
 export type PolygonGeometry = {
 	coordinates: [number, number][][];
 	extraPolygons?: [number, number][][][] | null;
 	properties?: any | null;
 };
 
+/**
+ *  Incremental render update sent to JS after a mutation. Contains adds, position/heading
+ *  patches, swap-removals, and color patches (for selection overlay changes).
+ *  `full_reset` signals JS to discard all cell data and re-fetch via `store_fill_render_file`.
+ */
 export type RenderDelta = RenderDelta_Serialize | RenderDelta_Deserialize;
 
+/**
+ *  Incremental render update sent to JS after a mutation. Contains adds, position/heading
+ *  patches, swap-removals, and color patches (for selection overlay changes).
+ *  `full_reset` signals JS to discard all cell data and re-fetch via `store_fill_render_file`.
+ */
 export type RenderDelta_Deserialize = {
 	added: RenderEntry[];
 	updated: RenderPatchEntry[];
@@ -849,6 +1214,11 @@ export type RenderDelta_Deserialize = {
 	fullReset: boolean;
 };
 
+/**
+ *  Incremental render update sent to JS after a mutation. Contains adds, position/heading
+ *  patches, swap-removals, and color patches (for selection overlay changes).
+ *  `full_reset` signals JS to discard all cell data and re-fetch via `store_fill_render_file`.
+ */
 export type RenderDelta_Serialize = {
 	added: RenderEntry[];
 	updated: RenderPatchEntry[];
@@ -857,6 +1227,7 @@ export type RenderDelta_Serialize = {
 	fullReset?: boolean;
 };
 
+/**  A newly-added marker to a render cell: position, heading, and base color. */
 export type RenderEntry = {
 	cell: string;
 	id: number;
@@ -869,6 +1240,7 @@ export type RenderEntry = {
 	a: number;
 };
 
+/**  Partial update to an existing marker within its cell (position and/or heading changed). */
 export type RenderPatchEntry = {
 	cell: string;
 	cellIndex: number;
@@ -877,6 +1249,11 @@ export type RenderPatchEntry = {
 	heading: number | null;
 };
 
+/**
+ *  Parameters for a full render rebuild. `marker_style` ("arrow" or "pin") determines
+ *  whether heading angles are written. The bounding box fields are currently unused
+ *  (no viewport culling -- all locations are rendered).
+ */
 export type RenderRequest = {
 	west?: number;
 	south?: number;
@@ -886,12 +1263,18 @@ export type RenderRequest = {
 	markerStyle?: string;
 };
 
+/**  Result of `store_save_dirty`: how many bytes were written to the delta file. */
 export type SaveResult = {
 	savedChunks: number;
 };
 
+/**
+ *  Score bounding box: either `"auto"` (computed from locations) or an
+ *  explicit `[south, west, north, east]` rectangle.
+ */
 export type ScoreBounds = string | [number, number, number, number];
 
+/**  A panorama visit record as returned to the frontend. */
 export type SeenEntry = {
 	id: number;
 	panoId: string;
@@ -908,17 +1291,29 @@ export type SeenEntry = {
 	thumbnail: string | null;
 };
 
+/**
+ *  Optional filters for seen-history queries. All fields are AND-combined.
+ *  `search` does a substring match on the `address` column.
+ */
 export type SeenFilter = {
 	country?: string | null;
 	mapId?: string | null;
 	search?: string | null;
 };
 
+/**
+ *  Map id + display name pair for the "filter by map" dropdown.
+ *  Name is resolved from the `maps` table when available, falling back to raw id.
+ */
 export type SeenMapInfo = {
 	id: string;
 	name: string;
 };
 
+/**
+ *  Inbound payload for recording a new panorama visit. Same shape as `SeenEntry`
+ *  minus the auto-assigned `id`.
+ */
 export type SeenWriteEntry = {
 	panoId: string;
 	lat: number;
@@ -934,6 +1329,10 @@ export type SeenWriteEntry = {
 	thumbnail: string | null;
 };
 
+/**
+ *  A named, colored selection. `key` is deterministic (e.g., `"tag:5"`, `"polygon:abc"`)
+ *  so JS can diff selections across syncs. `color` is the RGB overlay color.
+ */
 export type Selection = {
 	key: string;
 	color: [number, number, number];
@@ -942,11 +1341,18 @@ export type Selection = {
 	count?: number | null;
 };
 
+/**  Input for `store_sync_selections`: selection criteria + display color. */
 export type SelectionInput = {
 	props: SelectionProps;
 	color: [number, number, number];
 };
 
+/**
+ *  Discriminated union of all selection types. Serialized with `{ "type": "..." }` tag
+ *  for JS interop. Simple types (Tag, Untagged, PanoIds, etc.) resolve in O(N) with
+ *   parallel batch scans. Composites (Intersection, Union, Invert) recursively resolve
+ *  children. Duplicates uses a grid-accelerated spatial scan.
+ */
 export type SelectionProps =
 	| { type: "Locations"; locations: number[]; name: string | null }
 	| { type: "Everything" }
@@ -964,12 +1370,21 @@ export type SelectionProps =
 	| { type: "Invert"; selections: Selection[] }
 	| { type: "Filter"; field: string; op: string; value: any; value2: any | null };
 
+/**
+ *  Selection bitmask sync payload. `patch_file` points to a temp binary that JS reads
+ *  via `mma-buf://` to update the selection overlay colors. `counts` gives per-selection
+ *  match counts for sidebar display.
+ */
 export type SelectionSync = {
 	counts: number[];
 	patchFile: string | null;
 	selectedCount: number;
 };
 
+/**
+ *  Metadata snapshot returned to JS after every mutation. JS uses `version` to
+ *  detect stale responses and `canUndo`/`canRedo` for toolbar button state.
+ */
 export type StoreStatus = {
 	version: number;
 	locationCount: number;
@@ -978,24 +1393,45 @@ export type StoreStatus = {
 	tagCounts: { [key in number]: number };
 };
 
+/**  Lightweight status for polling: count, version, and whether unsaved changes exist. */
 export type SummaryResult = {
 	locationCount: number;
 	version: number;
 	dirtyCount: number;
 };
 
+/**  Result of `store_sync_selections`: per-selection counts and the bitmask patch file path. */
 export type SyncSelectionsResult = {
 	counts: number[];
 	patchFile: string | null;
 	selectedCount: number;
 };
 
+/**
+ *  A user-defined label that can be applied to any number of locations.
+ *
+ *  Tags are stored in `MapMeta` and referenced by id in each `Location.tags`.
+ *  The `count` field is maintained by callers during batch mutations, not by
+ *  the overlay add/remove methods.
+ */
 export type Tag = {
 	id: number;
 	name: string;
+	/**
+	 *  Hex color string (e.g. "#3a7fc2"). Generated deterministically from
+	 *  the tag name via `util::color_for_name` when not explicitly set.
+	 */
 	color: string;
 	visible?: boolean;
+	/**
+	 *  Display order in the sidebar tag list. `None` for legacy tags
+	 *  that predate ordered insertion.
+	 */
 	order?: number | null;
+	/**
+	 *  Number of locations currently carrying this tag. Denormalized for
+	 *  fast sidebar display -- kept in sync by callers after batch edits.
+	 */
 	count?: number;
 };
 

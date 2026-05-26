@@ -1,4 +1,5 @@
 import type { ComponentType } from "react";
+import { createSyncStore } from "@/lib/util/syncStore";
 
 export interface PluginSettingDef {
 	key: string;
@@ -90,8 +91,7 @@ export function setPluginEnabled(id: string, enabled: boolean) {
 	if (enabled) enabledSet.add(id);
 	else enabledSet.delete(id);
 	saveEnabled(enabledSet);
-	registryVersion++;
-	registryListeners.forEach((fn) => fn());
+	notifyRegistry();
 }
 
 export function getEnabledPlugins(): Plugin[] {
@@ -107,8 +107,7 @@ export function activatePlugins() {
 			if (cleanup) cleanups.set(plugin.id, cleanup);
 		}
 	}
-	registryVersion++;
-	registryListeners.forEach((fn) => fn());
+	notifyRegistry();
 }
 
 export function deactivatePlugins() {
@@ -135,16 +134,5 @@ export function deactivatePlugin(id: string) {
 
 // --- React subscription for registry changes ---
 
-let registryVersion = 0;
-let registryListeners: (() => void)[] = [];
-
-export function subscribeRegistry(fn: () => void) {
-	registryListeners.push(fn);
-	return () => {
-		registryListeners = registryListeners.filter((l) => l !== fn);
-	};
-}
-
-export function getRegistrySnapshot() {
-	return registryVersion;
-}
+const { subscribe: subscribeRegistry, getSnapshot: getRegistrySnapshot, notify: notifyRegistry } = createSyncStore();
+export { subscribeRegistry, getRegistrySnapshot };

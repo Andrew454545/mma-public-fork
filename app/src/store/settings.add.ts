@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from "react";
+import { createSyncStore } from "@/lib/util/syncStore";
 
 export type MovementMode = "moving" | "no-move" | "nmpz";
 export type ExactDateFormat = "date" | "datetime";
@@ -106,24 +107,7 @@ try {
 	// ignored
 }
 
-let listeners: (() => void)[] = [];
-let version = 0;
-
-function subscribe(fn: () => void) {
-	listeners.push(fn);
-	return () => {
-		listeners = listeners.filter((l) => l !== fn);
-	};
-}
-
-function notify() {
-	version++;
-	for (const fn of listeners) fn();
-}
-
-function getSnapshot() {
-	return version;
-}
+const { subscribe, getSnapshot, notify } = createSyncStore();
 
 export function getSettings(): AppSettings {
 	return settings;

@@ -38,7 +38,6 @@ import type { MapMeta, SortMode } from "@/types";
 import { fmt, relativeTime, shortDateFmt } from "@/lib/util/format";
 import { useSetting, type MapListField } from "@/store/settings.add";
 import { GuideDialog } from "@/components/dialogs/Guide.add";
-import { debugSpan } from "@/lib/util/debug";
 import { toast } from "@/lib/util/toast.add";
 
 // --- Drag types ---
@@ -700,7 +699,6 @@ export function MapList() {
 		}
 
 		const onMove = (ev: PointerEvent) => {
-			const span = debugSpan("MapList:dragMove");
 			if (previewRef.current) {
 				previewRef.current.style.left = `${ev.clientX + 12}px`;
 				previewRef.current.style.top = `${ev.clientY - 12}px`;
@@ -723,7 +721,6 @@ export function MapList() {
 					prevHighlight.current = el;
 				}
 			}
-			span.end();
 		};
 
 		const onUp = () => {

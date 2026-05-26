@@ -1,24 +1,8 @@
 import { useSyncExternalStore } from "react";
+import { createSyncStore } from "@/lib/util/syncStore";
 
 let trail: [number, number][] = [];
-let version = 0;
-let listeners: (() => void)[] = [];
-
-function notify() {
-	version++;
-	for (const fn of listeners) fn();
-}
-
-function subscribe(fn: () => void) {
-	listeners.push(fn);
-	return () => {
-		listeners = listeners.filter((l) => l !== fn);
-	};
-}
-
-function getSnapshot() {
-	return version;
-}
+const { subscribe, getSnapshot, notify } = createSyncStore();
 
 export function resetTrail(lng: number, lat: number) {
 	trail = [[lng, lat]];

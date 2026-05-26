@@ -17,11 +17,6 @@ export type ColorPatchEntry = {
 	b: number;
 	a: number;
 };
-export type CommitBlobEntry = {
-	geohash: string;
-	blobHash: string;
-	locationCount: number;
-};
 export type CommitInfo = {
 	id: string;
 	mapId: string;
@@ -357,21 +352,6 @@ export type SelectionProps = {
 	op: string;
 	value: any;
 	value2: any | null;
-};
-export type SelectionResult = {
-	key: string;
-	count: number;
-	selectionVersion: number;
-};
-export type SelectionSummary = {
-	key: string;
-	color: [
-		number,
-		number,
-		number
-	];
-	type: string;
-	count: number;
 };
 export type SelectionSync = {
 	counts: number[];
@@ -956,7 +936,6 @@ declare const mma: {
 	cmd: {
 		writeTempFile: (name: string, content: string) => Promise<string>;
 		readFile: (path: string) => Promise<string>;
-		getDbUri: () => Promise<string>;
 		getAppDataDir: () => Promise<string>;
 		openDataFolder: () => Promise<null>;
 		listUserPlugins: () => Promise<PluginManifest[]>;
@@ -981,8 +960,6 @@ declare const mma: {
 		storeTouchMapOpened: (mapId: string) => Promise<null>;
 		storeRenameFolder: (from: string, to: string) => Promise<null>;
 		storeDeleteFolder: (name: string) => Promise<null>;
-		storeMoveMapToFolder: (mapId: string, folder: string | null) => Promise<null>;
-		storeUpdateMapLabels: (mapId: string, labels: string[]) => Promise<null>;
 		storeGetPanoDate: (panoId: string) => Promise<number | null>;
 		storeSetPanoDate: (panoId: string, timestamp: number) => Promise<null>;
 		storeDbTableInfo: () => Promise<DbTableInfo[]>;
@@ -1011,7 +988,6 @@ declare const mma: {
 		storeGetLocationsByIds: (ids: number[]) => Promise<Location_Serialize[]>;
 		storeGetAllLocations: () => Promise<string>;
 		storeLocationCount: () => Promise<number>;
-		storeHasLocation: (id: number) => Promise<boolean>;
 		storeBounds: () => Promise<[
 			number,
 			number,
@@ -1029,11 +1005,7 @@ declare const mma: {
 		storeCreateTags: (names: string[]) => Promise<MutationResult_Serialize>;
 		storeUpdateTag: (tagId: number, name: string | null, color: string | null) => Promise<MutationResult_Serialize>;
 		storeDeleteTags: (tagIds: number[]) => Promise<MutationResult_Serialize>;
-		storeStripTags: (tagIds: number[]) => Promise<MutationResult_Serialize>;
 		storeReorderTags: (orderedIds: number[]) => Promise<MutationResult_Serialize>;
-		storeTagCounts: () => Promise<{
-			[x: number]: number;
-		}>;
 		storeUndo: () => Promise<MutationResult_Serialize>;
 		storeRedo: () => Promise<MutationResult_Serialize>;
 		storeResetUndo: () => Promise<null>;
@@ -1043,15 +1015,8 @@ declare const mma: {
 			number
 		]>;
 		storeSyncSelections: (sels: SelectionInput[]) => Promise<SyncSelectionsResult>;
-		storeAddSelection: (props: SelectionProps) => Promise<SelectionResult>;
-		storeRemoveSelection: (key: string) => Promise<number>;
-		storeResetSelections: () => Promise<number>;
-		storeGetSelections: () => Promise<SelectionSummary[]>;
-		storeGetSelectedIds: () => Promise<number[]>;
 		storeGetSelectedIdsList: () => Promise<number[]>;
-		storeSetSelectedIds: (ids: number[]) => Promise<null>;
 		storeResolveSelection: (props: SelectionProps) => Promise<number[]>;
-		storeRefreshSelections: () => Promise<number>;
 		storeFillRenderFile: (req: RenderRequest) => Promise<string>;
 		storeResolvePick: (cell: string, cellIndex: number) => Promise<number | null>;
 		bulkImportPreview: (path: string) => Promise<ImportPreviewEntry[]>;
@@ -1066,8 +1031,6 @@ declare const mma: {
 		storeExportCsv: (scope: number[] | null) => Promise<string>;
 		storeExportGeojson: (scope: number[] | null, tagsJson: string) => Promise<string>;
 		storeExportBulkZip: () => Promise<string>;
-		storeSnapshotCommit: () => Promise<CommitBlobEntry[]>;
-		storeRestoreCommit: (mapId: string, blobs: CommitBlobEntry[]) => Promise<null>;
 		storeDbClearTable: (table: string) => Promise<number>;
 		storeDbStats: () => Promise<DbStats>;
 		storeSeenWrite: (entry: SeenWriteEntry) => Promise<null>;
@@ -1199,7 +1162,6 @@ declare const mma: {
 	renameFolder(from: string, to: string): Promise<void>;
 	moveMapToFolder(mapId: string, folder: string | null): Promise<void>;
 	deleteFolder(name: string): Promise<void>;
-	getAllMaps(): Promise<MapData[]>;
 	renameMap(id: string, name: string): Promise<void>;
 	updateMapLabels(id: string, labels: string[]): Promise<void>;
 	updateMapMeta(patch: MapMetaPatch): Promise<void>;
@@ -1218,7 +1180,6 @@ declare const mma: {
 	}[]): Promise<void | MutationResult_Serialize>;
 	patchLocationExtra(locId: number, extraPatch: Record<string, unknown>, replace?: boolean): void;
 	useSelections(): Selection$1[];
-	useSelectionVersion(): number;
 	addSelection(props: SelectionProps): Promise<void>;
 	removeSelection(key: string): Promise<void>;
 	resetSelections(): Promise<void>;
@@ -1254,7 +1215,6 @@ declare const mma: {
 	setWorkArea(area: WorkArea): void;
 	useActivePluginId(): string | null;
 	getWorkArea(): WorkArea;
-	getActivePluginId(): string | null;
 	setPluginMode(pluginId: string): void;
 	exitPluginMode(): void;
 	createTags(names: string[]): Promise<Tag$1[]>;

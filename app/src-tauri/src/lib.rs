@@ -29,13 +29,6 @@ fn read_file(path: String) -> Result<String, String> {
 
 #[tauri::command]
 #[specta::specta]
-fn get_db_uri(app: tauri::AppHandle) -> Result<String, String> {
-    let path = fast_io::db_path(&app)?;
-    Ok(format!("sqlite:{}", path.to_string_lossy()))
-}
-
-#[tauri::command]
-#[specta::specta]
 fn get_app_data_dir(app: tauri::AppHandle) -> Result<String, String> {
     app.path().app_data_dir()
         .map(|p| p.to_string_lossy().into_owned())
@@ -318,7 +311,6 @@ pub fn run() {
                     write_temp_file,
                     read_file,
                     // --- Utility ---
-                    get_db_uri,
                     get_app_data_dir,
                     open_data_folder,
                     list_user_plugins,
@@ -338,8 +330,6 @@ pub fn run() {
                     map_meta::store_touch_map_opened,
                     map_meta::store_rename_folder,
                     map_meta::store_delete_folder,
-                    map_meta::store_move_map_to_folder,
-                    map_meta::store_update_map_labels,
                     map_meta::store_get_pano_date,
                     map_meta::store_set_pano_date,
                     map_meta::store_db_table_info,
@@ -353,7 +343,6 @@ pub fn run() {
                     location_store::store_get_locations_by_ids,
                     location_store::store_get_all_locations,
                     location_store::store_location_count,
-                    location_store::store_has_location,
                     location_store::store_bounds,
                     location_store::store_selection_bounds,
                     location_store::store_find_nearby,
@@ -362,9 +351,7 @@ pub fn run() {
                     location_store::store_create_tags,
                     location_store::store_update_tag,
                     location_store::store_delete_tags,
-                    location_store::store_strip_tags,
                     location_store::store_reorder_tags,
-                    location_store::store_tag_counts,
                     // --- Undo / redo ---
                     location_store::store_undo,
                     location_store::store_redo,
@@ -372,15 +359,8 @@ pub fn run() {
                     location_store::store_commit_diff,
                     // --- Selections ---
                     location_store::store_sync_selections,
-                    location_store::store_add_selection,
-                    location_store::store_remove_selection,
-                    location_store::store_reset_selections,
-                    location_store::store_get_selections,
-                    location_store::store_get_selected_ids,
                     location_store::store_get_selected_ids_list,
-                    location_store::store_set_selected_ids,
                     location_store::store_resolve_selection,
-                    location_store::store_refresh_selections,
                     // --- Render ---
                     location_store::store_fill_render_file,
                     location_store::store_resolve_pick,
@@ -395,8 +375,6 @@ pub fn run() {
                     export::store_export_geojson,
                     export::store_export_bulk_zip,
                     // --- Version control ---
-                    location_store::store_snapshot_commit,
-                    location_store::store_restore_commit,
                     map_meta::store_db_clear_table,
                     map_meta::store_db_stats,
                     seen::store_seen_write,

@@ -15,7 +15,7 @@ use crate::fast_io;
 use crate::map_meta;
 use crate::types::{Location, Tag};
 use crate::util;
-use crate::selections::{self, SelectionProps, Selection, SelectionSummary};
+use crate::selections::{self, SelectionProps, Selection};
 
 const GEOHASH_PRECISION: usize = 2;
 const RENDER_PRECISION: usize = 1;
@@ -1375,55 +1375,6 @@ pub fn store_update_locations(
     Ok(result)
 }
 
-/// Remove the given tag IDs from every location that has them. Returns a MutationResult.
-#[tauri::command]
-#[specta::specta]
-pub fn store_strip_tags(
-    state: tauri::State<'_, StoreState>,
-    tag_ids: Vec<u32>,
-) -> Result<MutationResult, String> {
-    let _t = std::time::Instant::now();
-    let mut store = state.lock().map_err(|e| e.to_string())?;
-    let tag_set: HashSet<u32> = tag_ids.into_iter().collect();
-    let view = store.loc_view();
-    let mut affected_ids = Vec::new();
-    for &tag_id in &tag_set {
-        let ids = selections::resolve(&view, &SelectionProps::Tag { tag_id });
-        affected_ids.extend(ids);
-    }
-    drop(view);
-    let affected_ids: HashSet<u32> = affected_ids.into_iter().collect();
-    if affected_ids.is_empty() {
-        return Ok(store.finish_mutation(ChangeSet::default()));
-    }
-    let mut updated: Vec<(Location, Location)> = Vec::new();
-    for &id in &affected_ids {
-        if let Some(old) = store.get_loc_by_id(id) {
-            let mut new_loc = old.clone();
-            new_loc.tags.retain(|t| !tag_set.contains(t));
-            updated.push((old, new_loc));
-        }
-    }
-    let old_locs: Vec<Location> = updated.iter().map(|(o, _)| o.clone()).collect();
-    store.remove_tag_counts(&old_locs);
-    for (_, new_loc) in &updated {
-        let patch = LocationPatch { tags: Some(new_loc.tags.clone()), ..Default::default() };
-        store.overlay_update(new_loc.id, &patch);
-    }
-    let new_locs: Vec<Location> = updated.iter().map(|(_, n)| n.clone()).collect();
-    store.add_tag_counts(&new_locs);
-    let (changed_old, changed_new): (Vec<_>, Vec<_>) = updated.iter()
-        .filter(|(o, n)| o != n)
-        .map(|(o, n)| (o.clone(), n.clone()))
-        .unzip();
-    if !changed_old.is_empty() {
-        store.push_undo(EditEntry { created: changed_new, removed: changed_old });
-        store.redo_stack.clear();
-    }
-    log::debug!("[cmd] store_strip_tags n={} total={}ms", affected_ids.len(), _t.elapsed().as_millis());
-    Ok(store.finish_mutation(ChangeSet { updated, ..Default::default() }))
-}
-
 /// Update a tag's name and/or color. If the new name collides with an existing
 /// tag (case-insensitive), merges: remaps all locations from `tag_id` to the
 /// existing tag, removes `tag_id`. Returns MutationResult with `tags` populated.
@@ -1569,11 +1520,8 @@ pub fn store_get_location(
     state: tauri::State<'_, StoreState>,
     id: u32,
 ) -> Result<Option<Location>, String> {
-    let _t = std::time::Instant::now();
     let store = state.lock().map_err(|e| e.to_string())?;
-    let r = Ok(store.get_loc_by_id(id));
-    log::debug!("[cmd] store_get_location lock={}ms total={}ms", _t.elapsed().as_millis(), _t.elapsed().as_millis());
-    r
+    Ok(store.get_loc_by_id(id))
 }
 
 /// Write a single location as JSON to a temp file and return the path.
@@ -1903,15 +1851,6 @@ pub(crate) fn snapshot_inner(
     }
 }
 
-#[tauri::command]
-#[specta::specta]
-pub fn store_snapshot_commit(
-    app: tauri::AppHandle,
-    state: tauri::State<'_, StoreState>,
-) -> Result<Vec<CommitBlobEntry>, String> {
-    snapshot_inner(&app, &state)
-}
-
 pub(crate) fn restore_inner(
     app: &tauri::AppHandle,
     map_id: &str,
@@ -1935,16 +1874,6 @@ pub(crate) fn restore_inner(
     let _ = std::fs::remove_file(delta);
     log::debug!("[cmd] restore_inner total={}ms rows={}", _t.elapsed().as_millis(), batch.num_rows());
     Ok(())
-}
-
-#[tauri::command]
-#[specta::specta]
-pub fn store_restore_commit(
-    app: tauri::AppHandle,
-    map_id: String,
-    blobs: Vec<CommitBlobEntry>,
-) -> Result<(), String> {
-    restore_inner(&app, &map_id, blobs)
 }
 
 // ---------------------------------------------------------------------------
@@ -2246,16 +2175,6 @@ fn apply_edit_reverse(store: &mut Store, entry: &EditEntry) -> ChangeSet {
 // Query commands
 // ---------------------------------------------------------------------------
 
-#[tauri::command]
-#[specta::specta]
-pub fn store_tag_counts(state: tauri::State<'_, StoreState>) -> Result<HashMap<u32, u32>, String> {
-    let _t = std::time::Instant::now();
-    let store = state.lock().map_err(|e| e.to_string())?;
-    let r: HashMap<u32, u32> = store.tags.iter().map(|(&k, v)| (k, v.count as u32)).collect();
-    log::debug!("[cmd] store_tag_counts total={}ms", _t.elapsed().as_millis());
-    Ok(r)
-}
-
 pub(crate) fn read_tags_json(conn: &rusqlite::Connection, map_id: &str) -> HashMap<u32, Tag> {
     let json: String = conn.query_row(
         "SELECT tags FROM maps WHERE id = ?1", [map_id], |row| row.get(0),
@@ -2491,13 +2410,6 @@ pub fn store_extra_field_values(state: tauri::State<'_, StoreState>, field: Stri
     Ok(seen.into_iter().collect())
 }
 
-#[tauri::command]
-#[specta::specta]
-pub fn store_has_location(state: tauri::State<'_, StoreState>, id: u32) -> Result<bool, String> {
-    let store = state.lock().map_err(|e| e.to_string())?;
-    Ok(store.get_loc_by_id(id).is_some())
-}
-
 // ---------------------------------------------------------------------------
 // Selections
 // ---------------------------------------------------------------------------
@@ -2643,14 +2555,6 @@ pub fn store_get_selected_ids_list(state: tauri::State<'_, StoreState>) -> Resul
 
 #[tauri::command]
 #[specta::specta]
-pub fn store_set_selected_ids(state: tauri::State<'_, StoreState>, ids: Vec<u32>) -> Result<(), String> {
-    let mut store = state.lock().map_err(|e| e.to_string())?;
-    store.selected_ids = ids.into_iter().collect();
-    Ok(())
-}
-
-#[tauri::command]
-#[specta::specta]
 pub fn store_resolve_selection(state: tauri::State<'_, StoreState>, props: SelectionProps) -> Result<Vec<u32>, String> {
     let store = state.lock().map_err(|e| e.to_string())?;
     let view = store.loc_view();
@@ -2720,144 +2624,6 @@ pub fn store_find_nearby(
 // ---------------------------------------------------------------------------
 // Selection commands
 // ---------------------------------------------------------------------------
-
-#[derive(serde::Serialize, specta::Type)]
-#[serde(rename_all = "camelCase")]
-pub struct SelectionResult {
-    pub key: String,
-    pub count: usize,
-    pub selection_version: u64,
-}
-
-#[tauri::command]
-#[specta::specta]
-pub fn store_add_selection(state: tauri::State<'_, StoreState>, props: SelectionProps) -> Result<SelectionResult, String> {
-    let mut store = state.lock().map_err(|e| e.to_string())?;
-    let view = store.loc_view();
-    let locations = selections::resolve(&view, &props);
-    let key = selection_key(&props, &locations);
-    let color = color_for_key(&key);
-    let count = locations.len();
-    store.selections.push(Selection { key: key.clone(), color, props, count: None });
-    store.selection_loc_sets.push(locations.into_iter().collect());
-    store.selection_version += 1;
-    Ok(SelectionResult { key, count, selection_version: store.selection_version })
-}
-
-#[tauri::command]
-#[specta::specta]
-pub fn store_remove_selection(state: tauri::State<'_, StoreState>, key: String) -> Result<u32, String> {
-    let mut store = state.lock().map_err(|e| e.to_string())?;
-    let idx = store.selections.iter().position(|s| s.key == key);
-    if let Some(i) = idx {
-        store.selections.remove(i);
-        store.selection_loc_sets.remove(i);
-    }
-    store.selection_version += 1;
-    Ok(store.selection_version as u32)
-}
-
-#[tauri::command]
-#[specta::specta]
-pub fn store_reset_selections(state: tauri::State<'_, StoreState>) -> Result<u32, String> {
-    let mut store = state.lock().map_err(|e| e.to_string())?;
-    store.selections.clear();
-    store.selection_loc_sets.clear();
-    store.selection_version += 1;
-    Ok(store.selection_version as u32)
-}
-
-#[tauri::command]
-#[specta::specta]
-pub fn store_get_selections(state: tauri::State<'_, StoreState>) -> Result<Vec<SelectionSummary>, String> {
-    let store = state.lock().map_err(|e| e.to_string())?;
-    Ok(store.selections.iter().enumerate().map(|(i, s)| SelectionSummary {
-        key: s.key.clone(),
-        color: s.color,
-        sel_type: selection_type_name(&s.props),
-        count: store.selection_loc_sets.get(i).map_or(0, |s| s.len()),
-    }).collect())
-}
-
-#[tauri::command]
-#[specta::specta]
-pub fn store_get_selected_ids(state: tauri::State<'_, StoreState>) -> Result<Vec<u32>, String> {
-    let store = state.lock().map_err(|e| e.to_string())?;
-    let mut all = HashSet::new();
-    for set in &store.selection_loc_sets { for &id in set { all.insert(id); } }
-    Ok(all.into_iter().collect())
-}
-
-#[tauri::command]
-#[specta::specta]
-pub fn store_refresh_selections(state: tauri::State<'_, StoreState>) -> Result<u32, String> {
-    let _t = std::time::Instant::now();
-    let mut store = state.lock().map_err(|e| e.to_string())?;
-    let resolved: Vec<Vec<u32>> = {
-        let view = store.loc_view();
-        store.selections.iter().map(|s| selections::resolve(&view, &s.props)).collect()
-    };
-    let n = resolved.len();
-    store.selection_loc_sets = resolved.into_iter().map(|ids| ids.into_iter().collect()).collect();
-    store.selection_version += 1;
-    log::debug!("[cmd] store_refresh_selections total={}ms sels={}", _t.elapsed().as_millis(), n);
-    Ok(store.selection_version as u32)
-}
-
-// --- Helpers ---
-
-fn selection_key(props: &SelectionProps, locations: &[u32]) -> String {
-    match props {
-        SelectionProps::Locations { .. } => format!("locs:{}", locations.len()),
-        SelectionProps::Everything => "everything".into(),
-        SelectionProps::Polygon { .. } => format!("polygon:{}", uuid::Uuid::new_v4()),
-        SelectionProps::Tag { tag_id } => format!("tag:{tag_id}"),
-        SelectionProps::Untagged => "untagged".into(),
-        SelectionProps::Unpanned => "unpanned".into(),
-        SelectionProps::PanoIds => "panoids".into(),
-        SelectionProps::NotPanoIds => "notpanoids".into(),
-        SelectionProps::Duplicates { distance } => format!("duplicates:{distance}"),
-        SelectionProps::Manual { .. } => "manual".into(),
-        SelectionProps::ValidationState { state, .. } => format!("validation:{state}"),
-        SelectionProps::Intersection { selections } => selections.iter().map(|s| format!("({})", s.key)).collect::<Vec<_>>().join("^"),
-        SelectionProps::Union { selections } => selections.iter().map(|s| format!("({})", s.key)).collect::<Vec<_>>().join("|"),
-        SelectionProps::Invert { selections } => {
-            if let Some(s) = selections.first() { format!("!{}", s.key) } else { "!".into() }
-        }
-        SelectionProps::Filter { field, op, value, value2 } => {
-            let v2 = value2.as_ref().map(|v| format!(":{v}")).unwrap_or_default();
-            format!("filter:{field}:{op}:{value}{v2}")
-        }
-    }
-}
-
-fn selection_type_name(props: &SelectionProps) -> String {
-    match props {
-        SelectionProps::Locations { .. } => "Locations",
-        SelectionProps::Everything => "Everything",
-        SelectionProps::Polygon { .. } => "Polygon",
-        SelectionProps::Tag { .. } => "Tag",
-        SelectionProps::Untagged => "Untagged",
-        SelectionProps::Unpanned => "Unpanned",
-        SelectionProps::PanoIds => "PanoIds",
-        SelectionProps::NotPanoIds => "NotPanoIds",
-        SelectionProps::Duplicates { .. } => "Duplicates",
-        SelectionProps::Manual { .. } => "Manual",
-        SelectionProps::ValidationState { .. } => "ValidationState",
-        SelectionProps::Intersection { .. } => "Intersection",
-        SelectionProps::Union { .. } => "Union",
-        SelectionProps::Invert { .. } => "Invert",
-        SelectionProps::Filter { .. } => "Filter",
-    }.into()
-}
-
-fn color_for_key(key: &str) -> [u8; 3] {
-    let mut hash: u32 = 0;
-    for b in key.bytes() { hash = hash.wrapping_mul(31).wrapping_add(b as u32); }
-    let hue = (hash % 360) as f64;
-    let (r, g, b) = util::hsl_to_rgb(hue, 0.65, 0.5);
-    [r, g, b]
-}
 
 // ---------------------------------------------------------------------------
 // Tests

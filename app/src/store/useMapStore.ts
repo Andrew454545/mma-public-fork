@@ -83,7 +83,6 @@ let currentMap: MapData | null = null;
 /** Persisted bitmasks per selection key. Updated incrementally on each
  *  mutation (delta refresh) when the column store is available. */
 let selections: Selection[] = [];
-let selectionVersion = 0;
 let selectedLocationIds = new Set<number>();
 let activeLocationId: number | null = null;
 let duplicateLocations: Location[] = [];
@@ -115,7 +114,7 @@ function getMapSnapshot() {
 export function refreshAfterMutation() {
 	if (!currentMap) {
 		selections = [];
-		selectionVersion++;
+	
 		selectedLocationIds = new Set();
 		mapVersion++;
 		notify();
@@ -385,23 +384,13 @@ export async function moveMapToFolder(mapId: string, folder: string | null) {
 		mapListVersion++;
 		notify();
 	}
-	await cmd.storeMoveMapToFolder(mapId, folder);
+	await cmd.storeUpdateMapMeta(mapId, { folder: folder ?? null });
 	tauriEmit("map-list-changed");
 }
 
 export async function deleteFolder(name: string) {
 	await cmd.storeDeleteFolder(name);
 	await invalidateMapList();
-}
-
-export async function getAllMaps(): Promise<MapData[]> {
-	const metas = await cmd.storeListMaps();
-	const maps: MapData[] = [];
-	for (const meta of metas) {
-		const map = await cmd.storeGetMap(meta.id);
-		if (map) maps.push(map);
-	}
-	return maps;
 }
 
 export async function renameMap(id: string, name: string) {
@@ -412,7 +401,7 @@ export async function renameMap(id: string, name: string) {
 }
 
 export async function updateMapLabels(id: string, labels: string[]) {
-	await cmd.storeUpdateMapLabels(id, labels);
+	await cmd.storeUpdateMapMeta(id, { labels });
 	if (currentMap && currentMapId === id) currentMap.meta.labels = labels;
 	await invalidateMapList();
 }
@@ -517,7 +506,7 @@ async function applySelectionSync(sync: { counts: number[]; patchFile: string | 
 		selections[i] = { ...selections[i], count: sync.counts[i] ?? 0 };
 	}
 	if (sync.patchFile) await emitBitmaskFile(sync.patchFile);
-	selectionVersion++;
+
 	mapVersion++;
 	notify();
 }
@@ -660,11 +649,6 @@ export function useSelections() {
 	return selections;
 }
 
-export function useSelectionVersion() {
-	useSyncExternalStore(subscribe, getMapSnapshot);
-	return selectionVersion;
-}
-
 /** Apply a pure selection transform, then IPC to Rust to resolve bitmasks and sync the overlay. */
 async function applySelectionUpdate(updater: (m: MapData, sels: Selection[]) => Selection[]) {
 	if (!currentMap) return;
@@ -700,7 +684,7 @@ async function applySelectionUpdate(updater: (m: MapData, sels: Selection[]) => 
 	log.debug(
 		`[selection] total=${(t3 - t0).toFixed(0)}ms ipc=${(t2 - t1).toFixed(0)}ms apply=${(t3 - t2).toFixed(0)}ms selected=${result.selectedCount}`,
 	);
-	selectionVersion++;
+
 	mapVersion++;
 	notify();
 	emitEvent("selection:change", selections);
@@ -918,9 +902,7 @@ export function getWorkArea() {
 	return workArea;
 }
 
-export function getActivePluginId() {
-	return activePluginId;
-}
+
 
 export function setPluginMode(pluginId: string) {
 	workArea = "plugin";

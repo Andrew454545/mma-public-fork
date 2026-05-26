@@ -6,7 +6,6 @@ import { invoke as __TAURI_INVOKE } from "@tauri-apps/api/core";
 export const commands = {
 	writeTempFile: (name: string, content: string) => typedError<string, string>(__TAURI_INVOKE("write_temp_file", { name, content })),
 	readFile: (path: string) => typedError<string, string>(__TAURI_INVOKE("read_file", { path })),
-	getDbUri: () => typedError<string, string>(__TAURI_INVOKE("get_db_uri")),
 	getAppDataDir: () => typedError<string, string>(__TAURI_INVOKE("get_app_data_dir")),
 	openDataFolder: () => typedError<null, string>(__TAURI_INVOKE("open_data_folder")),
 	listUserPlugins: () => __TAURI_INVOKE<PluginManifest[]>("list_user_plugins"),
@@ -43,8 +42,6 @@ export const commands = {
 	storeTouchMapOpened: (mapId: string) => typedError<null, string>(__TAURI_INVOKE("store_touch_map_opened", { mapId })),
 	storeRenameFolder: (from: string, to: string) => typedError<null, string>(__TAURI_INVOKE("store_rename_folder", { from, to })),
 	storeDeleteFolder: (name: string) => typedError<null, string>(__TAURI_INVOKE("store_delete_folder", { name })),
-	storeMoveMapToFolder: (mapId: string, folder: string | null) => typedError<null, string>(__TAURI_INVOKE("store_move_map_to_folder", { mapId, folder })),
-	storeUpdateMapLabels: (mapId: string, labels: string[]) => typedError<null, string>(__TAURI_INVOKE("store_update_map_labels", { mapId, labels })),
 	storeGetPanoDate: (panoId: string) => typedError<number | null, string>(__TAURI_INVOKE("store_get_pano_date", { panoId })),
 	storeSetPanoDate: (panoId: string, timestamp: number) => typedError<null, string>(__TAURI_INVOKE("store_set_pano_date", { panoId, timestamp })),
 	storeDbTableInfo: () => typedError<DbTableInfo[], string>(__TAURI_INVOKE("store_db_table_info")),
@@ -74,7 +71,6 @@ export const commands = {
 	storeGetLocationsByIds: (ids: number[]) => typedError<Location_Serialize[], string>(__TAURI_INVOKE("store_get_locations_by_ids", { ids })).then((v) => ((v.status === "ok" ? { ...v, data: v.data.map(i=>i) } : v) as typeof v)),
 	storeGetAllLocations: () => typedError<string, string>(__TAURI_INVOKE("store_get_all_locations")),
 	storeLocationCount: () => typedError<number, string>(__TAURI_INVOKE("store_location_count")),
-	storeHasLocation: (id: number) => typedError<boolean, string>(__TAURI_INVOKE("store_has_location", { id })),
 	storeBounds: () => typedError<[number, number, number, number] | null, string>(__TAURI_INVOKE("store_bounds")).then((v) => ((v.status === "ok" ? { ...v, data: v.data==null?v.data:v.data.map(i=>i) } : v) as typeof v)),
 	storeSelectionBounds: () => typedError<[number, number, number, number] | null, string>(__TAURI_INVOKE("store_selection_bounds")).then((v) => ((v.status === "ok" ? { ...v, data: v.data==null?v.data:v.data.map(i=>i) } : v) as typeof v)),
 	/**
@@ -98,14 +94,11 @@ export const commands = {
 	 *  visible=false so undo can revive them. Returns MutationResult with `tags`.
 	 */
 	storeDeleteTags: (tagIds: number[]) => typedError<MutationResult_Serialize, string>(__TAURI_INVOKE("store_delete_tags", { tagIds })).then((v) => ((v.status === "ok" ? { ...v, data: ({...v.data,delta:({...v.data.delta,added:v.data.delta.added.map(i=>i),updated:v.data.delta.updated.map(i=>({...i,lng:i.lng==null?i.lng:i.lng,lat:i.lat==null?i.lat:i.lat,heading:i.heading==null?i.heading:i.heading}))})}) } : v) as typeof v)),
-	/**  Remove the given tag IDs from every location that has them. Returns a MutationResult. */
-	storeStripTags: (tagIds: number[]) => typedError<MutationResult_Serialize, string>(__TAURI_INVOKE("store_strip_tags", { tagIds })).then((v) => ((v.status === "ok" ? { ...v, data: ({...v.data,delta:({...v.data.delta,added:v.data.delta.added.map(i=>i),updated:v.data.delta.updated.map(i=>({...i,lng:i.lng==null?i.lng:i.lng,lat:i.lat==null?i.lat:i.lat,heading:i.heading==null?i.heading:i.heading}))})}) } : v) as typeof v)),
 	/**
 	 *  Persist tag ordering. `ordered_ids` specifies the desired order; each tag's
 	 *  `order` field is set to its index in the list.
 	 */
 	storeReorderTags: (orderedIds: number[]) => typedError<MutationResult_Serialize, string>(__TAURI_INVOKE("store_reorder_tags", { orderedIds })).then((v) => ((v.status === "ok" ? { ...v, data: ({...v.data,delta:({...v.data.delta,added:v.data.delta.added.map(i=>i),updated:v.data.delta.updated.map(i=>({...i,lng:i.lng==null?i.lng:i.lng,lat:i.lat==null?i.lat:i.lat,heading:i.heading==null?i.heading:i.heading}))})}) } : v) as typeof v)),
-	storeTagCounts: () => typedError<{ [key in number]: number }, string>(__TAURI_INVOKE("store_tag_counts")),
 	storeUndo: () => typedError<MutationResult_Serialize, string>(__TAURI_INVOKE("store_undo")).then((v) => ((v.status === "ok" ? { ...v, data: ({...v.data,delta:({...v.data.delta,added:v.data.delta.added.map(i=>i),updated:v.data.delta.updated.map(i=>({...i,lng:i.lng==null?i.lng:i.lng,lat:i.lat==null?i.lat:i.lat,heading:i.heading==null?i.heading:i.heading}))})}) } : v) as typeof v)),
 	storeRedo: () => typedError<MutationResult_Serialize, string>(__TAURI_INVOKE("store_redo")).then((v) => ((v.status === "ok" ? { ...v, data: ({...v.data,delta:({...v.data.delta,added:v.data.delta.added.map(i=>i),updated:v.data.delta.updated.map(i=>({...i,lng:i.lng==null?i.lng:i.lng,lat:i.lat==null?i.lat:i.lat,heading:i.heading==null?i.heading:i.heading}))})}) } : v) as typeof v)),
 	storeResetUndo: () => typedError<null, string>(__TAURI_INVOKE("store_reset_undo")),
@@ -115,15 +108,8 @@ export const commands = {
 	 *  patch file for JS to apply to the render overlay. Returns per-selection counts.
 	 */
 	storeSyncSelections: (sels: SelectionInput[]) => typedError<SyncSelectionsResult, string>(__TAURI_INVOKE("store_sync_selections", { sels })),
-	storeAddSelection: (props: SelectionProps) => typedError<SelectionResult, string>(__TAURI_INVOKE("store_add_selection", { props })),
-	storeRemoveSelection: (key: string) => typedError<number, string>(__TAURI_INVOKE("store_remove_selection", { key })),
-	storeResetSelections: () => typedError<number, string>(__TAURI_INVOKE("store_reset_selections")),
-	storeGetSelections: () => typedError<SelectionSummary[], string>(__TAURI_INVOKE("store_get_selections")),
-	storeGetSelectedIds: () => typedError<number[], string>(__TAURI_INVOKE("store_get_selected_ids")),
 	storeGetSelectedIdsList: () => typedError<number[], string>(__TAURI_INVOKE("store_get_selected_ids_list")),
-	storeSetSelectedIds: (ids: number[]) => typedError<null, string>(__TAURI_INVOKE("store_set_selected_ids", { ids })),
 	storeResolveSelection: (props: SelectionProps) => typedError<number[], string>(__TAURI_INVOKE("store_resolve_selection", { props })),
-	storeRefreshSelections: () => typedError<number, string>(__TAURI_INVOKE("store_refresh_selections")),
 	/**
 	 *  Full render rebuild: single-pass over all alive locations, writes binary to a temp file.
 	 *  Returns the file path for JS to fetch via `mma-buf://`. Only called on map open or full reset.
@@ -143,8 +129,6 @@ export const commands = {
 	storeExportCsv: (scope: number[] | null) => typedError<string, string>(__TAURI_INVOKE("store_export_csv", { scope })),
 	storeExportGeojson: (scope: number[] | null, tagsJson: string) => typedError<string, string>(__TAURI_INVOKE("store_export_geojson", { scope, tagsJson })),
 	storeExportBulkZip: () => typedError<string, string>(__TAURI_INVOKE("store_export_bulk_zip")),
-	storeSnapshotCommit: () => typedError<CommitBlobEntry[], string>(__TAURI_INVOKE("store_snapshot_commit")),
-	storeRestoreCommit: (mapId: string, blobs: CommitBlobEntry[]) => typedError<null, string>(__TAURI_INVOKE("store_restore_commit", { mapId, blobs })),
 	storeDbClearTable: (table: string) => typedError<number, string>(__TAURI_INVOKE("store_db_clear_table", { table })),
 	storeDbStats: () => typedError<DbStats, string>(__TAURI_INVOKE("store_db_stats")),
 	storeSeenWrite: (entry: SeenWriteEntry) => typedError<null, string>(__TAURI_INVOKE("store_seen_write", { entry })),
@@ -184,12 +168,6 @@ export type ColorPatchEntry = {
 	g: number,
 	b: number,
 	a: number,
-};
-
-export type CommitBlobEntry = {
-	geohash: string,
-	blobHash: string,
-	locationCount: number,
 };
 
 export type CommitDiff = {
@@ -542,19 +520,6 @@ export type SelectionInput = {
 };
 
 export type SelectionProps = { type: "Locations"; locations: number[]; name: string | null } | { type: "Everything" } | { type: "Polygon"; polygon: PolygonGeometry; includeInformational: boolean } | { type: "Tag"; tagId: number } | { type: "Untagged" } | { type: "Unpanned" } | { type: "PanoIds" } | { type: "NotPanoIds" } | { type: "Manual"; locations: number[] } | { type: "Duplicates"; distance: number } | { type: "ValidationState"; locations: number[]; state: number } | { type: "Intersection"; selections: Selection[] } | { type: "Union"; selections: Selection[] } | { type: "Invert"; selections: Selection[] } | { type: "Filter"; field: string; op: string; value: any; value2: any | null };
-
-export type SelectionResult = {
-	key: string,
-	count: number,
-	selectionVersion: number,
-};
-
-export type SelectionSummary = {
-	key: string,
-	color: [number, number, number],
-	type: string,
-	count: number,
-};
 
 export type SelectionSync = {
 	counts: number[],

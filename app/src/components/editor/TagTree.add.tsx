@@ -1,16 +1,11 @@
-import { useState, useMemo, useEffect, useCallback } from "react";
+import { useState, useMemo, useCallback } from "react";
 import * as ContextMenu from "@radix-ui/react-context-menu";
 import { Icon } from "@/components/primitives/Icon";
 import { mdiChevronDown, mdiChevronRight, mdiPencil } from "@mdi/js";
 import { textColorFor } from "@/lib/util/color";
 import { fmt } from "@/lib/util/format";
-import {
-	toggleTagSelections,
-	removeTagFromAllLocations,
-	getSelectedLocationIds,
-    removeTagFromLocations,
-} from "@/store/useMapStore";
-import { cmd } from "@/lib/commands";
+import { toggleTagSelections } from "@/store/useMapStore";
+import { TagContextMenuContent } from "./TagManager";
 import type { Tag } from "@/types";
 
 interface TagTreeNode {
@@ -262,9 +257,9 @@ function TagTreeNodeRow({
 				</ContextMenu.Trigger>
 				{node.tag && (
 					<ContextMenu.Portal>
-						<TreeContextMenu
-							node={node}
-							tagCounts={tagCounts}
+						<TagContextMenuContent
+							tagId={node.tag!.id}
+							totalCount={sumCounts(node, tagCounts)}
 							onRename={() =>
 								onRenameTag({ id: node.tag!.id, name: node.tag!.name })
 							}
@@ -294,56 +289,3 @@ function TagTreeNodeRow({
 	);
 }
 
-function TreeContextMenu({
-	node,
-	tagCounts,
-	onRename,
-}: {
-	node: TagTreeNode;
-	tagCounts: Record<number, number>;
-	onRename: () => void;
-}) {
-	const totalCount = sumCounts(node, tagCounts);
-	const tagId = node.tag!.id;
-	const [selCount, setSelCount] = useState<number | null>(null);
-
-	useEffect(() => {
-		const selIds = getSelectedLocationIds();
-		if (selIds.size === 0) {
-			setSelCount(0);
-			return;
-		}
-		cmd.storeResolveSelection({ type: "Tag", tagId }).then((tagLocIds) => {
-			let c = 0;
-			for (const id of tagLocIds) if (selIds.has(id)) c++;
-			setSelCount(c);
-		});
-	}, [tagId]);
-
-	const inSel = selCount ?? 0;
-
-	return (
-		<ContextMenu.Content className="context-menu">
-			<ContextMenu.Item
-				className="context-menu__item"
-				onSelect={() => removeTagFromAllLocations(tagId)}
-			>
-				Remove from all ({fmt.format(totalCount)} locations)
-			</ContextMenu.Item>
-			<ContextMenu.Item
-				className="context-menu__item"
-				disabled={inSel === 0}
-				onSelect={() => removeTagFromLocations(tagId, [...getSelectedLocationIds()])}
-			>
-				Remove from selection ({fmt.format(inSel)} locations)
-			</ContextMenu.Item>
-			<ContextMenu.Item
-				className="context-menu__item"
-				disabled={inSel === 0}
-				onSelect={onRename}
-			>
-				Rename in selection ({fmt.format(inSel)} locations)
-			</ContextMenu.Item>
-		</ContextMenu.Content>
-	);
-}

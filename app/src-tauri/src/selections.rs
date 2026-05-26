@@ -47,16 +47,6 @@ pub struct Selection {
     pub count: Option<u32>,
 }
 
-#[derive(Serialize, specta::Type)]
-#[serde(rename_all = "camelCase")]
-pub struct SelectionSummary {
-    pub key: String,
-    pub color: [u8; 3],
-    #[serde(rename = "type")]
-    pub sel_type: String,
-    pub count: usize,
-}
-
 // ---------------------------------------------------------------------------
 // LocView: unified view over Arrow batch + overlay
 // ---------------------------------------------------------------------------

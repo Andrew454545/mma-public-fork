@@ -20,10 +20,6 @@ export function getCommands(): readonly Command[] {
 	return commands;
 }
 
-export function getCommandsByGroup(group: CommandGroup): Command[] {
-	return commands.filter((c) => c.group === group);
-}
-
 export function getCommand(id: string): Command | undefined {
 	return commands.find((c) => c.id === id);
 }

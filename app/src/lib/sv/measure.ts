@@ -1,6 +1,7 @@
 import { useSyncExternalStore, useEffect } from "react";
 import MeasureToolClass from "measuretool-googlemaps-v3";
 import type { Location } from "@/types";
+import { createSyncStore } from "@/lib/util/syncStore";
 
 // --- Measure tool state ---
 
@@ -10,17 +11,7 @@ interface MeasureState {
 }
 
 let mState: MeasureState = { instance: null, isMeasuring: false };
-let mListeners: (() => void)[] = [];
-
-function mSubscribe(fn: () => void) {
-	mListeners.push(fn);
-	return () => {
-		mListeners = mListeners.filter((l) => l !== fn);
-	};
-}
-function mNotify() {
-	for (const fn of mListeners) fn();
-}
+const mStore = createSyncStore();
 function mSnap() {
 	return mState;
 }
@@ -32,11 +23,11 @@ function createInstance(map: google.maps.Map) {
 	});
 	mt.addListener("measure_start", () => {
 		mState = { ...mState, isMeasuring: true };
-		mNotify();
+		mStore.notify();
 	});
 	mt.addListener("measure_end", () => {
 		mState = { ...mState, isMeasuring: false };
-		mNotify();
+		mStore.notify();
 		queueMicrotask(() => map.setOptions({ draggableCursor: "crosshair" }));
 	});
 	return mt;
@@ -47,7 +38,7 @@ export function startMeasure(map: google.maps.Map, latLng: { lat: number; lng: n
 	if (!instance) {
 		instance = createInstance(map);
 		mState = { ...mState, instance };
-		mNotify();
+		mStore.notify();
 	}
 	instance.start([latLng]);
 }
@@ -57,7 +48,7 @@ export function endMeasure() {
 }
 
 export function useMeasureState() {
-	return useSyncExternalStore(mSubscribe, mSnap);
+	return useSyncExternalStore(mStore.subscribe, mSnap);
 }
 
 export function useMeasure() {
@@ -69,28 +60,18 @@ export function useMeasure() {
 // --- Lat/lng anchor state ---
 
 let anchor: { lat: number; lng: number } | null = null;
-let aListeners: (() => void)[] = [];
-
-function aSubscribe(fn: () => void) {
-	aListeners.push(fn);
-	return () => {
-		aListeners = aListeners.filter((l) => l !== fn);
-	};
-}
-function aNotify() {
-	for (const fn of aListeners) fn();
-}
+const aStore = createSyncStore();
 function aSnap() {
 	return anchor;
 }
 
 export function setLatLngAnchor(v: { lat: number; lng: number } | null) {
 	anchor = v;
-	aNotify();
+	aStore.notify();
 }
 
 export function useLatLngAnchor() {
-	return useSyncExternalStore(aSubscribe, aSnap);
+	return useSyncExternalStore(aStore.subscribe, aSnap);
 }
 
 // --- Context menu target ---

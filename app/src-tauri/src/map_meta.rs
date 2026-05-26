@@ -471,40 +471,6 @@ pub fn store_delete_folder(app: tauri::AppHandle, name: String) -> Result<(), St
 
 #[tauri::command]
 #[specta::specta]
-pub fn store_move_map_to_folder(
-    app: tauri::AppHandle,
-    map_id: String,
-    folder: Option<String>,
-) -> Result<(), String> {
-    let conn = fast_io::open_db(&app)?;
-    conn.execute(
-        "UPDATE maps SET folder = ?1 WHERE id = ?2",
-        params![folder, map_id],
-    )
-    .map_err(|e| e.to_string())?;
-    Ok(())
-}
-
-#[tauri::command]
-#[specta::specta]
-pub fn store_update_map_labels(
-    app: tauri::AppHandle,
-    map_id: String,
-    labels: Vec<String>,
-) -> Result<(), String> {
-    let conn = fast_io::open_db(&app)?;
-    let now = now_iso();
-    let json = serde_json::to_string(&labels).unwrap_or_default();
-    conn.execute(
-        "UPDATE maps SET labels = ?1, updated_at = ?2 WHERE id = ?3",
-        params![json, now, map_id],
-    )
-    .map_err(|e| e.to_string())?;
-    Ok(())
-}
-
-#[tauri::command]
-#[specta::specta]
 pub fn store_get_pano_date(app: tauri::AppHandle, pano_id: String) -> Result<Option<i64>, String> {
     let conn = fast_io::open_db(&app)?;
     let result = conn.query_row(

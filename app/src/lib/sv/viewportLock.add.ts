@@ -1,4 +1,5 @@
 import { google } from "./opensv";
+import { createSyncStore } from "@/lib/util/syncStore";
 
 interface CameraFrame {
 	heading: number;
@@ -13,24 +14,8 @@ let lockedZoom = 0;
 let svService: google.maps.StreetViewService | null = null;
 const frameCache = new Map<string, CameraFrame>();
 
-let listeners: (() => void)[] = [];
-let version = 0;
-
-function notify() {
-	version++;
-	for (const fn of listeners) fn();
-}
-
-export function subscribeViewportLock(fn: () => void) {
-	listeners.push(fn);
-	return () => {
-		listeners = listeners.filter((l) => l !== fn);
-	};
-}
-
-export function getViewportLockSnapshot() {
-	return version;
-}
+const { subscribe: subscribeViewportLock, getSnapshot: getViewportLockSnapshot, notify } = createSyncStore();
+export { subscribeViewportLock, getViewportLockSnapshot };
 
 export function isViewportLocked() {
 	return locked;

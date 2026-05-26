@@ -258,7 +258,7 @@ export function TagManager() {
 	);
 }
 
-function TagContextMenuContent({
+export function TagContextMenuContent({
 	tagId,
 	totalCount,
 	onRename,

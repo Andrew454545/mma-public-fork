@@ -14,6 +14,7 @@ export interface Plugin {
 	description?: string;
 	icon: string;
 	comingSoon?: boolean;
+	core?: boolean;
 	settings?: PluginSettingDef[];
 	activate(): void | (() => void);
 	modal?: ComponentType<{ onClose: () => void }>;
@@ -83,6 +84,11 @@ export function getPlugin(id: string): Plugin | undefined {
 	return plugins.get(id);
 }
 
+export function unregisterPlugin(id: string) {
+	plugins.delete(id);
+	notifyRegistry();
+}
+
 export function isPluginEnabled(id: string): boolean {
 	return enabledSet.has(id);
 }
@@ -134,5 +140,9 @@ export function deactivatePlugin(id: string) {
 
 // --- React subscription for registry changes ---
 
-const { subscribe: subscribeRegistry, getSnapshot: getRegistrySnapshot, notify: notifyRegistry } = createSyncStore();
+const {
+	subscribe: subscribeRegistry,
+	getSnapshot: getRegistrySnapshot,
+	notify: notifyRegistry,
+} = createSyncStore();
 export { subscribeRegistry, getRegistrySnapshot };

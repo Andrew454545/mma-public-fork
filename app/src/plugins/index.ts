@@ -4,7 +4,7 @@
  */
 
 import "./externals";
-import { setPendingManifest, type PluginManifest } from "./registry";
+import { setPendingManifest, getPlugins, activatePlugin, type PluginManifest } from "./registry";
 import { cmd } from "@/lib/commands";
 import { log } from "@/lib/util/log";
 
@@ -16,6 +16,20 @@ const corePlugins = import.meta.glob("./*/index.ts");
 
 async function loadCorePlugins() {
 	await Promise.all(Object.values(corePlugins).map((load) => load()));
+	for (const p of getPlugins()) p.core = true;
+}
+
+async function loadUserPlugin(m: PluginManifest) {
+	const appDataDir = await cmd.getAppDataDir();
+	setPendingManifest(m);
+	try {
+		const filePath = `${appDataDir}\\plugins\\${m.id}\\${m.main}`;
+		const code = await cmd.readFile(filePath);
+		const blob = new Blob([code], { type: "application/javascript" });
+		await import(/* @vite-ignore */ URL.createObjectURL(blob));
+	} finally {
+		setPendingManifest(null);
+	}
 }
 
 async function loadUserPlugins() {
@@ -25,20 +39,18 @@ async function loadUserPlugins() {
 	} catch {
 		return;
 	}
-	const appDataDir = await cmd.getAppDataDir();
 	for (const m of manifests) {
 		try {
-			setPendingManifest(m);
-			const filePath = `${appDataDir}\\plugins\\${m.id}\\${m.main}`;
-			const code = await cmd.readFile(filePath);
-			const blob = new Blob([code], { type: "application/javascript" });
-			await import(/* @vite-ignore */ URL.createObjectURL(blob));
-			setPendingManifest(null);
+			await loadUserPlugin(m);
 		} catch (e) {
-			setPendingManifest(null);
 			log.error(`[plugin] failed to load user plugin "${m.id}":`, e);
 		}
 	}
+}
+
+export async function loadAndActivatePlugin(manifest: PluginManifest) {
+	await loadUserPlugin(manifest);
+	activatePlugin(manifest.id);
 }
 
 export const pluginsReady = loadCorePlugins().then(loadUserPlugins);

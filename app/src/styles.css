@@ -4690,9 +4690,29 @@ body {
 	color: #888;
 	padding: 2rem 0;
 }
-.plugin-marketplace__grid {
+.plugin-marketplace__tabs {
 	display: flex;
-	flex-direction: column;
+	gap: 0;
+	border-bottom: 1px solid #ddd;
+	margin-bottom: 0.5rem;
+}
+.plugin-marketplace__tab {
+	padding: 6px 16px;
+	font-size: 0.85rem;
+	font-weight: 600;
+	background: none;
+	border: none;
+	border-bottom: 2px solid transparent;
+	color: #888;
+	cursor: pointer;
+}
+.plugin-marketplace__tab--active {
+	color: #222;
+	border-bottom-color: #4a9eff;
+}
+.plugin-marketplace__grid {
+	display: grid;
+	grid-template-columns: 1fr 1fr;
 	gap: 0.5rem;
 }
 .plugin-card {

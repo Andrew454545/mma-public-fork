@@ -94,6 +94,53 @@ fn list_user_plugins(app: tauri::AppHandle) -> Vec<PluginManifest> {
     plugins
 }
 
+const PLUGIN_REPO_BASE: &str =
+    "https://raw.githubusercontent.com/ccmdi/mma/master/plugins";
+
+#[tauri::command]
+#[specta::specta]
+fn install_plugin(app: tauri::AppHandle, id: String) -> Result<PluginManifest, String> {
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?.join("plugins").join(&id);
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+
+    let manifest_url = format!("{PLUGIN_REPO_BASE}/{id}/manifest.json");
+    let manifest_bytes = proxy_client().get(&manifest_url).send()
+        .and_then(|r| r.error_for_status())
+        .map_err(|e| format!("Failed to fetch manifest: {e}"))?
+        .bytes().map_err(|e| e.to_string())?;
+    std::fs::write(dir.join("manifest.json"), &manifest_bytes).map_err(|e| e.to_string())?;
+
+    let val: serde_json::Value = serde_json::from_slice(&manifest_bytes)
+        .map_err(|e| format!("Invalid manifest JSON: {e}"))?;
+    let main = val.get("main").and_then(|v| v.as_str()).unwrap_or("index.js");
+
+    let main_url = format!("{PLUGIN_REPO_BASE}/{id}/{main}");
+    let main_bytes = proxy_client().get(&main_url).send()
+        .and_then(|r| r.error_for_status())
+        .map_err(|e| format!("Failed to fetch {main}: {e}"))?
+        .bytes().map_err(|e| e.to_string())?;
+    std::fs::write(dir.join(main), &main_bytes).map_err(|e| e.to_string())?;
+
+    let name = val.get("name").and_then(|v| v.as_str())
+        .unwrap_or(&id).to_string();
+    let description = val.get("description").and_then(|v| v.as_str())
+        .unwrap_or("").to_string();
+    let icon = val.get("icon").and_then(|v| v.as_str())
+        .unwrap_or("").to_string();
+
+    Ok(PluginManifest { id, name, description, icon, main: main.to_string() })
+}
+
+#[tauri::command]
+#[specta::specta]
+fn uninstall_plugin(app: tauri::AppHandle, id: String) -> Result<(), String> {
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?.join("plugins").join(&id);
+    if dir.exists() {
+        std::fs::remove_dir_all(&dir).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
 fn build_http_client(follow_redirects: bool) -> reqwest::blocking::Client {
     let redirect = if follow_redirects {
         reqwest::redirect::Policy::default()
@@ -314,6 +361,8 @@ pub fn run() {
                     get_app_data_dir,
                     open_data_folder,
                     list_user_plugins,
+                    install_plugin,
+                    uninstall_plugin,
                     geocoder::reverse_geocode,
                     // --- Map lifecycle ---
                     location_store::store_open_map,

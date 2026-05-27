@@ -825,13 +825,14 @@ function TagFindReplaceDialog({
 							<p style={{ margin: "0 0 0.25rem", fontSize: "0.85rem", color: "#888" }}>
 								{matches.length} tag{matches.length !== 1 ? "s" : ""} will be affected:
 							</p>
-							<div
+							<ul
 								style={{
-									display: "flex",
-									flexWrap: "wrap",
-									gap: 4,
-									maxHeight: 160,
+									margin: 0,
+									padding: 0,
+									listStyle: "none",
+									maxHeight: 320,
 									overflowY: "auto",
+									fontSize: "0.85rem",
 								}}
 							>
 								{matches.map((t) => {
@@ -840,18 +841,27 @@ function TagFindReplaceDialog({
 										replace,
 									);
 									return (
-										<span
+										<li
 											key={t.id}
-											className="tag is-small"
-											style={{ backgroundColor: t.color, color: textColorFor(t.color) }}
+											style={{ padding: "1px 0", display: "flex", alignItems: "center", gap: 6 }}
 										>
-											<span className="tag__text">
-												{t.name} <span style={{ opacity: 0.5 }}>-&gt;</span> {newName}
+											<span
+												className="tag is-small"
+												style={{ backgroundColor: t.color, color: textColorFor(t.color) }}
+											>
+												<span className="tag__text">{t.name}</span>
 											</span>
-										</span>
+											<span style={{ opacity: 0.5 }}>&rarr;</span>
+											<span
+												className="tag is-small"
+												style={{ backgroundColor: t.color, color: textColorFor(t.color) }}
+											>
+												<span className="tag__text">{newName}</span>
+											</span>
+										</li>
 									);
 								})}
-							</div>
+							</ul>
 						</div>
 					)}
 					<p style={{ margin: 0, fontSize: "0.8rem", color: "#e5a33e" }}>

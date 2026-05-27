@@ -4657,6 +4657,9 @@ body {
 	display: none !important;
 }
 
+.tag-find-replace-modal {
+	width: 36rem;
+}
 .version-history-modal {
 	max-width: 56rem;
 }

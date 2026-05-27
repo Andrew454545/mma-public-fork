@@ -41,7 +41,7 @@ import { patchOpenSV, setPanoHovered } from "@/lib/sv/opensvPatch.add";
 import { dateFmt } from "@/lib/util/format";
 import { textColorFor } from "@/lib/util/color";
 import {
-	type PanoTime,
+	type PanoReference,
 	type ResolvedPano,
 	parsePanoDate,
 	resolvePano,
@@ -76,7 +76,7 @@ import {
 import { useReverseGeocode } from "@/components/editor/location/useReverseGeocode";
 import { useCameraType } from "@/components/editor/location/useCameraType";
 import { useExactDate } from "@/components/editor/location/useExactDate";
-import { PanoViewerProvider, usePanoViewer } from "@/components/editor/location/PanoViewerContext";
+import { PanoViewerProvider, usePanoViewer } from "./PanoViewerContext";
 import {
 	toggleViewportLock,
 	applyViewportLock,
@@ -116,11 +116,11 @@ function PanoDatePicker({
 }) {
 	const { currentPano, panoDates, selectedPanoId } = usePanoViewer();
 	const location = useActiveLocation();
-	const lat = currentPano?.lat ?? location?.lat ?? 0;
-	const lng = currentPano?.lng ?? location?.lng ?? 0;
+	const lat = currentPano?.location?.latLng?.lat() ?? location?.lat ?? 0;
+	const lng = currentPano?.location?.latLng?.lng() ?? location?.lng ?? 0;
 	const defaultEntry = panoDates.find((d) => d.pano === defaultPanoId);
-	const resolvedEntry = currentPano
-		? panoDates.find((d) => d.pano === currentPano.panoId)
+	const resolvedEntry = currentPano?.location
+		? panoDates.find((d) => d.pano === currentPano.location!.pano)
 		: undefined;
 	const sorted = useMemo(
 		() => [...panoDates].sort((a, b) => a.date.getTime() - b.date.getTime()),
@@ -131,7 +131,7 @@ function PanoDatePicker({
 			? (defaultEntry ?? resolvedEntry)
 			: sorted.find((d) => d.pano === selectedPanoId);
 	const isDefault = selectedPanoId == null;
-	const displayDate = currentEntry?.date ?? (isDefault ? currentPano?.imageDate ?? null : null);
+	const displayDate = currentEntry?.date ?? (isDefault && currentPano?.imageDate ? parsePanoDate(currentPano.imageDate) : null);
 	const prevLabelRef = useRef("");
 	const displayLabel = displayDate
 		? isDefault
@@ -153,7 +153,7 @@ function PanoDatePicker({
 	const exactDateFormat = useSetting("exactDateFormat");
 	const dateTimezone = useSetting("dateTimezone");
 	const triggerPanoId =
-		currentEntry?.pano ?? currentPano?.panoId ?? sorted[sorted.length - 1]?.pano ?? defaultPanoId;
+		currentEntry?.pano ?? currentPano?.location?.pano ?? sorted[sorted.length - 1]?.pano ?? defaultPanoId;
 	const triggerCameraType = useCameraType(triggerPanoId);
 
 	const newestPano = sorted.length > 0 ? sorted[sorted.length - 1] : null;
@@ -248,7 +248,7 @@ function PanoDatePicker({
 	);
 }
 
-function PanoOption({ pano }: { pano: PanoTime }) {
+function PanoOption({ pano }: { pano: PanoReference }) {
 	const showBadges = useSetting("showCameraBadges");
 	const cameraType = useCameraType(pano.pano);
 	return (
@@ -743,13 +743,11 @@ function LocationPreviewInner() {
 				if (!panoId) return; // ?
 				const pos = pano.getPosition();
 				setCurrentPano((prev) => {
-					if (prev?.panoId === panoId) return prev;
+					if (prev?.location?.pano === panoId) return prev;
 					return {
-						panoId,
-						lat: pos?.lat() ?? 0,
-						lng: pos?.lng() ?? 0,
-						imageDate: prev?.imageDate ?? null,
-					};
+						location: { pano: panoId, latLng: pos! },
+						imageDate: prev?.imageDate,
+					} as google.maps.StreetViewPanoramaData;
 				});
 				if (pos) {
 					pushTrail(pos.lng(), pos.lat());
@@ -794,14 +792,7 @@ function LocationPreviewInner() {
 			// Populate currentPano from the resolve result immediately.
 			// Covers the case where setPano() with the same ID doesn't trigger status_changed.
 			if (result.pano?.location) {
-				const loc = result.pano.location;
-				const imgDate = result.pano.imageDate ? parsePanoDate(result.pano.imageDate) : null;
-				setCurrentPano({
-					panoId: loc.pano,
-					lat: loc.latLng.lat(),
-					lng: loc.latLng.lng(),
-					imageDate: imgDate,
-				});
+				setCurrentPano(result.pano);
 			}
 			setPanoReady(true);
 			seenSetCanvas(() => singletonDiv.querySelector("canvas"));
@@ -831,19 +822,22 @@ function LocationPreviewInner() {
 		}
 		let cancelled = false;
 
-		function extractTimes(data: google.maps.StreetViewPanoramaData | null): PanoTime[] {
+		function extractTimes(data: google.maps.StreetViewPanoramaData | null): PanoReference[] {
 			const raw = ((data as unknown as { time?: { pano: string; AA?: Date }[] })?.time) ?? [];
 			return raw.flatMap((t) =>
 				t.pano && t.AA instanceof Date ? [{ pano: t.pano, date: t.AA }] : [],
 			);
 		}
 
-		const byPano = fetchPanoData({ pano: currentPano.panoId });
-		const byLoc = fetchPanoData({ location: { lat: currentPano.lat, lng: currentPano.lng }, radius: 50 });
+		const loc = currentPano.location;
+		if (!loc?.latLng) return;
+		const panoPos = { lat: loc.latLng.lat(), lng: loc.latLng.lng() };
+		const byPano = fetchPanoData({ pano: loc.pano });
+		const byLoc = fetchPanoData({ location: panoPos, radius: 50 });
 
 		Promise.all([byPano, byLoc]).then(([panoData, locData]) => {
 			if (cancelled) return;
-			const merged = new Map<string, PanoTime>();
+			const merged = new Map<string, PanoReference>();
 			for (const t of extractTimes(locData)) merged.set(t.pano, t);
 			for (const t of extractTimes(panoData)) merged.set(t.pano, t);
 
@@ -852,7 +846,7 @@ function LocationPreviewInner() {
 			const allUnofficial = merged.size > 0 && [...merged.keys()].every((p) => !isOfficialPano(p));
 			if (allUnofficial && !cancelled) {
 				fetchPanoData({
-					location: { lat: currentPano.lat, lng: currentPano.lng },
+					location: panoPos,
 					radius: 25,
 					sources: [google.maps.StreetViewSource.GOOGLE],
 				}).then((officialData) => {
@@ -865,7 +859,7 @@ function LocationPreviewInner() {
 			}
 		});
 
-		fetchSvMetadata([currentPano.panoId]).then(([data]) => {
+		fetchSvMetadata([loc.pano]).then(([data]) => {
 			if (cancelled || !data) return;
 			setAltitude(data.extra?.altitude ?? 0);
 			const loc = getActiveLocation();
@@ -873,7 +867,7 @@ function LocationPreviewInner() {
 		});
 
 		return () => { cancelled = true; };
-	}, [location?.id, currentPano?.panoId]);
+	}, [location?.id, currentPano?.location?.pano]);
 
 	useEffect(() => {
 		if (isFullscreen) {
@@ -1031,7 +1025,7 @@ function LocationPreviewInner() {
 	});
 	useHotkey(useBinding("nextPanoDate"), () => {
 		if (!panoDates.length) return;
-		const currentPanoId = selectedPanoId ?? currentPano?.panoId ?? location?.panoId;
+		const currentPanoId = selectedPanoId ?? currentPano?.location?.pano ?? location?.panoId;
 		const raw = currentPanoId ? panoDates.findIndex((d) => d.pano === currentPanoId) : -1;
 		const idx = raw === -1 ? panoDates.length - 1 : raw;
 		const next = idx < panoDates.length - 1 ? idx + 1 : 0;
@@ -1039,7 +1033,7 @@ function LocationPreviewInner() {
 	});
 	useHotkey(useBinding("prevPanoDate"), () => {
 		if (!panoDates.length) return;
-		const currentPanoId = selectedPanoId ?? currentPano?.panoId ?? location?.panoId;
+		const currentPanoId = selectedPanoId ?? currentPano?.location?.pano ?? location?.panoId;
 		const raw = currentPanoId ? panoDates.findIndex((d) => d.pano === currentPanoId) : -1;
 		const idx = raw === -1 ? panoDates.length - 1 : raw;
 		const prev = idx > 0 ? idx - 1 : panoDates.length - 1;

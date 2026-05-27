@@ -2,20 +2,13 @@
 import { createContext, useContext, useState, type ReactNode } from "react";
 import { useActiveLocation } from "@/store/useMapStore";
 import { hasLoadAsPanoId } from "@/types";
-import type { PanoTime } from "@/lib/sv/lookup.add";
-
-export interface CurrentPano {
-	panoId: string;
-	lat: number;
-	lng: number;
-	imageDate: Date | null;
-}
+import type { PanoReference } from "@/lib/sv/lookup.add";
 
 interface PanoViewerContextValue {
-	currentPano: CurrentPano | null;
-	setCurrentPano: React.Dispatch<React.SetStateAction<CurrentPano | null>>;
-	panoDates: PanoTime[];
-	setPanoDates: React.Dispatch<React.SetStateAction<PanoTime[]>>;
+	currentPano: google.maps.StreetViewPanoramaData | null;
+	setCurrentPano: React.Dispatch<React.SetStateAction<google.maps.StreetViewPanoramaData | null>>;
+	panoDates: PanoReference[];
+	setPanoDates: React.Dispatch<React.SetStateAction<PanoReference[]>>;
 	isFullscreen: boolean;
 	setIsFullscreen: React.Dispatch<React.SetStateAction<boolean>>;
 	panoReady: boolean;
@@ -29,14 +22,14 @@ const PanoViewerContext = createContext<PanoViewerContextValue | null>(null);
 
 export function PanoViewerProvider({ children }: { children: ReactNode }) {
 	const location = useActiveLocation();
-	const [currentPano, setCurrentPano] = useState<CurrentPano | null>(null);
-	const [panoDates, setPanoDates] = useState<PanoTime[]>([]);
+	const [currentPano, setCurrentPano] = useState<google.maps.StreetViewPanoramaData | null>(null);
+	const [panoDates, setPanoDates] = useState<PanoReference[]>([]);
 	const [isFullscreen, setIsFullscreen] = useState(false);
 	const [panoReady, setPanoReady] = useState(false);
 	const [altitude, setAltitude] = useState(0);
 
 	const selectedPanoId =
-		location && hasLoadAsPanoId(location) && currentPano?.panoId ? currentPano.panoId : null;
+		location && hasLoadAsPanoId(location) && currentPano?.location?.pano ? currentPano.location.pano : null;
 
 	return (
 		<PanoViewerContext.Provider

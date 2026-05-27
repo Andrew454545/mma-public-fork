@@ -8,7 +8,7 @@ import type { Location } from "@/types";
 export const SV_SEARCH_RADIUS = 50;
 
 /** A single historical panorama entry (pano ID + capture date). */
-export interface PanoTime {
+export interface PanoReference {
 	pano: string;
 	date: Date;
 }

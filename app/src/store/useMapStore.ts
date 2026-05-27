@@ -6,6 +6,7 @@ import type {
 	MutationResult_Serialize as MutationResult,
 	LocationPatch_Deserialize as LocationPatch,
 	MapMetaPatch,
+	SyncSelectionsResult
 } from "@/bindings.gen";
 import { emit as emitEvent } from "@/lib/events";
 import { log } from "@/lib/util/log";
@@ -679,13 +680,13 @@ async function applySelectionUpdate(updater: (m: MapData, sels: Selection[]) => 
 				const r = parseInt(tag.color.slice(1, 3), 16);
 				const g = parseInt(tag.color.slice(3, 5), 16);
 				const b = parseInt(tag.color.slice(5, 7), 16);
-				color = [r, g, b] as [number, number, number];
+				color = [r, g, b];
 			}
 		}
 		return { props: s.props, color };
 	});
 	const t1 = performance.now();
-	let result;
+	let result: SyncSelectionsResult;
 	try {
 		result = await cmd.storeSyncSelections(sels);
 	} catch (e) {

@@ -14,6 +14,7 @@ interface DatePickerProps {
 	anyTime?: boolean;
 	onAnyTimeToggle?: (v: boolean) => void;
 	showAnyTime?: boolean;
+	onYearSelect?: (year: number) => void;
 }
 
 const MONTHS_SHORT = [
@@ -37,6 +38,9 @@ function pad2(n: number): string {
 
 function parseToDate(value: string): Date | null {
 	if (!value) return null;
+	// "MM" (anyYear month)
+	const mm = /^(\d{2})$/.exec(value);
+	if (mm) return new Date(2000, Number(mm[1]) - 1, 1);
 	// "MM-DD"
 	const md = /^(\d{2})-(\d{2})$/.exec(value);
 	if (md) return new Date(2000, Number(md[1]) - 1, Number(md[2]));
@@ -87,10 +91,12 @@ function MonthGrid({
 	value,
 	onChange,
 	anyYear,
+	onYearSelect,
 }: {
 	value: string;
 	onChange: (v: string) => void;
 	anyYear?: boolean;
+	onYearSelect?: (year: number) => void;
 }) {
 	const parsed = parseToDate(value);
 	const [year, setYear] = useState(() => parsed?.getFullYear() ?? new Date().getFullYear());
@@ -105,6 +111,10 @@ function MonthGrid({
 		}
 	};
 
+	const currentYear = new Date().getFullYear();
+	const yearStart = 2007;
+	const years = Array.from({ length: currentYear - yearStart + 1 }, (_, i) => yearStart + i);
+
 	return (
 		<div className="month-grid">
 			{!anyYear && (
@@ -116,6 +126,20 @@ function MonthGrid({
 					<button type="button" onClick={() => setYear((y) => y + 1)}>
 						&gt;
 					</button>
+				</div>
+			)}
+			{onYearSelect && !anyYear && (
+				<div className="month-grid__years">
+					{years.map((y) => (
+						<button
+							key={y}
+							type="button"
+							className="month-grid__cell"
+							onClick={() => onYearSelect(y)}
+						>
+							{y}
+						</button>
+					))}
 				</div>
 			)}
 			<div className="month-grid__months">
@@ -148,6 +172,7 @@ export function DatePicker({
 	anyTime,
 	onAnyTimeToggle,
 	showAnyTime,
+	onYearSelect,
 }: DatePickerProps) {
 	const [open, setOpen] = useState(false);
 
@@ -248,7 +273,7 @@ export function DatePicker({
 							</label>
 						</div>
 					) : mode === "month" ? (
-						<MonthGrid value={value} onChange={handleMonthSelect} anyYear={anyYear} />
+						<MonthGrid value={value} onChange={handleMonthSelect} anyYear={anyYear} onYearSelect={onYearSelect ? (y) => { onYearSelect(y); setOpen(false); } : undefined} />
 					) : (
 						<>
 							<DayPicker

@@ -3034,6 +3034,14 @@ summary.button {
 .month-grid__nav button:hover {
 	background: #f0f0f0;
 }
+.month-grid__years {
+	display: grid;
+	grid-template-columns: repeat(4, 1fr);
+	gap: 2px;
+	margin-bottom: 6px;
+	padding-bottom: 6px;
+	border-bottom: 1px solid #e0e0e0;
+}
 .month-grid__months {
 	display: grid;
 	grid-template-columns: repeat(3, 1fr);

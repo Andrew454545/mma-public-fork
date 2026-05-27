@@ -385,7 +385,7 @@ const OP_LABELS: Record<FilterOp, string> = {
 };
 const filterBuilderState = new Map<
 	string,
-	{ field: string; op: FilterOp; value: string; value2: string }
+	{ field: string; op: FilterOp; value: string; value2: string; anyYear?: boolean; anyTime?: boolean }
 >();
 
 function opsForType(type: string | undefined): FilterOp[] {
@@ -468,6 +468,7 @@ function FilterValueInput({
 	anyTime,
 	onAnyTimeToggle,
 	showAnyTime,
+	onYearSelect,
 }: {
 	fieldEntry: FieldEntry | undefined;
 	value: string;
@@ -479,6 +480,7 @@ function FilterValueInput({
 	anyTime?: boolean;
 	onAnyTimeToggle?: (v: boolean) => void;
 	showAnyTime?: boolean;
+	onYearSelect?: (year: number) => void;
 }) {
 	const type = fieldEntry?.fieldType;
 	const def = fieldEntry?.fieldDef;
@@ -510,6 +512,7 @@ function FilterValueInput({
 				anyTime={anyTime}
 				onAnyTimeToggle={onAnyTimeToggle}
 				showAnyTime={showAnyTime}
+				onYearSelect={onYearSelect}
 			/>
 		);
 	}
@@ -543,15 +546,15 @@ function FilterBuilder({ mapId }: { mapId: string }) {
 	const [op, setOp] = useState<FilterOp>(saved?.op ?? "eq");
 	const [value, setValue] = useState(saved?.value ?? "");
 	const [value2, setValue2] = useState(saved?.value2 ?? "");
-	const [anyYear, setAnyYear] = useState(false);
-	const [anyTime, setAnyTime] = useState(false);
+	const [anyYear, setAnyYear] = useState(saved?.anyYear ?? false);
+	const [anyTime, setAnyTime] = useState(saved?.anyTime ?? false);
 	useEffect(() => {
 		if (!field && fields.length > 0) setField(fields[0].key);
 	}, [field, fields]);
 
 	useEffect(() => {
-		filterBuilderState.set(mapId, { field, op, value, value2 });
-	}, [mapId, field, op, value, value2]);
+		filterBuilderState.set(mapId, { field, op, value, value2, anyYear, anyTime });
+	}, [mapId, field, op, value, value2, anyYear, anyTime]);
 
 	const fieldEntry = fields.find((f) => f.key === field);
 	const isNumeric = fieldEntry?.fieldType === "number" || fieldEntry?.fieldType === "date";
@@ -581,13 +584,58 @@ function FilterBuilder({ mapId }: { mapId: string }) {
 
 	const handleAnyYearToggle = (checked: boolean) => {
 		setAnyYear(checked);
-		if (checked) setAnyTime(false);
+		if (checked) {
+			setAnyTime(false);
+			const convert = (v: string): string => {
+				if (!v) return "";
+				if (isExactDate) {
+					const n = Number(v);
+					if (!isNaN(n) && v !== "") {
+						const d = new Date(n * 1000);
+						return `${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+					}
+				}
+				const ym = /^\d{4}-(\d{2})$/.exec(v);
+				if (ym) return ym[1];
+				return v;
+			};
+			setValue(convert(value));
+			setValue2(convert(value2));
+		} else {
+			const now = new Date();
+			const yr = now.getFullYear();
+			const convert = (v: string): string => {
+				if (!v) return "";
+				if (isExactDate) {
+					const md = /^(\d{2})-(\d{2})$/.exec(v);
+					if (md) {
+						return String(Math.floor(Date.UTC(yr, Number(md[1]) - 1, Number(md[2])) / 1000));
+					}
+				}
+				if (/^\d{2}$/.test(v)) return `${yr}-${v}`;
+				return v;
+			};
+			setValue(convert(value));
+			setValue2(convert(value2));
+		}
 	};
 
 	const handleAnyTimeToggle = (checked: boolean) => {
 		setAnyTime(checked);
 		if (checked) {
 			setAnyYear(false);
+			const convert = (v: string): string => {
+				if (!v) return "";
+				const n = Number(v);
+				if (!isNaN(n) && v !== "") {
+					const d = new Date(n * 1000);
+					return `${String(d.getUTCHours()).padStart(2, "0")}:${String(d.getUTCMinutes()).padStart(2, "0")}`;
+				}
+				return "";
+			};
+			setValue(convert(value));
+			setValue2(convert(value2));
+		} else {
 			setValue("");
 			setValue2("");
 		}
@@ -643,6 +691,13 @@ function FilterBuilder({ mapId }: { mapId: string }) {
 	const showAnyYear = isBetween && isDateLike;
 	const showAnyTime = isBetween && isExactDate;
 
+	const handleYearSelect = isBetween && fieldEntry?.fieldType === "month"
+		? (year: number) => {
+			setValue(`${year}-01`);
+			setValue2(`${year}-12`);
+		}
+		: undefined;
+
 	return (
 		<div className="extra-filter-builder">
 			<label>Filter by metadata:</label>
@@ -676,6 +731,7 @@ function FilterBuilder({ mapId }: { mapId: string }) {
 					anyTime={anyTime}
 					onAnyTimeToggle={handleAnyTimeToggle}
 					showAnyTime={showAnyTime}
+					onYearSelect={handleYearSelect}
 				/>
 			)}
 			{isBetween && (

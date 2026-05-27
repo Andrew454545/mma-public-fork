@@ -273,12 +273,18 @@ pub struct MapData {
 pub struct MapMetaPatch {
     pub name: Option<String>,
     pub description: Option<String>,
+    #[serde(deserialize_with = "deserialize_double_option", default)]
     pub folder: Option<Option<String>>,
     pub settings: Option<MapSettings>,
     pub score_bounds: Option<ScoreBounds>,
     pub extra: Option<MapExtra>,
     pub tags: Option<HashMap<String, Tag>>,
     pub labels: Option<Vec<String>>,
+}
+
+fn deserialize_double_option<'de, D>(de: D) -> Result<Option<Option<String>>, D::Error>
+where D: serde::Deserializer<'de> {
+    Ok(Some(serde::Deserialize::deserialize(de)?))
 }
 
 /// Deserialize a SQLite row into `MapMeta`, parsing JSON columns with

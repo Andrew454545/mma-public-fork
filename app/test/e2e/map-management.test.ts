@@ -1,5 +1,6 @@
 import {
 	waitForReady,
+	createAndOpenMap,
 	closeMap,
 	deleteMap,
 	flushAndWait,
@@ -28,14 +29,16 @@ describe("Map management", () => {
 	});
 
 	it("create a map", async () => {
-		const result = await withApi(async (api) => {
-			const map = await api.cmd.storeCreateMap("Test Map 1", null);
-			const count = await api.cmd.storeLocationCount();
-			return { id: map.meta.id, name: map.meta.name, locCount: count };
-		});
-		expect(result.name).toBe("Test Map 1");
-		expect(result.locCount).toBe(0);
-		createdMapIds.push(result.id);
+		const id = await createAndOpenMap("Test Map 1");
+		createdMapIds.push(id);
+
+		const name = await withApi(async (api) => api.getCurrentMap()?.meta.name);
+		expect(name).toBe("Test Map 1");
+
+		const count = await withApi(async (api) => api.cmd.storeLocationCount());
+		expect(count).toBe(0);
+
+		await closeMap();
 	});
 
 	it("create multiple maps", async () => {

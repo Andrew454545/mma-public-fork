@@ -129,6 +129,7 @@ describe("Delete clears active location", () => {
 
 	it("active location cleared when it is deleted", async () => {
 		await openLocation(locIds[0]);
+		await browser.pause(200);
 		const activeBefore = await withApi(async (api) => api.getActiveLocation()?.id ?? null);
 		expect(activeBefore).toBe(locIds[0]);
 

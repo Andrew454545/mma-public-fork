@@ -112,11 +112,19 @@ fn list_user_plugins(app: tauri::AppHandle) -> Vec<PluginManifest> {
 const PLUGIN_REPO_BASE: &str =
     "https://raw.githubusercontent.com/ccmdi/mma/master/plugins";
 
+fn validate_plugin_id(id: &str) -> Result<(), String> {
+    if id.is_empty() || !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+        return Err(format!("Invalid plugin id: {id}"));
+    }
+    Ok(())
+}
+
 /// Download a plugin from the GitHub plugin repository and install it to the local plugins directory.
 /// Fetches `manifest.json` and the main JS file specified in the manifest.
 #[tauri::command]
 #[specta::specta]
 fn install_plugin(app: tauri::AppHandle, id: String) -> Result<PluginManifest, String> {
+    validate_plugin_id(&id)?;
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?.join("plugins").join(&id);
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
 
@@ -130,6 +138,9 @@ fn install_plugin(app: tauri::AppHandle, id: String) -> Result<PluginManifest, S
     let val: serde_json::Value = serde_json::from_slice(&manifest_bytes)
         .map_err(|e| format!("Invalid manifest JSON: {e}"))?;
     let main = val.get("main").and_then(|v| v.as_str()).unwrap_or("index.js");
+    if main.contains("..") || main.contains('/') || main.contains('\\') {
+        return Err(format!("Invalid main field in manifest: {main}"));
+    }
 
     let main_url = format!("{PLUGIN_REPO_BASE}/{id}/{main}");
     let main_bytes = proxy_client().get(&main_url).send()
@@ -152,6 +163,7 @@ fn install_plugin(app: tauri::AppHandle, id: String) -> Result<PluginManifest, S
 #[tauri::command]
 #[specta::specta]
 fn uninstall_plugin(app: tauri::AppHandle, id: String) -> Result<(), String> {
+    validate_plugin_id(&id)?;
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?.join("plugins").join(&id);
     if dir.exists() {
         std::fs::remove_dir_all(&dir).map_err(|e| e.to_string())?;

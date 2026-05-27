@@ -95,9 +95,9 @@ function AdditionalCard({
 	const handlePrimary = async () => {
 		setBusy(true);
 		try {
-			if (!installed) onInstall(id);
-			else if (enabled) onDisable(id);
-			else onEnable(id);
+			if (!installed) await onInstall(id);
+			else if (enabled) await onDisable(id);
+			else await onEnable(id);
 		} finally {
 			setBusy(false);
 		}

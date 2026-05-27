@@ -157,8 +157,8 @@ export function GradientSidebar({ onClose }: { onClose: () => void }) {
 				}
 				if (nums.length === 0) return;
 
-				const min = Math.min(...nums);
-				const max = Math.max(...nums);
+				let min = Infinity, max = -Infinity;
+				for (const n of nums) { if (n < min) min = n; if (n > max) max = n; }
 				if (min === max) return;
 
 				const step = (max - min) / bucketCount;

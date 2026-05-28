@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { cmd } from "@/lib/commands";
 import { google } from "@/lib/sv/opensv";
-import { getDirtyCount } from "@/store/useMapStore";
+import { getDirtyCount, getCurrentMap } from "@/store/useMapStore";
 
 declare const __APP_VERSION__: string;
 
@@ -75,7 +75,7 @@ async function gatherStats(): Promise<Stats> {
 		locations: dbStats.locations,
 		tags: dbStats.tags,
 		commits: dbStats.commits,
-		pendingSaves: await getDirtyCount(),
+		pendingSaves: getCurrentMap() ? await getDirtyCount() : 0,
 		dbSize,
 		journalMode: dbStats.journalMode,
 		foreignKeys: dbStats.foreignKeys ? "ON" : "OFF",

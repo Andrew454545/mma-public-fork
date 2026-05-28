@@ -2,7 +2,7 @@ import { distMeters } from "@/lib/geo/geo";
 import { fetchPanoDotsWithIds } from "@/lib/geo/photometa";
 import { google } from "@/lib/sv/opensv";
 import { cameraTypeFromHeight, fetchSvMetadata } from "@/lib/sv/svMeta";
-import { LocationFlag, hasLoadAsPanoId } from "@/types";
+import { LocationFlag, hasLoadAsPanoId, createLocation } from "@/types";
 import type { Location } from "@/types";
 
 export const SV_SEARCH_RADIUS = 50;
@@ -338,19 +338,13 @@ export async function lookupStreetView(
 
 	const pos = chosen.location.latLng;
 	const heading = calcHeading(chosen, opts);
-	return {
-		id: 0, // placeholder; Rust assigns the real ID
+	return createLocation({
 		lat: pos.lat(),
 		lng: pos.lng(),
 		heading,
-		pitch: 0,
-		zoom: 0,
 		panoId: chosen.location.pano ?? null,
 		flags: !isDefault || opts.defaultPanoId ? LocationFlag.LoadAsPanoId : LocationFlag.None,
-		tags: [],
-		createdAt: new Date().toISOString(),
-		modifiedAt: new Date().toISOString(),
-	};
+	});
 }
 
 /**
@@ -391,19 +385,13 @@ export async function followLinkedPanos(
 		if (!nextData) break;
 
 		const pos = nextData.location.latLng;
-		results.push({
-			id: 0, // placeholder; Rust assigns the real ID
+		results.push(createLocation({
 			lat: pos.lat(),
 			lng: pos.lng(),
 			heading: best.heading,
-			pitch: 0,
-			zoom: 0,
 			panoId: best.pano,
 			flags: LocationFlag.LoadAsPanoId,
-			tags: [],
-			createdAt: new Date().toISOString(),
-			modifiedAt: new Date().toISOString(),
-		});
+		}));
 
 		currentPanoId = best.pano;
 		currentHeading = best.heading;

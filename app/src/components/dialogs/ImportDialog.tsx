@@ -5,7 +5,7 @@ import { fmt } from "@/lib/util/format";
 import { cmd } from "@/lib/commands";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { log } from "@/lib/util/log";
-import { debugSpan } from "@/lib/util/debug";
+import { trace } from "@/lib/util/debug";
 import { type ImportResult, type ImportPreview } from "@/types"
 
 interface Props {
@@ -74,10 +74,10 @@ export function ImportDialog({ onClose }: Props) {
 	const handleImport = async () => {
 		if (!preview) return;
 		setStatus("importing");
-		const span = debugSpan("import:rust");
+		const t = trace("import");
 		try {
 			const r = await importFile([...droppedFields]);
-			span.end(`${r.importedCount} locs imported`);
+			t.end({ imported: r.importedCount });
 			setResult(r);
 			setStatus("done");
 		} catch (e: unknown) {

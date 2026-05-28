@@ -10,7 +10,7 @@ import type {
 } from "@/bindings.gen";
 import { emit as emitEvent } from "@/lib/events";
 import { log } from "@/lib/util/log";
-import { debugSpan } from "@/lib/util/debug";
+import { trace } from "@/lib/util/debug";
 import { mmaBufUrl } from "@/lib/util/util";
 import { getTriggeredProviders } from "@/lib/data/fieldDefs.add";
 import { setUserFieldDefs, resetForMapChange } from "@/lib/data/fieldDefRegistry";
@@ -233,12 +233,11 @@ export function scheduleSave() {
 
 async function doSave(): Promise<void> {
 	if (!currentMapId || !currentMap) return;
-	const span = debugSpan("doSave");
-	const t0 = performance.now();
+	const t = trace("save");
 	inflightSave = cmd
 		.storeSaveDirty()
 		.then(() => {
-			log.debug(`[save] saveDirty=${(performance.now() - t0).toFixed(0)}ms`);
+			t.end();
 			invalidateMapList();
 		})
 		.catch((err) => {
@@ -247,7 +246,6 @@ async function doSave(): Promise<void> {
 		})
 		.finally(() => {
 			inflightSave = null;
-			span.end();
 		});
 	await inflightSave;
 }
@@ -273,17 +271,15 @@ export async function openMap(id: string, pushHistory = true) {
 		autosaveTimer = null;
 	}
 	if (inflightSave) await inflightSave;
-	const totalSpan = debugSpan("openMap:total");
+	const t = trace("openMap");
 	currentMapId = id;
-	const t0 = performance.now();
 	currentMap = await cmd.storeGetMap(id);
-	log.debug(`[openMap] getMap=${(performance.now() - t0).toFixed(0)}ms`);
+	t.step("getMap");
 
 	if (currentMap) {
-		const t1 = performance.now();
 		try {
 			const openResult = await cmd.storeOpenMap(id);
-			log.debug(`[openMap] store_open_map=${(performance.now() - t1).toFixed(0)}ms`);
+			t.step("store_open_map");
 			tagCounts = openResult.tagCounts;
 			undoRedoState = { canUndo: openResult.canUndo, canRedo: openResult.canRedo };
 			knownFieldKeys = new Set(openResult.knownFieldKeys);
@@ -306,7 +302,7 @@ export async function openMap(id: string, pushHistory = true) {
 
 	mapVersion++;
 	notify();
-	totalSpan.end();
+	t.end();
 	if (pushHistory) history.pushState({ mapId: id }, "", `#map/${id}`);
 	emitEvent("map:open", currentMap);
 }
@@ -563,11 +559,9 @@ export async function mutate(p: Promise<MutationResult>): Promise<MutationResult
 
 export async function addLocations(locs: Location[], opts?: { hideInDelta?: boolean }) {
 	if (!currentMap || locs.length === 0) return;
-	const t0 = performance.now();
+	const t = trace("add");
 	const r = await mutate(cmd.storeAddLocations(locs));
-	log.debug(
-		`[add] ipc=${(performance.now() - t0).toFixed(0)}ms delta: +${r.delta.added.length} -${r.delta.removed.length}`,
-	);
+	t.end({ delta: `+${r.delta.added.length} -${r.delta.removed.length}` });
 	for (let i = 0; i < r.delta.added.length && i < locs.length; i++) {
 		locs[i].id = r.delta.added[i].id;
 	}
@@ -687,7 +681,7 @@ export function useSelections() {
 /** Apply a pure selection transform, then IPC to Rust to resolve bitmasks and sync the overlay. */
 async function applySelectionUpdate(updater: (m: MapData, sels: Selection[]) => Selection[]) {
 	if (!currentMap) return;
-	const t0 = performance.now();
+	const t = trace("selection", { summary: true });
 	selections = updater(currentMap, selections);
 	const sels = selections.map((s) => {
 		let color = s.color;
@@ -702,7 +696,6 @@ async function applySelectionUpdate(updater: (m: MapData, sels: Selection[]) => 
 		}
 		return { props: s.props, color };
 	});
-	const t1 = performance.now();
 	let result: SyncSelectionsResult;
 	try {
 		result = await cmd.storeSyncSelections(sels);
@@ -710,15 +703,13 @@ async function applySelectionUpdate(updater: (m: MapData, sels: Selection[]) => 
 		log.error("[selection] store_sync_selections failed:", e);
 		return;
 	}
-	const t2 = performance.now();
+	t.step("ipc");
 	for (let i = 0; i < selections.length; i++) {
 		selections[i] = { ...selections[i], count: result.counts[i] ?? 0 };
 	}
 	if (result.patchFile) await emitBitmaskFile(result.patchFile);
-	const t3 = performance.now();
-	log.debug(
-		`[selection] total=${(t3 - t0).toFixed(0)}ms ipc=${(t2 - t1).toFixed(0)}ms apply=${(t3 - t2).toFixed(0)}ms selected=${result.selectedCount}`,
-	);
+	t.step("apply");
+	t.end({ selected: result.selectedCount });
 
 	mapVersion++;
 	notify();
@@ -870,14 +861,13 @@ export function useSelectedTagIds() {
 
 /** Set the active location. Fetches from Rust, checks for nearby duplicates, and updates workArea. */
 export async function setActiveLocation(id: number | null, checkDuplicates = true) {
-	const t0 = performance.now();
+	const t = trace("setActive");
 	activeLocationId = id;
 	cmd.storeSetActive(id).catch((e) => log.error("[setActive] store_set_active failed:", e));
 	if (id) {
 		const loc = await fetchViaFile<Location>(cmd.storeGetLocationFile(id));
-		log.debug(`[setActive] store_get_location_file ipc=${(performance.now() - t0).toFixed(0)}ms`);
+		t.step("ipc");
 		if (checkDuplicates && loc) {
-			//todo
 			const nearby = await cmd.storeFindNearby(loc.lat, loc.lng, 2.0);
 			if (nearby.length >= 2) {
 				duplicateLocations = nearby;
@@ -886,9 +876,7 @@ export async function setActiveLocation(id: number | null, checkDuplicates = tru
 				cachedActiveLocation = null;
 				mapVersion++;
 				notify();
-				log.debug(
-					`[setActive] duplicates=${nearby.length} total=${(performance.now() - t0).toFixed(0)}ms`,
-				);
+				t.end({ duplicates: nearby.length });
 				return;
 			}
 		}
@@ -901,7 +889,7 @@ export async function setActiveLocation(id: number | null, checkDuplicates = tru
 	}
 	mapVersion++;
 	notify();
-	log.debug(`[setActive] total=${(performance.now() - t0).toFixed(0)}ms`);
+	t.end();
 }
 
 export function openDuplicateLocation(loc: Location) {
@@ -1160,21 +1148,17 @@ function formatDiffMessage(diff: {
 /** Bake overlay, snapshot Arrow file, create a VCS commit. Resets undo stack. */
 export async function commitMap(message?: string): Promise<string> {
 	if (!currentMapId) throw new Error("No map open");
-	const t0 = performance.now();
+	const t = trace("commit");
 	await cmd.storeBakeAndSave();
-	log.debug(`[commit] bake_and_save=${(performance.now() - t0).toFixed(0)}ms`);
-	const t1 = performance.now();
+	t.step("bake_and_save");
 	const diff = await computeCommitDiff();
-	log.debug(`[commit] computeCommitDiff=${(performance.now() - t1).toFixed(0)}ms`);
-	const t2 = performance.now();
+	t.step("computeCommitDiff");
 	const autoMessage = message ?? formatDiffMessage(diff);
 	const id = await cmd.storeCreateCommit(currentMapId, autoMessage ?? null, diff ?? null);
-	log.debug(`[commit] createCommit=${(performance.now() - t2).toFixed(0)}ms`);
-	const t3 = performance.now();
+	t.step("createCommit");
 	await cmd.storeResetUndo();
-	log.debug(
-		`[commit] reset_undo=${(performance.now() - t3).toFixed(0)}ms total=${(performance.now() - t0).toFixed(0)}ms`,
-	);
+	t.step("reset_undo");
+	t.end();
 	undoRedoState = { canUndo: false, canRedo: false };
 	cachedCommitDiff = { added: 0, removed: 0, modified: 0 };
 	mapVersion++;

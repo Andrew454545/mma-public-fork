@@ -10,6 +10,7 @@ import { lookupStreetView, svThumbnailUrl, showToast, svSearchRadius } from "@/l
 import { cmd, fetchViaFile } from "@/lib/commands";
 import { mmaBufUrl } from "@/lib/util/util";
 import { log } from "@/lib/util/log";
+import { trace } from "@/lib/util/debug";
 import { useSetting } from "@/store/settings.add";
 import { CellManager } from "@/lib/render/CellManager";
 import {
@@ -406,7 +407,6 @@ export function MapEmbed() {
 	};
 
 	const buildLayers = useCallback(() => {
-		// const span = debugSpan("buildLayers");
 		const m = mapDataRef.current;
 		if (!m) {
 			return [];
@@ -754,7 +754,6 @@ export function MapEmbed() {
 			);
 		}
 
-		// span.end(`${layers.length} layers`);
 		return layers;
 	}, [
 		markerVisibility,
@@ -845,7 +844,7 @@ export function MapEmbed() {
 				const g = gRef.current;
 				if (!g) return;
 				const currentZoom = gMapRef.current?.getZoom() ?? 2;
-				const t0 = performance.now();
+				const t = trace("add");
 				const loc = await lookupStreetView(lat, lng, currentZoom, svSettingsRef.current);
 				if (!loc) {
 					if (containerRef.current) {
@@ -853,15 +852,12 @@ export function MapEmbed() {
 					}
 					return;
 				}
-				log.debug(`[add] lookup=${(performance.now() - t0).toFixed(0)}ms`);
-				const t1 = performance.now();
+				t.step("lookup");
 				await addLocations([loc], { hideInDelta: true });
-				log.debug(`[add] addLocations=${(performance.now() - t1).toFixed(0)}ms`);
-				const t2 = performance.now();
+				t.step("addLocations");
 				setActiveLocation(loc.id);
-				log.debug(
-					`[add] setActive=${(performance.now() - t2).toFixed(0)}ms total=${(performance.now() - t0).toFixed(0)}ms`,
-				);
+				t.step("setActive");
+				t.end();
 			}
 		},
 		[isMeasuring, dispatchContextMenu],
@@ -1167,7 +1163,7 @@ export function MapEmbed() {
 
 		let cancelled = false;
 		const fetchRender = async () => {
-			const t0 = performance.now();
+			const t = trace("render", { summary: true });
 			try {
 				const filePath = await cmd.storeFillRenderFile({
 					west: -180,
@@ -1178,13 +1174,11 @@ export function MapEmbed() {
 				});
 				const resp = await fetch(mmaBufUrl(filePath));
 				const buf = await resp.arrayBuffer();
-				const t1 = performance.now();
+				t.step("ipc");
 				if (cancelled) return;
 
 				cellMgrRef.current.initFromBinary(buf);
-				log.debug(
-					`[render] ipc=${(t1 - t0).toFixed(0)}ms cells=${cellMgrRef.current.cells.size} total=${cellMgrRef.current.totalCount} bytes=${buf.byteLength}`,
-				);
+				t.end({ cells: cellMgrRef.current.cells.size, total: cellMgrRef.current.totalCount, bytes: buf.byteLength });
 				setRenderTick((t) => t + 1);
 			} catch (e) {
 				log.error("[render] fetchRender failed:", e);
@@ -1203,7 +1197,7 @@ export function MapEmbed() {
 				setFullResetCounter((c) => c + 1);
 				return;
 			}
-			const t0 = performance.now();
+			const t = trace("delta", { summary: true });
 			const cm = cellMgrRef.current;
 			const affected = cm.applyDelta(delta);
 			const aid = activeLocRef.current?.id ?? null;
@@ -1222,18 +1216,14 @@ export function MapEmbed() {
 				);
 				cm.appendToSelectionOverlay(selPatches);
 			}
-			log.debug(
-				`[delta] applyDelta=${(performance.now() - t0).toFixed(0)}ms affected=${affected.size} +${delta.added.length} -${delta.removed.length}`,
-			);
+			t.end({ affected: affected.size, added: delta.added.length, removed: delta.removed.length });
 			if (affected.size > 0 || delta.colorPatches.length > 0) setRenderTick((t) => t + 1);
 		});
 		const unsub2 = selBitmaskBus.on((selColors, cellEntries, setIds) => {
-			const t0 = performance.now();
+			const t = trace("selection", { summary: true });
 			const ids = cellMgrRef.current.applySelectionBitmasks(selColors, cellEntries);
 			setIds(ids);
-			log.debug(
-				`[selection] applyBitmasks=${(performance.now() - t0).toFixed(0)}ms cells=${cellEntries.length} sels=${selColors.length} ids=${ids.size}`,
-			);
+			t.end({ cells: cellEntries.length, sels: selColors.length, ids: ids.size });
 			setRenderTick((t) => t + 1);
 		});
 		return () => {

@@ -100,6 +100,17 @@ jobs:
             mv "$f" "$(echo "$f" | tr ' ' '.')"
           done
 
+      - name: Give macOS updater bundles arch-specific names
+        # Both macOS .app.tar.gz bundles share the basename "Map.Making.App.app.tar.gz",
+        # which collides on upload (422) and makes latest.json point both arches at one URL.
+        run: |
+          for f in $(find artifacts -path '*aarch64-apple-darwin*' -name '*.app.tar.gz'); do
+            mv "$f" "$(dirname "$f")/Map.Making.App_aarch64.app.tar.gz"
+          done
+          for f in $(find artifacts -path '*x86_64-apple-darwin*' -name '*.app.tar.gz'); do
+            mv "$f" "$(dirname "$f")/Map.Making.App_x64.app.tar.gz"
+          done
+
       - name: Build latest.json for updater
         env:
           TAG: ${{ github.event_name == 'push' && github.ref_name || inputs.tag }}

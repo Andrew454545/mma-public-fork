@@ -8,6 +8,8 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
+use roaring::RoaringBitmap;
+
 use arrow::array::{
     Array, ArrayRef, Float64Array, ListArray, RecordBatch,
     StringArray, UInt32Array,
@@ -26,8 +28,6 @@ use crate::selections::{self, SelectionProps, Selection};
 
 /// Full geohash precision used for dirty-tracking and VCS snapshots.
 const GEOHASH_PRECISION: usize = 2;
-/// Truncated precision for render cells (32 buckets = 5 bits = 1 base-32 char).
-const RENDER_PRECISION: usize = 1;
 const MAX_UNDO_ENTRIES: usize = 1000;
 /// Standard base-32 alphabet for geohash encoding (Gustavo Niemeyer variant).
 const BASE32: &[u8] = b"0123456789bcdefghjkmnpqrstuvwxyz";
@@ -53,11 +53,6 @@ pub(crate) fn encode_geohash(lat: f64, lng: f64) -> String {
         if bits == 5 { hash.push(BASE32[ch as usize] as char); bits = 0; ch = 0; }
     }
     hash
-}
-
-/// Truncate a full geohash to its render cell key (first character).
-fn render_cell_key(gh: &str) -> &str {
-    &gh[..RENDER_PRECISION]
 }
 
 /// Compute the render cell index (0-31) directly from coordinates without allocating
@@ -89,6 +84,28 @@ fn cell_key_from_idx(idx: u8) -> String {
 fn cell_idx_from_key(key: &str) -> Option<u8> {
     let b = *key.as_bytes().first()?;
     BASE32.iter().position(|&c| c == b).map(|i| i as u8)
+}
+
+/// Serialize one render cell's per-selection bitmasks into a self-describing segment:
+/// `[cellChar:1][locCount:u32 le][ per selection: ceil(n/8) mask bytes ]`.
+/// Bits are indexed by render position within the cell. Pure/read-only, so the
+/// 32 cells can be serialized in parallel.
+fn serialize_cell_bitmask(ci: usize, cr: &CellRender, loc_sets: &[RoaringBitmap]) -> Vec<u8> {
+    let n = cr.id_order.len();
+    let mask_bytes = n.div_ceil(8);
+    let mut seg = Vec::with_capacity(1 + 4 + mask_bytes * loc_sets.len());
+    seg.push(BASE32[ci]);
+    seg.extend_from_slice(&(n as u32).to_le_bytes());
+    for set in loc_sets {
+        let mut bitmask = vec![0u8; mask_bytes];
+        for (li, &id) in cr.id_order.iter().enumerate() {
+            if set.contains(id) {
+                bitmask[li / 8] |= 1 << (li % 8);
+            }
+        }
+        seg.extend_from_slice(&bitmask);
+    }
+    seg
 }
 
 // ---------------------------------------------------------------------------
@@ -158,11 +175,24 @@ pub(crate) struct RenderState {
 
 pub(crate) struct SelectionState {
     pub all: Vec<Selection>,
-    pub loc_sets: Vec<HashSet<u32>>,
+    /// Per-selection membership, keyed by location id.
+    pub loc_sets: Vec<RoaringBitmap>,
     pub version: u64,
-    pub ids: HashSet<u32>,
-    pub colors: HashMap<u32, [u8; 3]>,
+    /// Union of all `loc_sets`. Answers "is this id selected".
+    pub ids: RoaringBitmap,
     pub active_id: Option<u32>,
+}
+
+impl SelectionState {
+    /// Color of a selected id = color of the last selection containing it. None if unselected.
+    fn color_for(&self, id: u32) -> Option<[u8; 3]> {
+        if !self.ids.contains(id) { return None; }
+        let mut color = None;
+        for (si, set) in self.loc_sets.iter().enumerate() {
+            if set.contains(id) { color = Some(self.all[si].color); }
+        }
+        color
+    }
 }
 
 pub(crate) struct TagState {
@@ -237,8 +267,7 @@ impl Store {
                 all: Vec::new(),
                 loc_sets: Vec::new(),
                 version: 0,
-                ids: HashSet::new(),
-                colors: HashMap::new(),
+                ids: RoaringBitmap::new(),
                 active_id: None,
             },
             tags: TagState {
@@ -371,7 +400,7 @@ impl Store {
     /// Selected locations are transparent (alpha=0) because they are drawn separately
     /// by the selection overlay layer with their selection color.
     fn base_color(&self, id: u32) -> (u8, u8, u8, u8) {
-        if self.selections.ids.contains(&id) { (0, 0, 0, 0) } else { (42, 42, 42, 255) }
+        if self.selections.ids.contains(id) { (0, 0, 0, 0) } else { (42, 42, 42, 255) }
     }
 
     /// Whether any active selection requires a full O(S*N) resolve rather than
@@ -455,14 +484,13 @@ impl Store {
             .collect();
         if !drop_ids.is_empty() {
             for id in &drop_ids {
-                if self.selections.ids.contains(id) { was_selected.insert(*id); }
+                if self.selections.ids.contains(*id) { was_selected.insert(*id); }
             }
             for set in &mut self.selections.loc_sets {
-                for id in &drop_ids { set.remove(id); }
+                for id in &drop_ids { set.remove(*id); }
             }
             for id in &drop_ids {
-                self.selections.ids.remove(id);
-                self.selections.colors.remove(id);
+                self.selections.ids.remove(*id);
             }
         }
 
@@ -471,12 +499,10 @@ impl Store {
             .collect();
         let sel_props: Vec<SelectionProps> = self.selections.all.iter().map(|s| s.props.clone()).collect();
         for (si, props) in sel_props.iter().enumerate() {
-            let color = self.selections.all[si].color;
             for loc in &test_locs {
                 if selections::test_add_row(loc, props) {
                     self.selections.loc_sets[si].insert(loc.id);
                     self.selections.ids.insert(loc.id);
-                    self.selections.colors.insert(loc.id, color);
                 }
             }
         }
@@ -485,10 +511,10 @@ impl Store {
         let mut gained = Vec::new();
         let mut lost = Vec::new();
         for loc in changes.added.iter().chain(changes.updated.iter().map(|(_, n)| n)) {
-            let is_now = self.selections.ids.contains(&loc.id);
+            let is_now = self.selections.ids.contains(loc.id);
             let was_before = was_selected.contains(&loc.id);
             if is_now && !was_before {
-                let color = self.selections.colors.get(&loc.id).copied().unwrap_or([255, 0, 0]);
+                let color = self.selections.color_for(loc.id).unwrap_or([255, 0, 0]);
                 gained.push((loc.id, color));
             } else if !is_now && was_before {
                 lost.push(loc.id);
@@ -506,36 +532,31 @@ impl Store {
 
     /// Build the bitmask file for only the specified cell indices.
     fn build_selection_bitmask_for_cells(&self, affected: &HashSet<u8>) -> SelectionSync {
-        let counts: Vec<usize> = self.selections.loc_sets.iter().map(|s| s.len()).collect();
-        let selected_count = self.selections.ids.len();
+        let counts: Vec<usize> = self.selections.loc_sets.iter().map(|s| s.len() as usize).collect();
+        let selected_count = self.selections.ids.len() as usize;
 
         if affected.is_empty() {
             return SelectionSync { counts, patch_file: None, selected_count };
         }
 
         let num_sels = self.selections.all.len();
+        // Serialize affected cells in parallel; segments are self-describing so order is irrelevant.
+        let segments: Vec<Vec<u8>> = self.render.cells.par_iter().enumerate()
+            .filter_map(|(ci, opt)| {
+                if !affected.contains(&(ci as u8)) { return None; }
+                let cr = opt.as_ref()?;
+                Some(serialize_cell_bitmask(ci, cr, &self.selections.loc_sets))
+            })
+            .collect();
+
         let mut buf: Vec<u8> = Vec::new();
         buf.push(num_sels as u8);
         for sel in &self.selections.all {
             buf.extend_from_slice(&sel.color);
         }
-        buf.push(affected.len() as u8);
-        for (ci, opt) in self.render.cells.iter().enumerate() {
-            if !affected.contains(&(ci as u8)) { continue; }
-            let cr = match opt { Some(cr) => cr, None => continue };
-            buf.push(BASE32[ci]);
-            let n = cr.id_order.len();
-            buf.extend_from_slice(&(n as u32).to_le_bytes());
-            let mask_bytes = n.div_ceil(8);
-            for si in 0..num_sels {
-                let mut bitmask = vec![0u8; mask_bytes];
-                for (li, &id) in cr.id_order.iter().enumerate() {
-                    if self.selections.loc_sets[si].contains(&id) {
-                        bitmask[li / 8] |= 1 << (li % 8);
-                    }
-                }
-                buf.extend_from_slice(&bitmask);
-            }
+        buf.push(segments.len() as u8);
+        for seg in &segments {
+            buf.extend_from_slice(seg);
         }
 
         let patch_file = {
@@ -561,9 +582,10 @@ impl Store {
 
         let num_sels = masks.len();
         let batch_len = self.batch.as_ref().map_or(0, |b| b.num_rows());
-        self.selections.loc_sets = vec![HashSet::new(); num_sels];
+        self.selections.loc_sets = vec![RoaringBitmap::new(); num_sels];
         for si in 0..num_sels {
             let mask = &masks[si];
+            // Batch ids are iterated in ascending order (sorted-id invariant)
             if let Some(ref b) = self.batch {
                 let id_col = col_id(b);
                 for i in 0..b.num_rows() {
@@ -581,17 +603,11 @@ impl Store {
             }
         }
 
-        let mut all_selected = HashSet::new();
-        let mut color_map = HashMap::new();
-        for (si, set) in self.selections.loc_sets.iter().enumerate() {
-            let color = self.selections.all[si].color;
-            for &id in set {
-                all_selected.insert(id);
-                color_map.insert(id, color);
-            }
+        let mut all_selected = RoaringBitmap::new();
+        for set in &self.selections.loc_sets {
+            all_selected |= set;
         }
         self.selections.ids = all_selected;
-        self.selections.colors = color_map;
         self.selections.version += 1;
     }
 
@@ -604,32 +620,27 @@ impl Store {
     /// Build the bitmask file from current render_cells + selection_loc_sets (all cells).
     fn rebuild_selection_bitmask(&self) -> SelectionSync {
         let t0 = std::time::Instant::now();
-        let counts: Vec<usize> = self.selections.loc_sets.iter().map(|s| s.len()).collect();
-        let selected_count = self.selections.ids.len();
+        let counts: Vec<usize> = self.selections.loc_sets.iter().map(|s| s.len() as usize).collect();
+        let selected_count = self.selections.ids.len() as usize;
 
         let num_sels = self.selections.all.len();
+        // Serialize all populated cells in parallel.
+        let segments: Vec<Vec<u8>> = self.render.cells.par_iter().enumerate()
+            .filter_map(|(ci, opt)| {
+                let cr = opt.as_ref()?;
+                Some(serialize_cell_bitmask(ci, cr, &self.selections.loc_sets))
+            })
+            .collect();
+        let num_cells = segments.len();
+
         let mut buf: Vec<u8> = Vec::new();
         buf.push(num_sels as u8);
         for sel in &self.selections.all {
             buf.extend_from_slice(&sel.color);
         }
-        let num_cells = self.render.cells.iter().filter(|o| o.is_some()).count();
         buf.push(num_cells as u8);
-        for (ci, opt) in self.render.cells.iter().enumerate() {
-            let cr = match opt { Some(cr) => cr, None => continue };
-            buf.push(BASE32[ci]);
-            let n = cr.id_order.len();
-            buf.extend_from_slice(&(n as u32).to_le_bytes());
-            let mask_bytes = n.div_ceil(8);
-            for si in 0..num_sels {
-                let mut bitmask = vec![0u8; mask_bytes];
-                for (li, &id) in cr.id_order.iter().enumerate() {
-                    if self.selections.loc_sets[si].contains(&id) {
-                        bitmask[li / 8] |= 1 << (li % 8);
-                    }
-                }
-                buf.extend_from_slice(&bitmask);
-            }
+        for seg in &segments {
+            buf.extend_from_slice(seg);
         }
 
         let patch_file = if num_cells > 0 {
@@ -2127,7 +2138,7 @@ fn build_cell_render_buffers(store: &mut Store, req: &RenderRequest) -> Vec<u8> 
     let has_dead = !store.overlay.dead.is_empty();
     let has_patches = !store.overlay.patches.is_empty();
 
-    let selected_set: &HashSet<u32> = &store.selections.ids;
+    let selected_set: &RoaringBitmap = &store.selections.ids;
     let active_id = store.selections.active_id;
     let arrow_style = req.marker_style == "arrow";
 
@@ -2137,7 +2148,6 @@ fn build_cell_render_buffers(store: &mut Store, req: &RenderRequest) -> Vec<u8> 
     let mut cells: [Option<CellOut>; 32] = [NONE; 32];
 
     // Selection overlay: selected entries rendered as a separate colored layer
-    let sel_colors = &store.selections.colors;
     struct SelOverlay { ids: Vec<u32>, positions: Vec<f32>, colors: Vec<u8>, angles: Vec<f32> }
     let mut sel_ov = SelOverlay { ids: Vec::new(), positions: Vec::new(), colors: Vec::new(), angles: Vec::new() };
 
@@ -2161,12 +2171,12 @@ fn build_cell_render_buffers(store: &mut Store, req: &RenderRequest) -> Vec<u8> 
         out.positions.push(lng as f32);
         out.positions.push(lat as f32);
         let angle = if arrow_style { 180.0 - heading as f32 } else { 0.0 };
-        let is_hidden = selected_set.contains(&id) || active_id == Some(id);
+        let is_hidden = selected_set.contains(id) || active_id == Some(id);
         if is_hidden { out.colors.extend_from_slice(&[0, 0, 0, 0]); }
         else { out.colors.extend_from_slice(&[42, 42, 42, 255]); }
         out.angles.push(angle);
         out.ids.push(id);
-        if let Some(&[r, g, b]) = sel_colors.get(&id) {
+        if let Some([r, g, b]) = store.selections.color_for(id) {
             sel_ov.positions.push(lng as f32);
             sel_ov.positions.push(lat as f32);
             sel_ov.colors.extend_from_slice(&[r, g, b, 255]);
@@ -2181,7 +2191,7 @@ fn build_cell_render_buffers(store: &mut Store, req: &RenderRequest) -> Vec<u8> 
             ids: Vec::new(), positions: Vec::new(), colors: Vec::new(), angles: Vec::new(),
         });
         let id = loc.id;
-        let is_hidden = selected_set.contains(&id) || active_id == Some(id);
+        let is_hidden = selected_set.contains(id) || active_id == Some(id);
         out.positions.push(loc.lng as f32);
         out.positions.push(loc.lat as f32);
         let angle = if arrow_style { 180.0 - loc.heading as f32 } else { 0.0 };
@@ -2189,7 +2199,7 @@ fn build_cell_render_buffers(store: &mut Store, req: &RenderRequest) -> Vec<u8> 
         else { out.colors.extend_from_slice(&[42, 42, 42, 255]); }
         out.angles.push(angle);
         out.ids.push(id);
-        if let Some(&[r, g, b]) = sel_colors.get(&id) {
+        if let Some([r, g, b]) = store.selections.color_for(id) {
             sel_ov.positions.push(loc.lng as f32);
             sel_ov.positions.push(loc.lat as f32);
             sel_ov.colors.extend_from_slice(&[r, g, b, 255]);
@@ -2562,7 +2572,7 @@ pub fn store_selection_bounds(webview: tauri::Webview, state: tauri::State<'_, S
             let ids = col_id(b);
             for i in 0..b.num_rows() {
                 let id = ids.value(i);
-                if !store.selections.ids.contains(&id) { continue; }
+                if !store.selections.ids.contains(id) { continue; }
                 if store.overlay.dead.contains(&id) { continue; }
                 let (lat, lng) = if let Some(p) = store.overlay.patches.get(&id) {
                     (p.lat, p.lng)
@@ -2577,7 +2587,7 @@ pub fn store_selection_bounds(webview: tauri::Webview, state: tauri::State<'_, S
             }
         }
         for loc in &store.overlay.adds {
-            if !store.selections.ids.contains(&loc.id) { continue; }
+            if !store.selections.ids.contains(loc.id) { continue; }
             if loc.lng < w { w = loc.lng; }
             if loc.lat < s { s = loc.lat; }
             if loc.lng > e { e = loc.lng; }
@@ -2685,10 +2695,6 @@ pub struct SyncSelectionsResult {
 
 /// Replace all selections, resolve bitmasks against current data, and write a binary
 /// patch file for JS to apply to the render overlay. Returns per-selection counts.
-// TODO: selection resolution perf at 1M+ scale (~500ms currently)
-// - Inverted index (tag_id → HashSet<loc_id>) for O(1) tag/untagged/panoId lookups
-// - BitVec instead of HashSet for membership — 1M locs = 125KB, bitmask binary becomes a direct copy
-// - "select everything" shortcut — flag instead of 125KB of all-1 bits
 #[tauri::command]
 #[specta::specta]
 pub async fn store_sync_selections(
@@ -2711,62 +2717,52 @@ pub async fn store_sync_selections(
             .map(|sel| selections::resolve_bitmask(&view, &sel.props))
             .collect();
 
-        // 2. Single pass: build per-selection HashSets + selected_ids + color_map from masks
+        // 2. Build one Roaring bitmap per selection from its mask. Batch ids are
+        // ascending (sorted-id invariant) so the bitmaps fill sequentially.
         let batch_rows = view.batch_rows();
-        let mut sel_sets: Vec<HashSet<u32>> = vec![HashSet::new(); num_sels];
-        let mut all_selected = HashSet::new();
-        let mut color_map = HashMap::new();
-        for si in 0..num_sels {
+        let sel_sets: Vec<RoaringBitmap> = (0..num_sels).into_par_iter().map(|si| {
             let mask = &masks[si];
-            let color = sels[si].color;
+            let mut bm = RoaringBitmap::new();
             for i in 0..batch_rows {
                 if mask[i] && view.is_alive(i) {
-                    let id = view.id_at(i);
-                    sel_sets[si].insert(id);
-                    all_selected.insert(id);
-                    color_map.insert(id, color);
+                    bm.insert(view.id_at(i));
                 }
             }
             for (j, loc) in view.adds().iter().enumerate() {
                 if mask[batch_rows + j] {
-                    sel_sets[si].insert(loc.id);
-                    all_selected.insert(loc.id);
-                    color_map.insert(loc.id, color);
+                    bm.insert(loc.id);
                 }
             }
-        }
+            bm
+        }).collect();
         drop(view);
 
-        let counts: Vec<usize> = sel_sets.iter().map(|s| s.len()).collect();
-        let selected_count = all_selected.len();
+        let mut all_selected = RoaringBitmap::new();
+        for s in &sel_sets { all_selected |= s; }
 
-        // 3. Build bitmask binary using sel_sets (O(1) lookups, no intermediate maps)
+        let counts: Vec<usize> = sel_sets.iter().map(|s| s.len() as usize).collect();
+        let selected_count = all_selected.len() as usize;
+
+        // 3. Serialize the per-cell bitmask binary. Cells are independent → parallel.
+        let segments: Vec<Vec<u8>> = store.render.cells.par_iter().enumerate()
+            .filter_map(|(ci, opt)| {
+                let cr = opt.as_ref()?;
+                Some(serialize_cell_bitmask(ci, cr, &sel_sets))
+            })
+            .collect();
+        let num_cells = segments.len();
+
         let mut buf: Vec<u8> = Vec::new();
         buf.push(num_sels as u8);
         for sel in &sels {
             buf.extend_from_slice(&sel.color);
         }
-        let num_cells = store.render.cells.iter().filter(|o| o.is_some()).count();
         buf.push(num_cells as u8);
-        for (ci, opt) in store.render.cells.iter().enumerate() {
-            let cr = match opt { Some(cr) => cr, None => continue };
-            buf.push(BASE32[ci]);
-            let n = cr.id_order.len();
-            buf.extend_from_slice(&(n as u32).to_le_bytes());
-            let mask_bytes = n.div_ceil(8);
-            for si in 0..num_sels {
-                let mut bitmask = vec![0u8; mask_bytes];
-                for (li, &id) in cr.id_order.iter().enumerate() {
-                    if sel_sets[si].contains(&id) {
-                        bitmask[li / 8] |= 1 << (li % 8);
-                    }
-                }
-                buf.extend_from_slice(&bitmask);
-            }
+        for seg in &segments {
+            buf.extend_from_slice(seg);
         }
 
         store.selections.ids = all_selected;
-        store.selections.colors = color_map;
         store.selections.all = sels.iter().enumerate().map(|(i, sel)| {
             selections::Selection {
                 key: format!("sync:{i}"),
@@ -2808,7 +2804,7 @@ pub async fn store_sync_selections(
 #[specta::specta]
 pub fn store_get_selected_ids_list(webview: tauri::Webview, state: tauri::State<'_, StoreState>) -> Result<Vec<u32>, String> {
     with_store!(webview, state, |store| {
-        Ok(store.selections.ids.iter().copied().collect())
+        Ok(store.selections.ids.iter().collect())
     })
 }
 

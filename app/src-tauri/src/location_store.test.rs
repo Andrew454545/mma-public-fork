@@ -1188,13 +1188,9 @@ fn selected_ids_cleared_properly() {
     let mut store = setup_store_with(&[loc(1, 0.0, 0.0), loc(2, 0.0, 0.0)]);
     store.selections.ids.insert(1);
     store.selections.ids.insert(2);
-    store.selections.colors.insert(1, [255, 0, 0]);
-    store.selections.colors.insert(2, [0, 255, 0]);
 
     store.selections.ids.clear();
-    store.selections.colors.clear();
     assert!(store.selections.ids.is_empty());
-    assert!(store.selections.colors.is_empty());
 }
 
 // -----------------------------------------------------------------------
@@ -1328,8 +1324,16 @@ fn render_buffer_with_selection_overlay() {
     let l2 = loc(2, 30.0, 40.0);
     let mut store = setup_store_with(&[l1, l2]);
     store.bake_overlay();
+    store.selections.all.push(selections::Selection {
+        key: "manual".into(),
+        color: [255, 0, 0],
+        props: selections::SelectionProps::Manual { locations: vec![1] },
+        count: None,
+    });
+    let mut bm = RoaringBitmap::new();
+    bm.insert(1);
+    store.selections.loc_sets.push(bm);
     store.selections.ids.insert(1);
-    store.selections.colors.insert(1, [255, 0, 0]);
 
     let req = RenderRequest {
         west: -180.0, south: -90.0, east: 180.0, north: 90.0,
@@ -1347,6 +1351,27 @@ fn render_buffer_with_selection_overlay() {
     }
     let sel_count = u32::from_le_bytes(buf[offset..offset+4].try_into().unwrap());
     assert_eq!(sel_count, 1, "one selected location");
+}
+
+#[test]
+fn color_for_uses_last_matching_selection() {
+    let mut store = setup_store_with(&[loc(1, 0.0, 0.0)]);
+    // id 1 belongs to two selections with different colors.
+    for (key, color) in [("a", [255, 0, 0]), ("b", [0, 0, 255])] {
+        store.selections.all.push(selections::Selection {
+            key: key.into(),
+            color,
+            props: selections::SelectionProps::Manual { locations: vec![1] },
+            count: None,
+        });
+        let mut bm = RoaringBitmap::new();
+        bm.insert(1);
+        store.selections.loc_sets.push(bm);
+    }
+    store.selections.ids.insert(1);
+
+    assert_eq!(store.selections.color_for(1), Some([0, 0, 255]), "last selection wins");
+    assert_eq!(store.selections.color_for(2), None, "unselected id");
 }
 
 // -----------------------------------------------------------------------
@@ -1622,7 +1647,7 @@ fn add_tag_selection(store: &mut Store, tag_id: u32, color: [u8; 3]) {
         props: selections::SelectionProps::Tag { tag_id },
         count: None,
     });
-    store.selections.loc_sets.push(HashSet::new());
+    store.selections.loc_sets.push(RoaringBitmap::new());
 }
 
 /// Parse the binary bitmask and return the cell chars it contains.

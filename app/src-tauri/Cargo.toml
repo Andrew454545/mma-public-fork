@@ -31,6 +31,7 @@ rmp-serde = "1"
 sha2 = "0.10"
 chrono = "0.4"
 rayon = "1.10"
+roaring = "0.10"
 arrow = { version = "54", features = ["ipc"] }
 tokio = { version = "1", features = ["rt"] }
 zip = { version = "2", default-features = false, features = ["deflate"] }

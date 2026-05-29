@@ -16,6 +16,7 @@ mod location_store;
 mod import;
 mod export;
 mod map_meta;
+mod borders;
 mod geocoder;
 mod seen;
 mod vcs;
@@ -168,53 +169,6 @@ fn uninstall_plugin(app: tauri::AppHandle, id: String) -> Result<(), String> {
     if dir.exists() {
         std::fs::remove_dir_all(&dir).map_err(|e| e.to_string())?;
     }
-    Ok(())
-}
-
-// ---------------------------------------------------------------------------
-// Border data download
-// ---------------------------------------------------------------------------
-
-fn validate_border_level(level: &str) -> Result<(), String> {
-    if !matches!(level, "medium" | "heavy") {
-        return Err(format!("Invalid border level: {level}"));
-    }
-    Ok(())
-}
-
-#[tauri::command]
-#[specta::specta]
-fn check_border_file(app: tauri::AppHandle, level: String) -> Result<bool, String> {
-    validate_border_level(&level)?;
-    let path = app.path().app_data_dir()
-        .map_err(|e| e.to_string())?
-        .join("borders")
-        .join(format!("borders-{level}.json"));
-    Ok(path.exists())
-}
-
-#[tauri::command]
-#[specta::specta]
-fn download_border_file(app: tauri::AppHandle, level: String) -> Result<(), String> {
-    validate_border_level(&level)?;
-    let dir = app.path().app_data_dir()
-        .map_err(|e| e.to_string())?
-        .join("borders");
-    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    let url = format!(
-        "https://raw.githubusercontent.com/ccmdi/mma/master/data/borders/borders-{level}.json"
-    );
-    let client = reqwest::blocking::Client::builder()
-        .use_rustls_tls()
-        .timeout(std::time::Duration::from_secs(120))
-        .build()
-        .map_err(|e| e.to_string())?;
-    let bytes = client.get(&url).send()
-        .and_then(|r| r.error_for_status())
-        .map_err(|e| format!("Failed to download borders-{level}.json: {e}"))?
-        .bytes().map_err(|e| e.to_string())?;
-    std::fs::write(dir.join(format!("borders-{level}.json")), &bytes)
-        .map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -447,8 +401,9 @@ pub fn run() {
                     list_user_plugins,
                     install_plugin,
                     uninstall_plugin,
-                    check_border_file,
-                    download_border_file,
+                    borders::check_border_file,
+                    borders::download_border_file,
+                    borders::border_lookup,
                     geocoder::reverse_geocode,
                     // --- Map lifecycle ---
                     location_store::store_open_map,

@@ -1211,7 +1211,6 @@ declare const mma: {
 			createdAt: string;
 			modifiedAt?: string | null;
 		} | null>;
-		storeGetLocationFile: (id: number) => Promise<string | null>;
 		storeGetLocationsByIds: (ids: number[]) => Promise<Location_Serialize[]>;
 		storeGetAllLocations: () => Promise<string>;
 		storeLocationCount: () => Promise<number>;

@@ -395,7 +395,7 @@ pub fn resolve(view: &LocView, props: &SelectionProps) -> Vec<u32> {
 
 /// Ray-casting algorithm: cast a horizontal ray eastward from (lng, lat) and count
 /// edge crossings. Odd count = inside. O(V) where V = vertices.
-fn point_in_ring(lng: f64, lat: f64, ring: &[[f64; 2]]) -> bool {
+pub(crate) fn point_in_ring(lng: f64, lat: f64, ring: &[[f64; 2]]) -> bool {
     let mut inside = false;
     let n = ring.len();
     let mut j = n.wrapping_sub(1);
@@ -412,7 +412,7 @@ fn point_in_ring(lng: f64, lat: f64, ring: &[[f64; 2]]) -> bool {
 
 /// Test point-in-polygon with holes: must be inside the outer ring (coords[0])
 /// and outside all hole rings (coords[1..]).
-fn point_in_polygon(lng: f64, lat: f64, coords: &[Vec<[f64; 2]>]) -> bool {
+pub(crate) fn point_in_polygon(lng: f64, lat: f64, coords: &[Vec<[f64; 2]>]) -> bool {
     if coords.is_empty() { return false; }
     if !point_in_ring(lng, lat, &coords[0]) { return false; }
     for hole in coords.iter().skip(1) {
@@ -422,7 +422,7 @@ fn point_in_polygon(lng: f64, lat: f64, coords: &[Vec<[f64; 2]>]) -> bool {
 }
 
 /// Test against the full geometry (primary polygon + extra_polygons). Any hit = true.
-fn point_in_geometry(lng: f64, lat: f64, geom: &PolygonGeometry) -> bool {
+pub(crate) fn point_in_geometry(lng: f64, lat: f64, geom: &PolygonGeometry) -> bool {
     if point_in_polygon(lng, lat, &geom.coordinates) { return true; }
     if let Some(extras) = &geom.extra_polygons {
         for poly in extras {

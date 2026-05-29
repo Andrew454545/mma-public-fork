@@ -26,6 +26,11 @@ export const commands = {
 	uninstallPlugin: (id: string) => typedError<null, string>(__TAURI_INVOKE("uninstall_plugin", { id })),
 	checkBorderFile: (level: string) => typedError<boolean, string>(__TAURI_INVOKE("check_border_file", { level })),
 	downloadBorderFile: (level: string) => typedError<null, string>(__TAURI_INVOKE("download_border_file", { level })),
+	borderLookup: (lat: number, lng: number, level: string) => typedError<{
+	coordinates: (([number, number])[])[],
+	extraPolygons?: ((([number, number])[])[])[] | null,
+	properties?: any | null,
+} | null, string>(__TAURI_INVOKE("border_lookup", { lat, lng, level })).then((v) => ((v.status === "ok" ? { ...v, data: v.data==null?v.data:({...v.data,coordinates:v.data.coordinates.map(i=>i.map(i=>i.map(i=>i))),extraPolygons:v.data.extraPolygons==null?v.data.extraPolygons:v.data.extraPolygons.map(i=>i.map(i=>i.map(i=>i.map(i=>i))))}) } : v) as typeof v)),
 	/**
 	 *  Finds the nearest city/country for a coordinate. O(log n) k-d tree lookup.
 	 *  Always returns `Some` -- the GeoNames dataset covers every landmass.

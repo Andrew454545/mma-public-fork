@@ -742,8 +742,8 @@ function BorderDetailSection() {
 					disabled={downloading !== null}
 				>
 					<option value="light">Standard (bundled)</option>
-					<option value="medium">High (~3MB){statusLabel("medium")}</option>
-					<option value="heavy">Ultra (~8MB){statusLabel("heavy")}</option>
+					<option value="medium">High (~10MB){statusLabel("medium")}</option>
+					<option value="heavy">Ultra (~46MB){statusLabel("heavy")}</option>
 				</select>
 			</label>
 			{downloading && (

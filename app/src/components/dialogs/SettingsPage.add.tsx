@@ -25,6 +25,7 @@ import {
 	type MapListField,
 	type GeocodeProvider,
 	type TagViewMode,
+	type BorderDetail,
 } from "@/store/settings.add";
 
 const IS_MAC = /Mac|iPod|iPhone|iPad/i.test(navigator.platform);
@@ -673,6 +674,88 @@ function TagsSection() {
 	);
 }
 
+function BorderDetailSection() {
+	const s = useSettings();
+	const [mediumReady, setMediumReady] = useState<boolean | null>(null);
+	const [heavyReady, setHeavyReady] = useState<boolean | null>(null);
+	const [downloading, setDownloading] = useState<string | null>(null);
+	const [error, setError] = useState<string | null>(null);
+
+	useEffect(() => {
+		let cancelled = false;
+		(async () => {
+			const { cmd } = await import("@/lib/commands");
+			const [m, h] = await Promise.all([
+				cmd.checkBorderFile("medium").catch(() => false),
+				cmd.checkBorderFile("heavy").catch(() => false),
+			]);
+			if (!cancelled) {
+				setMediumReady(m);
+				setHeavyReady(h);
+			}
+		})();
+		return () => { cancelled = true; };
+	}, []);
+
+	const handleChange = async (level: BorderDetail) => {
+		setError(null);
+		if (level === "light") {
+			setSetting("borderDetail", level);
+			return;
+		}
+		const isReady = level === "medium" ? mediumReady : heavyReady;
+		if (isReady) {
+			setSetting("borderDetail", level);
+			return;
+		}
+		setDownloading(level);
+		try {
+			const { cmd } = await import("@/lib/commands");
+			await cmd.downloadBorderFile(level);
+			if (level === "medium") setMediumReady(true);
+			else setHeavyReady(true);
+			setSetting("borderDetail", level);
+		} catch (e) {
+			setError(`Download failed: ${e instanceof Error ? e.message : String(e)}`);
+		} finally {
+			setDownloading(null);
+		}
+	};
+
+	const statusLabel = (level: "medium" | "heavy") => {
+		if (downloading === level) return " (downloading...)";
+		const ready = level === "medium" ? mediumReady : heavyReady;
+		if (ready === null) return "";
+		return ready ? "" : " (will download)";
+	};
+
+	return (
+		<fieldset className="fieldset">
+			<legend className="fieldset__header">
+				Country Select <span className="fieldset__divider" />
+			</legend>
+			<label className="settings-popup__item">
+				Border accuracy
+				<select
+					value={s.borderDetail}
+					onChange={(e) => handleChange(e.target.value as BorderDetail)}
+					disabled={downloading !== null}
+				>
+					<option value="light">Standard (bundled)</option>
+					<option value="medium">High (~3MB){statusLabel("medium")}</option>
+					<option value="heavy">Ultra (~8MB){statusLabel("heavy")}</option>
+				</select>
+			</label>
+			{downloading && (
+				<p style={{ margin: "0.25rem 0 0", fontSize: "0.85rem", opacity: 0.7 }}>
+					Downloading border data...
+				</p>
+			)}
+			{error && <p className="settings-popup__warning">{error}</p>}
+		</fieldset>
+	);
+}
+
 function StreetViewTab() {
 	return (
 		<>
@@ -682,6 +765,7 @@ function StreetViewTab() {
 			<TagsSection />
 			<DatePickerSection />
 			<GeocodingSection />
+			<BorderDetailSection />
 		</>
 	);
 }

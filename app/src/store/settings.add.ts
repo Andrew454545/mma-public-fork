@@ -9,6 +9,7 @@ export type SeenResolution = "low" | "medium" | "high";
 export type MapListField = "locationCount" | "lastOpened" | "created";
 export type GeocodeProvider = "local" | "nominatim";
 export type TagViewMode = "flat" | "tree";
+export type BorderDetail = "light" | "medium" | "heavy";
 
 import type { SavedSelection } from "./savedSelections.add";
 
@@ -51,6 +52,7 @@ export interface AppSettings {
 	nominatimApiKey: string;
 	tagViewMode: TagViewMode;
 	panOnPaste: boolean;
+	borderDetail: BorderDetail;
 	savedSelections: SavedSelection[];
 }
 
@@ -93,6 +95,7 @@ const DEFAULTS: AppSettings = {
 	nominatimApiKey: "",
 	panOnPaste: true,
 	tagViewMode: "flat" as TagViewMode,
+	borderDetail: "light" as BorderDetail,
 	savedSelections: [] as SavedSelection[],
 };
 

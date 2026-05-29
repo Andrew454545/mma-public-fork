@@ -4,6 +4,7 @@ import { selectPolygon } from "@/store/useMapStore";
 import { pointInPolygon } from "@/lib/geo/geo";
 import { getBinding } from "@/lib/util/hotkeys.add";
 import { parseHotkey, matchesKey, isEditableElement } from "@/lib/hooks/useHotkey";
+import { getSettings, type BorderDetail } from "@/store/settings.add";
 
 interface BorderFeature {
 	type: "Feature";
@@ -16,13 +17,27 @@ interface BordersData {
 	features: BorderFeature[];
 }
 
-let borders: BordersData | null = null;
+const borderCache = new Map<string, BordersData>();
 
-async function loadBorders(): Promise<BordersData> {
-	if (borders) return borders;
-	const res = await fetch("/borders.json");
-	borders = await res.json();
-	return borders!;
+async function loadBorders(level: BorderDetail): Promise<BordersData> {
+	const cached = borderCache.get(level);
+	if (cached) return cached;
+
+	let data: BordersData;
+	if (level === "light") {
+		const res = await fetch("/borders.json");
+		data = await res.json();
+	} else {
+		const { cmd } = await import("@/lib/commands");
+		const appDataDir = await cmd.getAppDataDir();
+		const sep = appDataDir.includes("\\") ? "\\" : "/";
+		const path = `${appDataDir}${sep}borders${sep}borders-${level}.json`;
+		const raw = await cmd.readFile(path);
+		data = JSON.parse(raw);
+	}
+
+	borderCache.set(level, data);
+	return data;
 }
 
 function findCountry(lat: number, lng: number, features: BorderFeature[]): BorderFeature | null {
@@ -96,10 +111,13 @@ export function useCountrySelect() {
 
 		const interceptor = (lat: number, lng: number): boolean => {
 			if (!held) return false;
-			loadBorders().then((data) => {
-				const country = findCountry(lat, lng, data.features);
-				if (country) selectCountry(country);
-			});
+			const { borderDetail } = getSettings();
+			loadBorders(borderDetail)
+				.catch(() => loadBorders("light"))
+				.then((data) => {
+					const country = findCountry(lat, lng, data.features);
+					if (country) selectCountry(country);
+				});
 			return true;
 		};
 

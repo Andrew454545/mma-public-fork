@@ -24,6 +24,8 @@ export const commands = {
 	installPlugin: (id: string) => typedError<PluginManifest, string>(__TAURI_INVOKE("install_plugin", { id })),
 	/**  Remove a plugin by deleting its directory from the local plugins folder. */
 	uninstallPlugin: (id: string) => typedError<null, string>(__TAURI_INVOKE("uninstall_plugin", { id })),
+	checkBorderFile: (level: string) => typedError<boolean, string>(__TAURI_INVOKE("check_border_file", { level })),
+	downloadBorderFile: (level: string) => typedError<null, string>(__TAURI_INVOKE("download_border_file", { level })),
 	/**
 	 *  Finds the nearest city/country for a coordinate. O(log n) k-d tree lookup.
 	 *  Always returns `Some` -- the GeoNames dataset covers every landmass.

@@ -100,6 +100,12 @@ export type EditorImportPreview = {
 export type EditorImportResult_Serialize = {
 	importedCount: number;
 	warnings: string[];
+	bounds: [
+		number,
+		number,
+		number,
+		number
+	] | null;
 } & MutationResult_Serialize;
 /**
  *  Configuration for JSON export. Controls which fields are included and
@@ -315,18 +321,19 @@ export type MapMetaPatch_Serialize = {
  *  unofficial, camera type filters), export defaults, and metadata enrichment.
  */
 export type MapSettings = {
-	pointAlongRoad: boolean;
-	preferDirection: number | null;
-	preferOfficial: boolean;
-	preferHigherQuality: boolean;
-	onlyOfficial: boolean;
-	cameraTypes: string[] | null;
-	defaultPanoId: boolean;
-	exportZoom: boolean;
-	exportUnpanned: boolean;
-	enrichMetadata: boolean;
-	enrichFields: string[] | null;
-	generatedLocationTag: string | null;
+	pointAlongRoad?: boolean;
+	preferDirection?: string | null;
+	preferOfficial?: boolean;
+	preferHigherQuality?: boolean;
+	onlyOfficial?: boolean;
+	cameraTypes?: string[] | null;
+	defaultPanoId?: boolean;
+	exportZoom?: boolean;
+	exportUnpanned?: boolean;
+	searchRadius?: number | null;
+	enrichMetadata?: boolean;
+	enrichFields?: string[] | null;
+	generatedLocationTag?: string | null;
 };
 /**
  *  Unified response for every mutation IPC. Bundles the store status, render delta,
@@ -1079,6 +1086,7 @@ export type SeenResolution = "low" | "medium" | "high";
 export type MapListField = "locationCount" | "lastOpened" | "created";
 export type GeocodeProvider = "local" | "nominatim";
 export type TagViewMode = "flat" | "tree";
+export type BorderDetail = "light" | "medium" | "heavy";
 export interface AppSettings {
 	showCameraBadges: boolean;
 	showLinksControl: boolean;
@@ -1117,6 +1125,8 @@ export interface AppSettings {
 	geocodeProvider: GeocodeProvider;
 	nominatimApiKey: string;
 	tagViewMode: TagViewMode;
+	panOnPaste: boolean;
+	borderDetail: BorderDetail;
 	savedSelections: SavedSelection[];
 }
 declare function setSetting<K extends keyof AppSettings>(key: K, value: AppSettings[K]): void;
@@ -1156,6 +1166,8 @@ declare const mma: {
 		listUserPlugins: () => Promise<PluginManifest[]>;
 		installPlugin: (id: string) => Promise<PluginManifest>;
 		uninstallPlugin: (id: string) => Promise<null>;
+		checkBorderFile: (level: string) => Promise<boolean>;
+		downloadBorderFile: (level: string) => Promise<null>;
 		reverseGeocode: (lat: number, lng: number) => Promise<{
 			city: string;
 			admin: string;
@@ -1328,6 +1340,8 @@ declare const mma: {
 		geocodeProvider: GeocodeProvider;
 		nominatimApiKey: string;
 		tagViewMode: TagViewMode;
+		panOnPaste: boolean;
+		borderDetail: BorderDetail;
 		savedSelections: SavedSelection[];
 	};
 	on(event: EditorEvent, handler: Handler): () => void;

@@ -384,8 +384,9 @@ export async function syncSelections(): Promise<{ ids: number[] }> {
 }
 
 export async function createMap(name: string, folder: string | null = null) {
-	await cmd.storeCreateMap(name, folder);
+	const { meta } = await cmd.storeCreateMap(name, folder);
 	await invalidateMapList();
+	return meta;
 }
 
 export async function deleteMap(id: string) {

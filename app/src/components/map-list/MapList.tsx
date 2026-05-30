@@ -771,6 +771,21 @@ export function MapList() {
 							filterRef.current = e.target.value.toLowerCase();
 							applyFilter(listRef.current, filterRef.current);
 						}}
+						onKeyDown={(e) => {
+							if (e.key !== "Enter") return;
+							e.preventDefault();
+							const first = listRef.current?.querySelector<HTMLAnchorElement>(
+								"[data-filter-name]:not([hidden]) .map-link",
+							);
+							if (first) {
+								first.click();
+								return;
+							}
+							const name = filterInputRef.current?.value.trim();
+							if (name) {
+								createMap(name).then((m) => openMapWindow(m.id, m.name));
+							}
+						}}
 						className="input"
 						type="text"
 						placeholder="Search maps..."

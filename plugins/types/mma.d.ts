@@ -1020,7 +1020,12 @@ export type FileAccessMode = "copy" | "scoped";
 export type OpenDialogReturn<T extends OpenDialogOptions> = T["directory"] extends true ? T["multiple"] extends true ? string[] | null : string | null : T["multiple"] extends true ? string[] | null : string | null;
 declare function open$1<T extends OpenDialogOptions>(options?: T): Promise<OpenDialogReturn<T>>;
 declare function save(options?: SaveDialogOptions): Promise<string | null>;
-export type EditorEvent = "location:add" | "location:remove" | "location:update" | "selection:change" | "map:open" | "map:close";
+/** Variants that wrap children — derived as exactly those carrying a `selections` array. */
+export type CompositeType = Extract<SelectionProps, {
+	selections: Selection$1[];
+}>["type"];
+/** Composite variants that are flat groups (no negation). */
+export type GroupType = Exclude<CompositeType, "Invert">;
 declare enum ValidationState {
 	Ok = 0,
 	UpdateAvailable = 1,
@@ -1031,6 +1036,19 @@ declare enum ValidationState {
 	GoodcamAvailable = 6
 }
 export type FilterOp = "eq" | "neq" | "gt" | "lt" | "gte" | "lte" | "between" | "between_anyyear" | "between_anytime" | "has" | "nothas";
+/** Payload type for each editor event. `void` means the event carries no payload. */
+export interface EditorEventMap {
+	"location:add": Location$1[];
+	"location:remove": number[];
+	"location:update": Partial<Location$1> & {
+		id: number;
+	};
+	"selection:change": Selection$1[];
+	"map:open": MapData;
+	"map:close": void;
+}
+export type EditorEvent = keyof EditorEventMap;
+export type EventHandler<E extends EditorEvent> = (payload: EditorEventMap[E]) => void;
 export interface SavedSelectionItem {
 	props: SavedSelectionProps;
 	color: [
@@ -1158,7 +1176,6 @@ export interface LocationStore {
 	destroy(): void;
 }
 declare function createLocationStore(): Promise<LocationStore>;
-export type Handler = (...args: unknown[]) => void;
 declare const mma: {
 	cmd: {
 		writeTempFile: (name: string, content: string) => Promise<string>;
@@ -1358,7 +1375,7 @@ declare const mma: {
 		borderDetail: BorderDetail;
 		savedSelections: SavedSelection[];
 	};
-	on(event: EditorEvent, handler: Handler): () => void;
+	on<E extends EditorEvent>(event: E, handler: EventHandler<E>): () => void;
 	getSeenEntries: typeof getSeenEntries;
 	getSeenCount: typeof getSeenCount;
 	clearSeen: typeof clearSeen;
@@ -1368,22 +1385,10 @@ declare const mma: {
 	validateLocations: typeof validateLocations;
 	needsEnrichment: (loc: Pick<Location$1, "extra">) => boolean;
 	mmaBufUrl: typeof mmaBufUrl;
-	useMapList(): MapMeta[];
 	invalidateMapList(): Promise<void>;
-	useTagCounts(): Record<number, number>;
 	getTagCounts(): Record<number, number>;
 	refreshAfterMutation(): void;
-	useCurrentMap(): MapData | null;
 	getVisibleTags(): Tag$1[];
-	useMapVersion(): number;
-	useSelectedLocationIds(): Set<number>;
-	useActiveLocation(): Location$1 | null;
-	useDuplicateLocations(): Location$1[];
-	useWorkArea(): WorkArea;
-	useReview(): {
-		locations: number[];
-		index: number;
-	} | null;
 	hasCommitDiff(): boolean;
 	useCommitDiff(): {
 		added: number;
@@ -1399,7 +1404,6 @@ declare const mma: {
 	getCurrentMapId(): string | null;
 	getCurrentMap(): MapData | null;
 	getKnownFieldKeys(): ReadonlySet<string>;
-	useKnownFieldKeys(): ReadonlySet<string>;
 	getActiveLocation(): Location$1 | null;
 	fetchAllLocations(): Promise<Location$1[]>;
 	fetchLocation(id: number): Promise<Location$1 | null>;
@@ -1431,7 +1435,6 @@ declare const mma: {
 		patch: Partial<Location$1>;
 	}[]): Promise<void | MutationResult_Serialize>;
 	patchLocationExtra(loc: Location$1, extraPatch: Record<string, unknown>, replace?: boolean): Promise<void>;
-	useSelections(): Selection$1[];
 	addSelections(props: SelectionProps[]): Promise<void>;
 	removeSelections(keys: string[]): Promise<void>;
 	resetSelections(): Promise<void>;
@@ -1460,7 +1463,7 @@ declare const mma: {
 		];
 	}[]): void;
 	reorderSelection(fromKey: string, toKey: string, position: "before" | "after"): void;
-	composeSelections(dragKey: string, dropKey: string, mode: "intersection" | "union", dragParent: string | null, dropParent: string | null): void;
+	composeSelections(dragKey: string, dropKey: string, mode: GroupType, dragParent: string | null, dropParent: string | null): void;
 	decomposeChild(parentKey: string, childKey: string): void;
 	removeChildFromSelection(parentKey: string, childKey: string): void;
 	toggleTagSelections(tagIds: number[]): void;
@@ -1470,7 +1473,6 @@ declare const mma: {
 	removeDuplicate(id: number): void;
 	closeDuplicates(): void;
 	setWorkArea(area: WorkArea): void;
-	useActivePluginId(): string | null;
 	getWorkArea(): WorkArea;
 	setPluginMode(pluginId: string): void;
 	exitPluginMode(): void;
@@ -1500,10 +1502,6 @@ declare const mma: {
 		canUndo: boolean;
 		canRedo: boolean;
 	};
-	useUndoRedo(): {
-		canUndo: boolean;
-		canRedo: boolean;
-	};
 	commitMap(message?: string): Promise<string>;
 	checkoutCommit(commitId: string): Promise<void>;
 	renderDeltaBus: {
@@ -1529,6 +1527,25 @@ declare const mma: {
 			locCount: number;
 			masks: Uint8Array[];
 		}[], setIds: (ids: Set<number>) => void) => void;
+	};
+	useMapList: () => MapMeta[];
+	useTagCounts: () => Record<number, number>;
+	useCurrentMap: () => MapData | null;
+	useMapVersion: () => number;
+	useSelectedLocationIds: () => Set<number>;
+	useActiveLocation: () => Location_Serialize | null;
+	useDuplicateLocations: () => Location_Serialize[];
+	useWorkArea: () => WorkArea;
+	useReview: () => {
+		locations: number[];
+		index: number;
+	} | null;
+	useKnownFieldKeys: () => ReadonlySet<string>;
+	useSelections: () => Selection$1[];
+	useActivePluginId: () => string | null;
+	useUndoRedo: () => {
+		canUndo: boolean;
+		canRedo: boolean;
 	};
 	ready: boolean;
 };

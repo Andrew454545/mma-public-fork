@@ -1757,3 +1757,79 @@ fn removal_bitmask_includes_affected_cell() {
     let sync = result.selection_sync.unwrap();
     assert!(sync.patch_file.is_some(), "should send bitmask for the affected cell");
 }
+
+// -----------------------------------------------------------------------
+// merge_group (duplicate merge policy)
+// -----------------------------------------------------------------------
+
+fn loc_full(id: u32, tags: Vec<u32>, created_at: &str) -> Location {
+    Location { tags, created_at: created_at.into(), ..loc(id, 0.0, 0.0) }
+}
+
+#[test]
+fn merge_group_survivor_is_most_tags() {
+    let a = loc_full(1, vec![1], "2020-01-01");
+    let b = loc_full(2, vec![1, 2, 3], "2021-01-01");
+    let s = merge_group(&[a, b]);
+    assert_eq!(s.id, 2);
+    assert_eq!(s.tags, vec![1, 2, 3]);
+}
+
+#[test]
+fn merge_group_tie_breaks_on_earliest_created() {
+    let a = loc_full(1, vec![1], "2021-01-01");
+    let b = loc_full(2, vec![9], "2019-01-01"); // fewer-tag tie, but earlier
+    let s = merge_group(&[a, b]);
+    assert_eq!(s.id, 2);
+}
+
+#[test]
+fn merge_group_tie_breaks_on_lowest_id() {
+    let a = loc_full(5, vec![1], "2020-01-01");
+    let b = loc_full(2, vec![9], "2020-01-01"); // same tags+created, lower id
+    let s = merge_group(&[a, b]);
+    assert_eq!(s.id, 2);
+}
+
+#[test]
+fn merge_group_unions_and_dedupes_tags() {
+    let a = loc_full(1, vec![1, 2], "2020-01-01");
+    let b = loc_full(2, vec![2, 3], "2020-01-01");
+    let s = merge_group(&[a, b]);
+    assert_eq!(s.tags, vec![1, 2, 3]);
+}
+
+#[test]
+fn merge_group_extra_survivor_wins_and_unions_keys() {
+    let mut a = loc_full(1, vec![1, 2], "2020-01-01"); // survivor (most tags)
+    a.extra = Some(serde_json::from_str(r#"{"k":"survivor"}"#).unwrap());
+    let mut b = loc_full(2, vec![3], "2020-01-01");
+    b.extra = Some(serde_json::from_str(r#"{"k":"other","x":"y"}"#).unwrap());
+    let s = merge_group(&[a, b]);
+    let extra = s.extra.unwrap();
+    assert_eq!(extra.get("k").unwrap(), "survivor"); // conflict -> survivor wins
+    assert_eq!(extra.get("x").unwrap(), "y"); // non-conflicting key from other is kept
+}
+
+#[test]
+fn merge_group_applies_and_undo_restores() {
+    let a = loc_with_tags(1, 0.0, 0.0, vec![10]);
+    let b = loc_with_tags(2, 0.0, 0.0, vec![20]);
+    let mut store = setup_store_with(&[a.clone(), b.clone()]);
+    assert_eq!(store.alive_count, 2);
+
+    let members = vec![a.clone(), b.clone()];
+    let survivor = merge_group(&members);
+    assert_eq!(survivor.id, 1); // tie on tags+created -> lowest id survives
+    let entry = EditEntry { created: vec![survivor], removed: members };
+
+    apply_edit_forward(&mut store, &entry);
+    assert_eq!(store.alive_count, 1);
+    assert_eq!(store.get_loc_by_id(1).unwrap().tags, vec![10, 20]);
+    assert!(store.get_loc_by_id(2).is_none());
+
+    apply_edit_reverse(&mut store, &entry);
+    assert_eq!(store.alive_count, 2);
+    assert_eq!(store.get_loc_by_id(1).unwrap().tags, vec![10]);
+    assert_eq!(store.get_loc_by_id(2).unwrap().tags, vec![20]);
+}

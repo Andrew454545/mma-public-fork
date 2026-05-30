@@ -489,6 +489,83 @@ fn find_duplicates_bitmask(view: &LocView, distance_m: f64, mask: &mut [bool]) {
     }
 }
 
+/// Transitive (connected-component) spatial grouping. Two locations are linked when within
+/// `distance_m` metres; each returned group is a connected component of size >= 2. Same
+/// grid broad-phase as `find_duplicates_bitmask`, but union-find preserves the partition
+/// instead of flattening to a membership mask. Chains collapse: A~B, B~C => {A,B,C} even
+/// if A and C are out of range. Output is deterministic: ids ascending within each group,
+/// groups ordered by first id.
+pub fn find_duplicate_groups(view: &LocView, distance_m: f64) -> Vec<Vec<u32>> {
+    let cell_deg = distance_m / 111_000.0 * 1.5;
+
+    struct Pt { lat: f64, lng: f64, id: u32 }
+    let mut points: Vec<Pt> = Vec::new();
+    for i in 0..view.batch_rows {
+        if !view.is_alive(i) { continue; }
+        if let Some(p) = view.patch_at(i) {
+            points.push(Pt { lat: p.lat, lng: p.lng, id: p.id });
+        } else {
+            points.push(Pt { lat: view.lats.unwrap().value(i), lng: view.lngs.unwrap().value(i), id: view.id_at(i) });
+        }
+    }
+    for loc in view.adds.iter() {
+        points.push(Pt { lat: loc.lat, lng: loc.lng, id: loc.id });
+    }
+
+    let n = points.len();
+    if n < 2 { return Vec::new(); }
+
+    // Union-find with path halving.
+    fn find(parent: &mut [usize], mut x: usize) -> usize {
+        while parent[x] != x {
+            parent[x] = parent[parent[x]];
+            x = parent[x];
+        }
+        x
+    }
+    let mut parent: Vec<usize> = (0..n).collect();
+
+    let mut grid: HashMap<(i32, i32), Vec<usize>> = HashMap::new();
+    for (pi, pt) in points.iter().enumerate() {
+        let cx = (pt.lng / cell_deg).floor() as i32;
+        let cy = (pt.lat / cell_deg).floor() as i32;
+        grid.entry((cx, cy)).or_default().push(pi);
+    }
+
+    for pi in 0..n {
+        let (lat, lng) = (points[pi].lat, points[pi].lng);
+        let cx = (lng / cell_deg).floor() as i32;
+        let cy = (lat / cell_deg).floor() as i32;
+        for dx in -1..=1 {
+            for dy in -1..=1 {
+                if let Some(cell) = grid.get(&(cx + dx, cy + dy)) {
+                    for &pj in cell {
+                        if pj <= pi { continue; }
+                        if haversine_m(lat, lng, points[pj].lat, points[pj].lng) <= distance_m {
+                            let ra = find(&mut parent, pi);
+                            let rb = find(&mut parent, pj);
+                            if ra != rb { parent[ra] = rb; }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    let mut comps: HashMap<usize, Vec<u32>> = HashMap::new();
+    for pi in 0..n {
+        let r = find(&mut parent, pi);
+        comps.entry(r).or_default().push(points[pi].id);
+    }
+
+    let mut groups: Vec<Vec<u32>> = comps.into_values()
+        .filter(|g| g.len() >= 2)
+        .map(|mut g| { g.sort_unstable(); g })
+        .collect();
+    groups.sort_unstable_by_key(|g| g[0]);
+    groups
+}
+
 /// Great-circle distance in metres using the haversine formula. Assumes spherical Earth (R = 6371 km).
 pub(crate) fn haversine_m(lat1: f64, lng1: f64, lat2: f64, lng2: f64) -> f64 {
     let r = 6_371_000.0;

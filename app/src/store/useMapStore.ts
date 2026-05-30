@@ -774,6 +774,17 @@ export function selectDuplicates(distance: number) {
 	return addSelections([{ type: "Duplicates", distance }]);
 }
 
+/** Read-only preview of transitive duplicate groups (size >= 2) within `distance` metres. */
+export function previewDuplicateGroups(distance: number): Promise<number[][]> {
+	return cmd.storeDuplicateGroups(distance);
+}
+
+/** Merge each transitive duplicate group into one survivor (tags unioned). One undoable edit. */
+export async function mergeDuplicates(distance: number) {
+	if (!currentMap) return;
+	await mutate(cmd.storeMergeDuplicates(distance));
+}
+
 export function selectTag(tagId: number) {
 	return addSelections([{ type: "Tag", tagId }]);
 }

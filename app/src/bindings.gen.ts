@@ -212,6 +212,18 @@ export const commands = {
 	 */
 	storeResolveSelection: (props: SelectionProps) => typedError<number[], string>(__TAURI_INVOKE("store_resolve_selection", { props })),
 	/**
+	 *  Transitive spatial duplicate groups (connected components, size >= 2) within `distance`
+	 *  metres. Read-only; used to preview a merge. Returns groups of location IDs.
+	 */
+	storeDuplicateGroups: (distance: number) => typedError<number[][], string>(__TAURI_INVOKE("store_duplicate_groups", { distance })),
+	/**
+	 *  Merge each transitive duplicate group (size >= 2 within `distance` metres) into one
+	 *  survivor. Survivor = most tags, then earliest `created_at`, then lowest id. Tags are
+	 *  set-unioned across the group; `extra` is merged with the survivor winning key conflicts;
+	 *  all other survivor fields are kept. Applied as a single undoable edit.
+	 */
+	storeMergeDuplicates: (distance: number) => typedError<MutationResult_Serialize, string>(__TAURI_INVOKE("store_merge_duplicates", { distance })).then((v) => ((v.status === "ok" ? { ...v, data: ({...v.data,delta:({...v.data.delta,added:v.data.delta.added.map(i=>i),updated:v.data.delta.updated.map(i=>({...i,lng:i.lng==null?i.lng:i.lng,lat:i.lat==null?i.lat:i.lat,heading:i.heading==null?i.heading:i.heading}))})}) } : v) as typeof v)),
+	/**
 	 *  Full render rebuild: single-pass over all alive locations, writes binary to a temp file.
 	 *  Returns the file path for JS to fetch via `mma-buf://`. Only called on map open or full reset.
 	 */

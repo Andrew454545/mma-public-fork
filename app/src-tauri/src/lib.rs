@@ -448,6 +448,8 @@ pub fn run() {
                     location_store::store_sync_selections,
                     location_store::store_get_selected_ids_list,
                     location_store::store_resolve_selection,
+                    location_store::store_duplicate_groups,
+                    location_store::store_merge_duplicates,
                     // --- Render ---
                     location_store::store_fill_render_file,
                     location_store::store_resolve_pick,

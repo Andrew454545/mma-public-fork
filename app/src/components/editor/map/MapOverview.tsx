@@ -36,6 +36,7 @@ import { RgbColorPicker } from "react-colorful";
 import type { Selection, FilterOp } from "@/store/selections";
 import { selectionDisplayName } from "@/store/selections";
 import { TagManager } from "@/components/editor/TagManager";
+import { MergeDuplicatesModal } from "@/components/dialogs/MergeDuplicatesModal.add";
 import { Dialog, DialogContent } from "@/components/primitives/Dialog";
 import { ToolBlock } from "@/components/primitives/ToolBlock";
 import { Icon } from "@/components/primitives/Icon";
@@ -901,6 +902,7 @@ export function MapOverview() {
 	const [selectionsCollapsed, setSelectionsCollapsed] = useState(false);
 	const [dupDistance, setDupDistance] = useState(1);
 	const [showTagFindReplace, setShowTagFindReplace] = useState(false);
+	const [showMergeDuplicates, setShowMergeDuplicates] = useState(false);
 
 	useEffect(() => {
 		const handler = () => setShowTagFindReplace(true);
@@ -1129,11 +1131,19 @@ export function MapOverview() {
 					</label>
 					<button className="button" type="button" onClick={() => selectDuplicates(dupDistance)}>
 						Find duplicates
+					</button>{" "}
+					<button className="button" type="button" onClick={() => setShowMergeDuplicates(true)}>
+						Merge duplicates
 					</button>
 				</p>
 				<FilterBuilder key={map.meta.id} mapId={map.meta.id} />
 			</ToolBlock>
 			<TagFindReplaceDialog open={showTagFindReplace} onOpenChange={setShowTagFindReplace} />
+			<MergeDuplicatesModal
+				open={showMergeDuplicates}
+				onOpenChange={setShowMergeDuplicates}
+				distance={dupDistance}
+			/>
 		</section>
 	);
 }

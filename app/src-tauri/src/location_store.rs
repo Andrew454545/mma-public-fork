@@ -2405,6 +2405,42 @@ fn apply_edit(store: &mut Store, remove: &[Location], create: &[Location]) -> Ch
     changes
 }
 
+/// Fold a duplicate group into one survivor. Survivor = most tags, then earliest
+/// `created_at`, then lowest id (`max_by` picks the greatest, so created_at/id are
+/// reversed to favour smaller). Tags are set-unioned; `extra` is merged with the
+/// survivor winning key conflicts; all other survivor fields are kept. `members` must
+/// be non-empty. The returned survivor keeps its original id (so callers represent the
+/// merge as an update of the survivor plus removal of the rest).
+fn merge_group(members: &[Location]) -> Location {
+    let survivor = members.iter().max_by(|a, b| {
+        a.tags.len().cmp(&b.tags.len())
+            .then_with(|| b.created_at.cmp(&a.created_at))
+            .then_with(|| b.id.cmp(&a.id))
+    }).expect("merge_group requires a non-empty group");
+
+    let mut tagset: std::collections::BTreeSet<u32> = std::collections::BTreeSet::new();
+    for m in members { tagset.extend(m.tags.iter().copied()); }
+
+    // Non-survivors in id order first, survivor last so its values win conflicts.
+    let mut merged_extra = serde_json::Map::new();
+    let mut others: Vec<&Location> = members.iter().filter(|m| m.id != survivor.id).collect();
+    others.sort_by_key(|m| m.id);
+    for m in others {
+        if let Some(e) = &m.extra {
+            for (k, v) in e { merged_extra.insert(k.clone(), v.clone()); }
+        }
+    }
+    if let Some(e) = &survivor.extra {
+        for (k, v) in e { merged_extra.insert(k.clone(), v.clone()); }
+    }
+
+    let mut new_survivor = survivor.clone();
+    new_survivor.tags = tagset.into_iter().collect();
+    new_survivor.extra = if merged_extra.is_empty() { None } else { Some(merged_extra) };
+    new_survivor.modified_at = Some(crate::util::now_iso());
+    new_survivor
+}
+
 /// Replay an edit forward: remove `entry.removed`, create `entry.created`.
 fn apply_edit_forward(store: &mut Store, entry: &EditEntry) -> ChangeSet {
     apply_edit(store, &entry.removed, &entry.created)
@@ -2816,6 +2852,67 @@ pub fn store_resolve_selection(webview: tauri::Webview, state: tauri::State<'_, 
     with_store!(webview, state, |store| {
         let view = store.loc_view();
         Ok(selections::resolve(&view, &props))
+    })
+}
+
+/// Transitive spatial duplicate groups (connected components, size >= 2) within `distance`
+/// metres. Read-only; used to preview a merge. Returns groups of location IDs.
+#[tauri::command]
+#[specta::specta]
+pub fn store_duplicate_groups(
+    webview: tauri::Webview,
+    state: tauri::State<'_, StoreState>,
+    distance: f64,
+) -> Result<Vec<Vec<u32>>, String> {
+    with_store!(webview, state, |store| {
+        let view = store.loc_view();
+        Ok(selections::find_duplicate_groups(&view, distance))
+    })
+}
+
+/// Merge each transitive duplicate group (size >= 2 within `distance` metres) into one
+/// survivor. Survivor = most tags, then earliest `created_at`, then lowest id. Tags are
+/// set-unioned across the group; `extra` is merged with the survivor winning key conflicts;
+/// all other survivor fields are kept. Applied as a single undoable edit.
+#[tauri::command]
+#[specta::specta]
+pub fn store_merge_duplicates(
+    webview: tauri::Webview,
+    state: tauri::State<'_, StoreState>,
+    distance: f64,
+) -> Result<MutationResult, String> {
+    let _t = std::time::Instant::now();
+    with_store!(webview, state, |store| {
+        let groups = {
+            let view = store.loc_view();
+            selections::find_duplicate_groups(&view, distance)
+        };
+
+        let mut remove: Vec<Location> = Vec::new();
+        let mut create: Vec<Location> = Vec::new();
+
+        for group in &groups {
+            let members: Vec<Location> = group.iter()
+                .filter_map(|&id| store.get_loc_by_id(id))
+                .collect();
+            if members.len() < 2 { continue; }
+            create.push(merge_group(&members));
+            for m in members { remove.push(m); }
+        }
+
+        let result = if create.is_empty() {
+            store.finish_mutation(ChangeSet::default())
+        } else {
+            let group_count = create.len();
+            let merged_away = remove.len() - create.len();
+            let changes = apply_edit(store, &remove, &create);
+            store.push_undo(EditEntry { created: create, removed: remove });
+            store.edits.redo.clear();
+            log::debug!("[cmd] store_merge_duplicates groups={} merged_away={} total={}ms",
+                group_count, merged_away, _t.elapsed().as_millis());
+            store.finish_mutation(changes)
+        };
+        Ok(result)
     })
 }
 

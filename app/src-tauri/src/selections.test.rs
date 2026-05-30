@@ -413,6 +413,47 @@ fn duplicates_finds_nearby() {
     assert!(!ids.contains(&3));
 }
 
+// 0.00001 deg latitude ~= 1.11 m. Three points spaced one step apart chain pairwise
+// (1-2, 2-3) but 1-3 (~2.22 m) exceeds a 2 m threshold: only transitivity unites them.
+#[test]
+fn duplicate_groups_are_transitive() {
+    let dead = HashSet::new();
+    let patches = HashMap::new();
+    let adds = vec![
+        loc(1, 0.00000, 0.0),
+        loc(2, 0.00001, 0.0),
+        loc(3, 0.00002, 0.0),
+    ];
+    let view = make_view(None, &dead, &patches, &adds);
+    let groups = find_duplicate_groups(&view, 2.0);
+    assert_eq!(groups, vec![vec![1, 2, 3]]);
+}
+
+#[test]
+fn duplicate_groups_separate_clusters_and_drop_singletons() {
+    let dead = HashSet::new();
+    let patches = HashMap::new();
+    let adds = vec![
+        loc(1, 0.00000, 0.0),
+        loc(2, 0.00001, 0.0), // with 1
+        loc(4, 0.50000, 0.0),
+        loc(5, 0.50001, 0.0), // with 4
+        loc(6, 0.80000, 0.0), // alone -> excluded
+    ];
+    let view = make_view(None, &dead, &patches, &adds);
+    let groups = find_duplicate_groups(&view, 2.0);
+    assert_eq!(groups, vec![vec![1, 2], vec![4, 5]]);
+}
+
+#[test]
+fn duplicate_groups_empty_when_all_far() {
+    let dead = HashSet::new();
+    let patches = HashMap::new();
+    let adds = vec![loc(1, 0.0, 0.0), loc(2, 0.5, 0.0), loc(3, 1.0, 0.0)];
+    let view = make_view(None, &dead, &patches, &adds);
+    assert!(find_duplicate_groups(&view, 2.0).is_empty());
+}
+
 // -----------------------------------------------------------------------
 // Filter on adds
 // -----------------------------------------------------------------------

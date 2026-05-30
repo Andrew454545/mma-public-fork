@@ -2822,6 +2822,30 @@ summary.button {
 	display: flex;
 	justify-content: flex-end;
 }
+
+.merge-duplicates__status {
+	font-size: 0.875rem;
+	margin: 0 0 0.75rem;
+}
+.merge-duplicates__actions {
+	display: flex;
+	justify-content: flex-end;
+	gap: 0.5rem;
+}
+.merge-duplicates__loading {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	min-height: 80px;
+}
+.merge-duplicates__spinner {
+	width: 28px;
+	height: 28px;
+	border: 3px solid #ddd;
+	border-top-color: #4a9eff;
+	border-radius: 50%;
+	animation: spin 0.6s linear infinite;
+}
 .bulk-operation__scope {
 	display: flex;
 	gap: 1rem;

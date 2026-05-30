@@ -34,7 +34,7 @@ import { cmd } from "@/lib/commands";
 
 import { RgbColorPicker } from "react-colorful";
 import type { Selection, FilterOp } from "@/store/selections";
-import { selectionDisplayName } from "@/store/selections";
+import { selectionDisplayName, OP_LABELS } from "@/store/selections";
 import { TagManager } from "@/components/editor/TagManager";
 import { MergeDuplicatesModal } from "@/components/dialogs/MergeDuplicatesModal.add";
 import { Dialog, DialogContent } from "@/components/primitives/Dialog";
@@ -373,19 +373,6 @@ function SelectionRow({
 
 const ALL_OPS: FilterOp[] = ["eq", "neq", "gt", "lt", "gte", "lte", "between", "has", "nothas"];
 const EQUALITY_OPS: FilterOp[] = ["eq", "neq", "has", "nothas"];
-const OP_LABELS: Record<FilterOp, string> = {
-	eq: "=",
-	neq: "!=",
-	gt: ">",
-	lt: "<",
-	gte: ">=",
-	lte: "<=",
-	between: "between",
-	between_anyyear: "between (any year)",
-	between_anytime: "between (any date)",
-	has: "has",
-	nothas: "does not have",
-};
 const filterBuilderState = new Map<
 	string,
 	{ field: string; op: FilterOp; value: string; value2: string; anyYear?: boolean; anyTime?: boolean }

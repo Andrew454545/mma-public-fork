@@ -42,6 +42,21 @@ export type FilterOp =
 	| "has"
 	| "nothas";
 
+/** Display symbol/word for each filter operator. */
+export const OP_LABELS: Record<FilterOp, string> = {
+	eq: "=",
+	neq: "!=",
+	gt: ">",
+	lt: "<",
+	gte: ">=",
+	lte: "<=",
+	between: "between",
+	between_anyyear: "between (any year)",
+	between_anytime: "between (any date)",
+	has: "has",
+	nothas: "does not have",
+};
+
 export function colorForKey(key: string): [number, number, number] {
 	let t = 0;
 	for (let i = 0; i < key.length; i += 1) t = ((key.charCodeAt(i) + (t << 5)) | 0) + t;
@@ -386,19 +401,6 @@ export function selectionDisplayName(map: MapData, sel: Selection): string {
 		.with({ type: "Union" }, () => "Union")
 		.with({ type: "Invert" }, (p) => `Invert: ${selectionDisplayName(map, p.selections[0])}`)
 		.with({ type: "Filter" }, (p) => {
-			const OP_LABELS: Record<FilterOp, string> = {
-				eq: "=",
-				neq: "!=",
-				gt: ">",
-				lt: "<",
-				gte: ">=",
-				lte: "<=",
-				between: "between",
-				between_anyyear: "between (any year)",
-				between_anytime: "between (any date)",
-				has: "has",
-				nothas: "does not have",
-			};
 			const fieldDef = getFieldDef(p.field);
 			const fieldLabel = fieldDef?.label ?? p.field;
 			if (p.op === "has") return `has ${fieldLabel}`;

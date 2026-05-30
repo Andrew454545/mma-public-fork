@@ -68,10 +68,10 @@ describe("Undo/Redo", () => {
 	});
 
 	it("undo update restores original values", async () => {
-		const loc = await getLoc(undo1Id);
+		const original = await getLoc(undo1Id);
 		await withApi(async (api, l) => {
 			await api.updateLocation(l, { lat: 99, heading: 270 });
-		}, loc);
+		}, original);
 
 		let loc = await getLoc(undo1Id);
 		expect(loc.lat).toBe(99);

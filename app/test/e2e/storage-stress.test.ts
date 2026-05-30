@@ -1239,8 +1239,8 @@ describe("Implicit save on close", () => {
 		]);
 
 		// Update without flushing
-		const loc = await getLoc(ids[0]);
-		await withApi((api, l) => api.updateLocation(l, { heading: 222.22 }), loc);
+		const original = await getLoc(ids[0]);
+		await withApi((api, l) => api.updateLocation(l, { heading: 222.22 }), original);
 
 		// Close immediately (bake happens in close)
 		await closeMap();

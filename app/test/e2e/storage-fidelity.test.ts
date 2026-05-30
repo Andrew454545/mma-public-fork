@@ -203,8 +203,8 @@ describe("Save ordering under concurrent mutations", () => {
 		await closeMap();
 		await openMap(mapId);
 
-		const loc = await getLoc(so1Id);
-		expect(loc.heading).toBe(180);
+		const reloaded = await getLoc(so1Id);
+		expect(reloaded.heading).toBe(180);
 	});
 
 	it("remove then add to same geohash region persists correctly", async () => {

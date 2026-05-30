@@ -48,8 +48,8 @@ describe("Data integrity - flags", () => {
 		await closeMap();
 		await openMap(mapId);
 
-		const loc = await getLoc(fl0Id);
-		expect(loc.flags).toBe(1);
+		const reloaded = await getLoc(fl0Id);
+		expect(reloaded.flags).toBe(1);
 	});
 
 	it("flag=2 (Informational) survives save/load", async () => {
@@ -131,8 +131,8 @@ describe("Data integrity - panoId", () => {
 		await closeMap();
 		await openMap(mapId);
 
-		const loc = await getLoc(pnStrId);
-		expect(loc.panoId).toBeNull();
+		const reloaded = await getLoc(pnStrId);
+		expect(reloaded.panoId).toBeNull();
 	});
 });
 

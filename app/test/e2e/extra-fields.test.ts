@@ -69,9 +69,9 @@ describe("Extra field definitions", () => {
 			await api.patchLocationExtra(l, { country: "France" });
 		}, loc);
 
-		const loc = await getLoc(ids[0]);
-		expect(loc.extra.altitude).toBe(100);
-		expect(loc.extra.country).toBe("France");
+		const reloaded = await getLoc(ids[0]);
+		expect(reloaded.extra.altitude).toBe(100);
+		expect(reloaded.extra.country).toBe("France");
 	});
 
 	it("patchLocationExtra with replace=true overwrites", async () => {
@@ -88,9 +88,9 @@ describe("Extra field definitions", () => {
 			await api.patchLocationExtra(l, { newField: "value" }, true);
 		}, loc);
 
-		const loc = await getLoc(ids[0]);
-		expect(loc.extra.newField).toBe("value");
-		expect(loc.extra.altitude).toBeUndefined();
+		const reloaded = await getLoc(ids[0]);
+		expect(reloaded.extra.newField).toBe("value");
+		expect(reloaded.extra.altitude).toBeUndefined();
 	});
 
 	it("extra fields survive save/close/reopen", async () => {

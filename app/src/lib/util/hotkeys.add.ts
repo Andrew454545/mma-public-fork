@@ -19,6 +19,7 @@ export type HotkeyAction =
 	| "toggleFullscreen"
 	| "returnToSpawn"
 	| "pointNorth"
+	| "centerRoad"
 	| "zoomIn"
 	| "zoomOut"
 	| "copyLink"
@@ -110,6 +111,12 @@ const RAW_HOTKEY_DEFS: HotkeyDef[] = [
 		defaultBinding: "r",
 	},
 	{ action: "pointNorth", label: "Point north", group: "Location Editor", defaultBinding: "n" },
+	{
+		action: "centerRoad",
+		label: "Center toward nearest road direction",
+		group: "Location Editor",
+		defaultBinding: "b",
+	},
 	{ action: "zoomIn", label: "Zoom in", group: "Location Editor", defaultBinding: "+" },
 	{ action: "zoomOut", label: "Zoom out", group: "Location Editor", defaultBinding: "-" },
 	{

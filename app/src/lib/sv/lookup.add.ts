@@ -130,6 +130,20 @@ export function normalizeHeading(h: number): number {
 	return h > 180 ? h - 360 : h < -180 ? h + 360 : h;
 }
 
+/** Heading among `headings` closest to `target` by shortest angular distance, or null if empty. */
+export function nearestLinkHeading(headings: number[], target: number): number | null {
+	let best: number | null = null;
+	let bestDelta = Infinity;
+	for (const h of headings) {
+		const d = Math.abs(normalizeHeading(h - target));
+		if (d < bestDelta) {
+			bestDelta = d;
+			best = h;
+		}
+	}
+	return best;
+}
+
 /** Determine initial heading for a location based on road links and direction preference. */
 export function calcHeading(
 	data: google.maps.StreetViewResolvedPanoramaData,

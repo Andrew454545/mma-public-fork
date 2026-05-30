@@ -49,6 +49,7 @@ import {
 	followLinkedPanos,
 	downloadPanoTile,
 	showToast,
+	nearestLinkHeading,
 } from "@/lib/sv/lookup.add";
 import { isOfficialPano } from "@/lib/sv/panoId";
 import { enrich } from "@/lib/sv/enrich.add";
@@ -983,6 +984,16 @@ function LocationPreviewInner() {
 				cancelTweenRef.current = tweenPov(singletonPano, { heading: 0, pitch: 0 });
 			}
 		}
+	});
+	useHotkey(useBinding("centerRoad"), () => {
+		if (!singletonPano) return;
+		const headings = (singletonPano.getLinks() ?? [])
+			.map((l) => l?.heading)
+			.filter((h): h is number => h != null);
+		const nearest = nearestLinkHeading(headings, singletonPano.getPov().heading);
+		if (nearest == null) return;
+		cancelTweenRef.current?.();
+		cancelTweenRef.current = tweenPov(singletonPano, { heading: nearest, pitch: 0 });
 	});
 	useHotkey(useBinding("spin180"), () => {
 		if (singletonPano) {

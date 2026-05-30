@@ -5,6 +5,7 @@ import {
 	parsePanoDate,
 	svSearchRadius,
 	normalizeHeading,
+	nearestLinkHeading,
 	calcHeading,
 	samePano,
 	isUnofficial,
@@ -89,6 +90,28 @@ describe("normalizeHeading", () => {
 	it("wraps values < -180", () => {
 		expect(normalizeHeading(-270)).toBe(90);
 		expect(normalizeHeading(-360)).toBe(0);
+	});
+});
+
+describe("nearestLinkHeading", () => {
+	it("returns null for empty input", () => {
+		expect(nearestLinkHeading([], 90)).toBeNull();
+	});
+
+	it("picks the heading with smallest angular distance", () => {
+		expect(nearestLinkHeading([0, 90, 180, 270], 80)).toBe(90);
+		expect(nearestLinkHeading([0, 90, 180, 270], 100)).toBe(90);
+	});
+
+	it("crosses the 0/360 wrap boundary", () => {
+		expect(nearestLinkHeading([10, 200], 350)).toBe(10);
+		expect(nearestLinkHeading([350, 170], 10)).toBe(350);
+	});
+
+	it("does not bias clockwise vs counterclockwise", () => {
+		// 70 and 110 are both 20deg from 90; first-seen wins on a tie
+		expect(nearestLinkHeading([70, 110], 90)).toBe(70);
+		expect(nearestLinkHeading([110, 70], 90)).toBe(110);
 	});
 });
 

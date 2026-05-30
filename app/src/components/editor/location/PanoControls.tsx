@@ -7,7 +7,7 @@ import { lookupStreetView } from "@/lib/sv/lookup.add";
 import { shortenMapsUrl } from "@/lib/sv/shortUrl";
 import { useSettings } from "@/store/settings.add";
 import { useBinding } from "@/lib/util/hotkeys.add";
-import { useHotkeyRef } from "@/lib/hooks/useHotkey";
+import { useHotkey, useHotkeyRef } from "@/lib/hooks/useHotkey";
 import { open } from "@tauri-apps/plugin-shell";
 import { tweenPov } from "@/lib/sv/tweenPov";
 
@@ -290,19 +290,33 @@ export function PanoControls({
 		if (url) open(url.toString());
 	}, [buildMapsUrl]);
 
-	const copyLink = useCallback(async () => {
+	// `long` skips the shortenMapsUrl redirect lookup and copies the raw long URL.
+	const doCopy = useCallback(async (long: boolean) => {
 		const url = buildMapsUrl();
 		if (!url) return;
+		const longStr = url.toString();
+		if (long) {
+			await navigator.clipboard.writeText(longStr).catch(() => {});
+			setCopyState("done");
+			setTimeout(() => setCopyState("idle"), 500);
+			return;
+		}
 		setCopyState("loading");
 		try {
-			const short = await shortenMapsUrl(url.toString());
+			const short = await shortenMapsUrl(longStr);
 			await navigator.clipboard.writeText(short);
 		} catch {
-			await navigator.clipboard.writeText(url.toString()).catch(() => {});
+			await navigator.clipboard.writeText(longStr).catch(() => {});
 		}
 		setCopyState("done");
 		setTimeout(() => setCopyState("idle"), 500);
 	}, [buildMapsUrl]);
+
+	const copyLink = useCallback(() => doCopy(false), [doCopy]);
+
+	useHotkey(useBinding("copyLinkLong"), () => {
+		doCopy(true);
+	});
 
 	const hasChanged =
 		panorama.getPov().heading !== location.heading ||

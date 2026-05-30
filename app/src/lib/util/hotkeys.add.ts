@@ -23,6 +23,7 @@ export type HotkeyAction =
 	| "zoomIn"
 	| "zoomOut"
 	| "copyLink"
+	| "copyLinkLong"
 	| "toggleCrosshair"
 	| "toggleHideCar"
 	| "togglePanoUI"
@@ -124,6 +125,12 @@ const RAW_HOTKEY_DEFS: HotkeyDef[] = [
 		label: "Copy Street View link",
 		group: "Location Editor",
 		defaultBinding: "Mod+c",
+	},
+	{
+		action: "copyLinkLong",
+		label: "Quick copy Street View link (long URL)",
+		group: "Location Editor",
+		defaultBinding: "Mod+Alt+c",
 	},
 	{
 		action: "toggleCrosshair",

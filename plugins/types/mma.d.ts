@@ -632,6 +632,8 @@ export type WorkArea = "overview" | "location" | "duplicates" | "import" | "plug
 export interface EnrichFieldOption {
 	key: string;
 	label: string;
+	/** Excluded from the default field set (null enrichFields); user must opt in. */
+	defaultOff?: boolean;
 }
 declare function registerEnrichFields(fields: EnrichFieldOption[]): void;
 export interface EnrichmentProvider {
@@ -1168,6 +1170,17 @@ declare const mma: {
 		uninstallPlugin: (id: string) => Promise<null>;
 		checkBorderFile: (level: string) => Promise<boolean>;
 		downloadBorderFile: (level: string) => Promise<null>;
+		borderLookup: (lat: number, lng: number, level: string) => Promise<{
+			coordinates: (([
+				number,
+				number
+			])[])[];
+			extraPolygons?: ((([
+				number,
+				number
+			])[])[])[] | null;
+			properties?: any | null;
+		} | null>;
 		reverseGeocode: (lat: number, lng: number) => Promise<{
 			city: string;
 			admin: string;

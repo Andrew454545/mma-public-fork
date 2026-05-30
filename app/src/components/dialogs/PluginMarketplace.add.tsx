@@ -294,7 +294,9 @@ export function PluginMarketplace({
 				{tab === "additional" && (
 					<>
 						{!registry && !fetchError && (
-							<div className="plugin-marketplace__empty">Loading...</div>
+							<div className="plugin-marketplace__loading">
+								<div className="plugin-marketplace__spinner" />
+							</div>
 						)}
 						{fetchError && (
 							<div className="plugin-marketplace__empty">

@@ -161,9 +161,8 @@ describe("Enrichment — single location via preview", () => {
 	});
 
 	it("clears datetime/timezone when imageDate changes", async () => {
-		await withApi(async (api) => {
-			api.setSetting("showExactDate", false);
-		});
+		// Default enrich set excludes datetime/timezone, so no live resolution interferes
+		await updateMapSettings({ enrichFields: undefined });
 		// Pre-seed with stale datetime
 		const dtLoc = await readLocation(enrichExistingMetaId);
 		await withApi(async (api, l) => {
@@ -430,8 +429,18 @@ describe("Enrichment — exact date via preview", () => {
 	});
 
 	it("datetime and timezone are written after exact date resolves", async () => {
+		await updateMapSettings({
+			enrichFields: [
+				"altitude",
+				"countryCode",
+				"cameraType",
+				"panoType",
+				"imageDate",
+				"datetime",
+				"timezone",
+			],
+		});
 		await withApi(async (api) => {
-			api.setSetting("showExactDate", true);
 			api.setSetting("dateTimezone", "location");
 		});
 		await openLocation(exactEnrichId);

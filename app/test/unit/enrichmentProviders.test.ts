@@ -134,6 +134,24 @@ describe("registerEnrichFields", () => {
 		// non-defaultOff core fields remain in the default set
 		expect(getDefaultEnrichKeys()).toContain("altitude");
 	});
+
+	it("treats exact date / timezone as opt-in (expensive, not enriched by default)", () => {
+		expect(getDefaultEnrichKeys()).not.toContain("datetime");
+		expect(getDefaultEnrichKeys()).not.toContain("timezone");
+		expect(getAllEnrichKeys()).toContain("datetime");
+	});
+});
+
+describe("isFieldEnabled", () => {
+	it("is false for opt-in fields under the default set", () => {
+		expect(isFieldEnabled(null, "datetime")).toBe(false);
+		expect(isFieldEnabled(null, "altitude")).toBe(true);
+	});
+
+	it("respects an explicit enrichFields list", () => {
+		expect(isFieldEnabled(["datetime"], "datetime")).toBe(true);
+		expect(isFieldEnabled(["altitude"], "datetime")).toBe(false);
+	});
 });
 
 describe("filterEnrichPatch", () => {

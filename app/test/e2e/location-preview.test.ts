@@ -699,23 +699,30 @@ describe("LocationPreview — exact date resolution", () => {
 		mapId = await createAndOpenMap("E2E LP Exact Date");
 		await withApi(async (api) => {
 			const map = api.getCurrentMap()!;
-			await api.updateMapMeta({ settings: { ...map.meta.settings, enrichMetadata: true } });
+			await api.updateMapMeta({
+				settings: {
+					...map.meta.settings,
+					enrichMetadata: true,
+					enrichFields: [
+						"altitude",
+						"countryCode",
+						"cameraType",
+						"panoType",
+						"imageDate",
+						"datetime",
+						"timezone",
+					],
+				},
+			});
 			return "ok";
 		});
 		const ids = await addLocs([
 			loc({ lat: OFFICIAL_COORDS.lat, lng: OFFICIAL_COORDS.lng, panoId: OFFICIAL_PANO }),
 		]);
 		exact1Id = ids[0];
-		// Enable exact date setting
-		await withApi(async (api) => {
-			api.setSetting("showExactDate", true);
-		});
 	});
 
 	after(async () => {
-		await withApi(async (api) => {
-			api.setSetting("showExactDate", false);
-		});
 		await closeLocation();
 		await closeMap();
 		await deleteMap(mapId);
@@ -1230,6 +1237,29 @@ describe("LocationPreview — camera type badges", () => {
 
 // ============================================================================
 
+const EXACT_ENRICH_FIELDS = [
+	"altitude",
+	"countryCode",
+	"cameraType",
+	"panoType",
+	"imageDate",
+	"datetime",
+	"timezone",
+];
+const NO_EXACT_ENRICH_FIELDS = ["altitude", "countryCode", "cameraType", "panoType", "imageDate"];
+
+// Exact-date resolution is gated by the per-map datetime enrich field, so enable/disable
+// it by setting enrichFields rather than a global app setting.
+async function setMapEnrichFields(fields: string[]) {
+	await withApi(async (api, f) => {
+		const map = api.getCurrentMap()!;
+		await api.updateMapMeta({
+			settings: { ...map.meta.settings, enrichMetadata: true, enrichFields: f },
+		});
+		return "ok";
+	}, fields);
+}
+
 describe("LocationPreview — settings toggles", () => {
 	let mapId: string;
 	let set1Id: number;
@@ -1251,7 +1281,6 @@ describe("LocationPreview — settings toggles", () => {
 	after(async () => {
 		// Reset all settings we touched
 		await withApi(async (api) => {
-			api.setSetting("showExactDate", false);
 			api.setSetting("exactDateFormat", "date");
 			api.setSetting("showCameraBadges", false);
 			api.setSetting("hidePanoUI", false);
@@ -1265,10 +1294,8 @@ describe("LocationPreview — settings toggles", () => {
 		await closeLocation();
 	});
 
-	it("showExactDate OFF — no exact date label, just month/year", async () => {
-		await withApi(async (api) => {
-			api.setSetting("showExactDate", false);
-		});
+	it("datetime field OFF — no exact date label, just month/year", async () => {
+		await setMapEnrichFields(NO_EXACT_ENRICH_FIELDS);
 		await openLocation(set1Id);
 		await waitForDates();
 		// Wait a beat for any exact date fetch to NOT happen
@@ -1281,10 +1308,8 @@ describe("LocationPreview — settings toggles", () => {
 		expect(text.length).toBeGreaterThan(0);
 	});
 
-	it("showExactDate ON — resolves to exact day", async () => {
-		await withApi(async (api) => {
-			api.setSetting("showExactDate", true);
-		});
+	it("datetime field ON — resolves to exact day", async () => {
+		await setMapEnrichFields(EXACT_ENRICH_FIELDS);
 		await openLocation(set1Id);
 		await waitForDates();
 		await browser.waitUntil(
@@ -1300,8 +1325,8 @@ describe("LocationPreview — settings toggles", () => {
 	});
 
 	it("exactDateFormat 'datetime' — shows time alongside date", async () => {
+		await setMapEnrichFields(EXACT_ENRICH_FIELDS);
 		await withApi(async (api) => {
-			api.setSetting("showExactDate", true);
 			api.setSetting("exactDateFormat", "datetime");
 		});
 		await openLocation(set1Id);
@@ -1325,8 +1350,8 @@ describe("LocationPreview — settings toggles", () => {
 	});
 
 	it("dateTimezone 'utc' — shifts displayed date", async () => {
+		await setMapEnrichFields(EXACT_ENRICH_FIELDS);
 		await withApi(async (api) => {
-			api.setSetting("showExactDate", true);
 			api.setSetting("exactDateFormat", "datetime");
 			api.setSetting("dateTimezone", "utc");
 		});
@@ -1349,9 +1374,9 @@ describe("LocationPreview — settings toggles", () => {
 	});
 
 	it("showCameraBadges OFF — gen badges hidden (unofficial still shows)", async () => {
+		await setMapEnrichFields(NO_EXACT_ENRICH_FIELDS);
 		await withApi(async (api) => {
 			api.setSetting("showCameraBadges", false);
-			api.setSetting("showExactDate", false);
 		});
 		await openLocation(set1Id);
 		await waitForDates();

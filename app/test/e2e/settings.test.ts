@@ -20,7 +20,7 @@ describe("Settings persistence", () => {
 		await deleteMap(mapId);
 		// Reset settings to defaults
 		await withApi(async (api) => {
-			api.setSetting("showExactDate", false);
+			api.setSetting("showPanoMetadata", false);
 			api.setSetting("enableSeen", true);
 			api.setSetting("showCameraBadges", true);
 			api.setSetting("defaultMovementMode", "moving");
@@ -31,7 +31,7 @@ describe("Settings persistence", () => {
 
 	it("getSettings returns an object with known keys", async () => {
 		const settings = await withApi(async (api) => api.getSettings());
-		expect(typeof settings.showExactDate).toBe("boolean");
+		expect(typeof settings.showPanoMetadata).toBe("boolean");
 		expect(typeof settings.showCameraBadges).toBe("boolean");
 		expect(typeof settings.enableSeen).toBe("boolean");
 		expect(typeof settings.defaultMovementMode).toBe("string");
@@ -40,9 +40,9 @@ describe("Settings persistence", () => {
 
 	it("setting a boolean value persists", async () => {
 		await withApi(async (api) => {
-			api.setSetting("showExactDate", true);
+			api.setSetting("showPanoMetadata", true);
 		});
-		const result = await withApi(async (api) => api.getSettings().showExactDate);
+		const result = await withApi(async (api) => api.getSettings().showPanoMetadata);
 		expect(result).toBe(true);
 	});
 

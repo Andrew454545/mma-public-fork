@@ -1132,7 +1132,6 @@ export interface AppSettings {
 	showCoordinateDisplay: boolean;
 	showFullscreenButton: boolean;
 	showPanoMetadata: boolean;
-	showExactDate: boolean;
 	exactDateFormat: ExactDateFormat;
 	dateTimezone: DateTimezone;
 	showNavArrow: boolean;
@@ -1355,7 +1354,6 @@ declare const mma: {
 		showCoordinateDisplay: boolean;
 		showFullscreenButton: boolean;
 		showPanoMetadata: boolean;
-		showExactDate: boolean;
 		exactDateFormat: ExactDateFormat;
 		dateTimezone: DateTimezone;
 		showNavArrow: boolean;

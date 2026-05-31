@@ -35,6 +35,7 @@ import { useHotkey, parseHotkey, matchesKey, isEditableElement } from "@/lib/hoo
 import { useBinding, getBinding } from "@/lib/util/hotkeys.add";
 import { useSettings, useSetting, setSetting, getSettings } from "@/store/settings.add";
 import { useTimezone } from "@/lib/util/timezone.add";
+import { isFieldEnabled } from "@/lib/data/fieldDefs.add";
 import * as Select from "@radix-ui/react-select";
 import { PluginLocationPanels } from "@/plugins/PluginPanels";
 import { patchOpenSV, setPanoHovered } from "@/lib/sv/opensvPatch.add";
@@ -150,7 +151,8 @@ function PanoDatePicker({
 	);
 
 	const showBadges = useSetting("showCameraBadges");
-	const showExactDate = useSetting("showExactDate");
+	const currentMap = useCurrentMap();
+	const datetimeEnabled = isFieldEnabled(currentMap?.meta.settings.enrichFields ?? null, "datetime");
 	const exactDateFormat = useSetting("exactDateFormat");
 	const dateTimezone = useSetting("dateTimezone");
 	const triggerPanoId =
@@ -162,8 +164,8 @@ function PanoDatePicker({
 	const yearMonth = displayDate
 		? `${displayDate.getFullYear()}-${String(displayDate.getMonth() + 1).padStart(2, "0")}`
 		: null;
-	const exactDate = useExactDate(triggerPanoId, lat, lng, yearMonth, showExactDate && isNewest);
-	const resolvedTz = useTimezone(lat, lng, showExactDate && dateTimezone === "location");
+	const exactDate = useExactDate(triggerPanoId, lat, lng, yearMonth, datetimeEnabled && isNewest);
+	const resolvedTz = useTimezone(lat, lng, datetimeEnabled && dateTimezone === "location");
 	const tzOption = dateTimezone === "utc" ? "UTC" : (resolvedTz ?? undefined);
 	const exactLabel = exactDate.ts
 		? exactDateFormat === "datetime"

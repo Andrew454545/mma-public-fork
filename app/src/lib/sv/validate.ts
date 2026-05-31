@@ -8,7 +8,6 @@ import { runConcurrent } from "@/lib/util/concurrent";
 
 const GOOD_CAM_TYPES = new Set(["gen4", "gen2"]);
 
-// 1:1 translation of original cp.
 async function validateOne(loc: Location, signal?: AbortSignal): Promise<ValidationState> {
 	signal?.throwIfAborted();
 

@@ -1,7 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { ManageFieldsModal } from "@/components/dialogs/ManageFieldsModal.add";
 import { getEnrichFieldOptions, getDefaultEnrichKeys } from "@/lib/data/fieldDefs.add";
-import { useSetting } from "@/store/settings.add";
 import { Dialog, DialogContent } from "@/components/primitives/Dialog";
 import type { MapStyle } from "@/lib/geo/tiles";
 import { EnrichInfoButton } from "@/components/editor/map/EnrichInfoButton";
@@ -319,7 +318,6 @@ export function MapTypeDropdown({ layerConfig }: { layerConfig: LayerConfig }) {
 }
 
 export function MapSettingsDropdown({ settings: s }: { settings: MapSettingsDropdownProps }) {
-	const showExactDate = useSetting("showExactDate");
 	const [pointAlongRoad, setPointAlongRoad] = useMapSetting("pointAlongRoad");
 	const [preferDirection, setPreferDirection] = useMapSetting("preferDirection");
 	const [preferOfficial, setPreferOfficial] = useMapSetting("preferOfficial");
@@ -525,15 +523,12 @@ export function MapSettingsDropdown({ settings: s }: { settings: MapSettingsDrop
 						Choose which metadata fields to add when enriching locations.
 					</p>
 					{getEnrichFieldOptions().map((f) => {
-						const exactDateOff = !showExactDate && (f.key === "datetime" || f.key === "timezone");
-						const enabled =
-							!exactDateOff && (enrichFields ? enrichFields.includes(f.key) : !f.defaultOff);
+						const enabled = enrichFields ? enrichFields.includes(f.key) : !f.defaultOff;
 						return (
-							<label key={f.key} className="settings-popup__item" style={{ display: "flex", alignItems: "center", gap: ".5rem", ...(exactDateOff ? { opacity: 0.5 } : undefined) }}>
+							<label key={f.key} className="settings-popup__item" style={{ display: "flex", alignItems: "center", gap: ".5rem" }}>
 								<input
 									type="checkbox"
 									checked={enabled}
-									disabled={exactDateOff}
 									onChange={(e) => {
 										const defaultKeys = getDefaultEnrichKeys();
 										const current = enrichFields ?? [...defaultKeys];

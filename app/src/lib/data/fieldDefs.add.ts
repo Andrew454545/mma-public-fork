@@ -1,6 +1,5 @@
 import type { ExtraFieldDef } from "@/types";
 import type { Location } from "@/types";
-import { getSettings } from "@/store/settings.add";
 import { registerPluginFieldDefs, unregisterPluginFieldDefs } from "@/lib/data/fieldDefRegistry";
 import { trackDisposable } from "@/plugins/scope";
 
@@ -17,8 +16,8 @@ const coreFieldOptions: EnrichFieldOption[] = [
 	{ key: "cameraType", label: "Camera type" },
 	{ key: "panoType", label: "Pano type" },
 	{ key: "imageDate", label: "Image date" },
-	{ key: "datetime", label: "Exact date" },
-	{ key: "timezone", label: "Timezone" },
+	{ key: "datetime", label: "Exact date", defaultOff: true },
+	{ key: "timezone", label: "Timezone", defaultOff: true },
 	{ key: "drivingDirection", label: "Driving direction", defaultOff: true },
 ];
 
@@ -85,8 +84,7 @@ export function getTriggeredProviders(patchedKeys: string[]): EnrichmentProvider
 }
 
 export function isFieldEnabled(enrichFields: string[] | null, key: string): boolean {
-	if ((key === "datetime" || key === "timezone") && !getSettings().showExactDate) return false;
-	return !enrichFields || enrichFields.includes(key);
+	return (enrichFields ?? getDefaultEnrichKeys()).includes(key);
 }
 
 export function filterEnrichPatch(

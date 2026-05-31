@@ -30,7 +30,6 @@ export interface AppSettings {
 	showCoordinateDisplay: boolean;
 	showFullscreenButton: boolean;
 	showPanoMetadata: boolean;
-	showExactDate: boolean;
 	exactDateFormat: ExactDateFormat;
 	dateTimezone: DateTimezone;
 	showNavArrow: boolean;
@@ -73,7 +72,6 @@ const DEFAULTS: AppSettings = {
 	showCoordinateDisplay: true,
 	showFullscreenButton: true,
 	showPanoMetadata: false,
-	showExactDate: false,
 	exactDateFormat: "date" as ExactDateFormat,
 	dateTimezone: "location" as DateTimezone,
 	showNavArrow: true,

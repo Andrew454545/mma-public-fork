@@ -458,37 +458,25 @@ function DatePickerSection() {
 				Show camera type badges (Gen1, Gen2, etc.)
 			</label>
 			<label className="settings-popup__item">
-				<input
-					type="checkbox"
-					checked={s.showExactDate}
-					onChange={(e) => setSetting("showExactDate", e.target.checked)}
-				/>
-				Resolve exact capture date (newest panos only)
+				Exact date format
+				<select
+					value={s.exactDateFormat}
+					onChange={(e) => setSetting("exactDateFormat", e.target.value as ExactDateFormat)}
+				>
+					<option value="date">Date only</option>
+					<option value="datetime">Date + time</option>
+				</select>
 			</label>
-			{s.showExactDate && (
-				<>
-					<label className="settings-popup__item">
-						Format
-						<select
-							value={s.exactDateFormat}
-							onChange={(e) => setSetting("exactDateFormat", e.target.value as ExactDateFormat)}
-						>
-							<option value="date">Date only</option>
-							<option value="datetime">Date + time</option>
-						</select>
-					</label>
-					<label className="settings-popup__item">
-						Timezone
-						<select
-							value={s.dateTimezone}
-							onChange={(e) => setSetting("dateTimezone", e.target.value as DateTimezone)}
-						>
-							<option value="location">Location timezone</option>
-							<option value="utc">UTC</option>
-						</select>
-					</label>
-				</>
-			)}
+			<label className="settings-popup__item">
+				Exact date timezone
+				<select
+					value={s.dateTimezone}
+					onChange={(e) => setSetting("dateTimezone", e.target.value as DateTimezone)}
+				>
+					<option value="location">Location timezone</option>
+					<option value="utc">UTC</option>
+				</select>
+			</label>
 		</fieldset>
 	);
 }

@@ -7,7 +7,6 @@ export interface HeatmapSettings {
 	radiusPixels: number;
 	opacity: number;
 	threshold: number;
-	filterTags: Set<number> | null;
 }
 
 export const DEFAULT_SETTINGS: HeatmapSettings = {
@@ -16,13 +15,11 @@ export const DEFAULT_SETTINGS: HeatmapSettings = {
 	radiusPixels: 30,
 	opacity: 0.6,
 	threshold: 0.05,
-	filterTags: null,
 };
 
 interface LocPoint {
 	lat: number;
 	lng: number;
-	tags: number[];
 }
 
 let overlay: GoogleMapsOverlay | null = null;
@@ -35,15 +32,16 @@ export function getSettings(): HeatmapSettings {
 }
 
 export function getLocationCount(): number {
-	return filterLocations(allLocations()).length;
+	return selectedLocations().length;
 }
 
-function allLocations(): LocPoint[] {
+function selectedLocations(): LocPoint[] {
 	if (!locStore) return [];
+	const ids = MMA.getSelectedLocationIds();
 	const out: LocPoint[] = [];
-	for (const l of locStore.locations.values()) {
-		const loc = l as { lat: number; lng: number; tags: number[] };
-		out.push({ lat: loc.lat, lng: loc.lng, tags: loc.tags });
+	for (const id of ids) {
+		const loc = locStore.locations.get(id) as { lat: number; lng: number } | undefined;
+		if (loc) out.push({ lat: loc.lat, lng: loc.lng });
 	}
 	return out;
 }
@@ -58,19 +56,13 @@ export function updateSettings(patch: Partial<HeatmapSettings>) {
 	onSettingsChange?.();
 }
 
-function filterLocations(locs: LocPoint[]): LocPoint[] {
-	const tags = settings.filterTags;
-	if (!tags || tags.size === 0) return locs;
-	return locs.filter((loc) => loc.tags.some((t) => tags.has(t)));
-}
-
 function rebuild() {
 	if (!overlay) return;
 	if (!settings.visible) {
 		overlay.setProps({ layers: [] });
 		return;
 	}
-	const data = filterLocations(allLocations());
+	const data = selectedLocations();
 
 	const layer = new HeatmapLayer({
 		id: "mma-heatmap",
@@ -101,9 +93,14 @@ export async function init(): Promise<() => void> {
 		rebuild();
 		onSettingsChange?.();
 	});
+	const unsubSel = MMA.on("selection:change", () => {
+		rebuild();
+		onSettingsChange?.();
+	});
 
 	return () => {
 		unsubStore();
+		unsubSel();
 		locStore?.destroy();
 		locStore = null;
 		if (overlay) {

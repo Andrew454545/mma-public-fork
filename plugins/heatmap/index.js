@@ -928,8 +928,7 @@ var DEFAULT_SETTINGS = {
   intensity: 1,
   radiusPixels: 30,
   opacity: 0.6,
-  threshold: 0.05,
-  filterTags: null
+  threshold: 0.05
 };
 var overlay = null;
 var locStore = null;
@@ -939,14 +938,15 @@ function getSettings() {
   return settings;
 }
 function getLocationCount() {
-  return filterLocations(allLocations()).length;
+  return selectedLocations().length;
 }
-function allLocations() {
+function selectedLocations() {
   if (!locStore) return [];
+  const ids = MMA.getSelectedLocationIds();
   const out = [];
-  for (const l of locStore.locations.values()) {
-    const loc = l;
-    out.push({ lat: loc.lat, lng: loc.lng, tags: loc.tags });
+  for (const id of ids) {
+    const loc = locStore.locations.get(id);
+    if (loc) out.push({ lat: loc.lat, lng: loc.lng });
   }
   return out;
 }
@@ -958,18 +958,13 @@ function updateSettings(patch) {
   rebuild();
   onSettingsChange?.();
 }
-function filterLocations(locs) {
-  const tags = settings.filterTags;
-  if (!tags || tags.size === 0) return locs;
-  return locs.filter((loc) => loc.tags.some((t) => tags.has(t)));
-}
 function rebuild() {
   if (!overlay) return;
   if (!settings.visible) {
     overlay.setProps({ layers: [] });
     return;
   }
-  const data = filterLocations(allLocations());
+  const data = selectedLocations();
   const layer = new heatmap_layer_default({
     id: "mma-heatmap",
     data,
@@ -994,8 +989,13 @@ async function init() {
     rebuild();
     onSettingsChange?.();
   });
+  const unsubSel = MMA.on("selection:change", () => {
+    rebuild();
+    onSettingsChange?.();
+  });
   return () => {
     unsubStore();
+    unsubSel();
     locStore?.destroy();
     locStore = null;
     if (overlay) {
@@ -1043,17 +1043,6 @@ var CSS = `
   min-width: 36px; text-align: right; font-size: 12px;
   color: var(--text-secondary, #999); font-variant-numeric: tabular-nums;
 }
-.heatmap-sidebar__tags {
-  display: flex; flex-direction: column; gap: 2px;
-  max-height: 200px; overflow-y: auto;
-}
-.heatmap-sidebar__tag {
-  display: flex; align-items: center; gap: 6px;
-  padding: 3px 0; font-size: 13px; cursor: pointer;
-}
-.heatmap-sidebar__tag-dot {
-  width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0;
-}
 .heatmap-sidebar__count {
   font-size: 12px; color: var(--text-secondary, #999);
   padding: 4px 0;
@@ -1085,7 +1074,6 @@ function Icon({ path, size = 20 }) {
 function HeatmapSidebar({ onClose }) {
   const [, rerender] = (0, import_react.useState)(0);
   const s = getSettings();
-  const tags = MMA.getCurrentMap()?.meta.tags ?? {};
   (0, import_react.useEffect)(() => {
     injectCSS();
     setOnSettingsChange(() => rerender((n) => n + 1));
@@ -1098,27 +1086,9 @@ function HeatmapSidebar({ onClose }) {
     (key, value) => updateSettings({ [key]: value }),
     []
   );
-  const toggleTag = (0, import_react.useCallback)(
-    (tagId) => {
-      const current = s.filterTags;
-      const next = new Set(current ?? []);
-      if (next.has(tagId)) next.delete(tagId);
-      else next.add(tagId);
-      updateSettings({ filterTags: next.size > 0 ? next : null });
-    },
-    [s.filterTags]
-  );
-  const clearFilters = (0, import_react.useCallback)(() => {
-    updateSettings({ filterTags: null });
-  }, []);
   const reset = (0, import_react.useCallback)(() => {
     updateSettings({ ...DEFAULT_SETTINGS });
   }, []);
-  const tagEntries = Object.entries(tags).map(([id, tag]) => ({
-    id: Number(id),
-    name: tag.name,
-    color: tag.color
-  }));
   const count = getLocationCount();
   return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("section", { className: "map-sidebar heatmap-sidebar", children: [
     /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("header", { className: "heatmap-sidebar__header", children: [
@@ -1139,11 +1109,6 @@ function HeatmapSidebar({ onClose }) {
             onChange: (e) => updateSettings({ visible: e.target.checked })
           }
         )
-      ] }),
-      /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "heatmap-sidebar__count", children: [
-        count.toLocaleString(),
-        " location",
-        count !== 1 ? "s" : ""
       ] }),
       /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "heatmap-sidebar__section", children: [
         /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { className: "heatmap-sidebar__section-title", children: "Settings" }),
@@ -1192,33 +1157,6 @@ function HeatmapSidebar({ onClose }) {
             onChange: (v) => setSlider("threshold", v)
           }
         )
-      ] }),
-      tagEntries.length > 0 && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "heatmap-sidebar__section", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("p", { className: "heatmap-sidebar__section-title", children: [
-          "Filter by tag",
-          s.filterTags && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(import_jsx_runtime.Fragment, { children: [
-            " ",
-            /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", { className: "heatmap-sidebar__reset", onClick: clearFilters, children: "clear" })
-          ] })
-        ] }),
-        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "heatmap-sidebar__tags", children: tagEntries.map((tag) => /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("label", { className: "heatmap-sidebar__tag", children: [
-          /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
-            "input",
-            {
-              type: "checkbox",
-              checked: s.filterTags?.has(tag.id) ?? false,
-              onChange: () => toggleTag(tag.id)
-            }
-          ),
-          /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
-            "span",
-            {
-              className: "heatmap-sidebar__tag-dot",
-              style: { background: tag.color }
-            }
-          ),
-          tag.name
-        ] }, tag.id)) })
       ] })
     ] })
   ] });

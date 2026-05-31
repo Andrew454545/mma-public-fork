@@ -40,17 +40,6 @@ const CSS = `
   min-width: 36px; text-align: right; font-size: 12px;
   color: var(--text-secondary, #999); font-variant-numeric: tabular-nums;
 }
-.heatmap-sidebar__tags {
-  display: flex; flex-direction: column; gap: 2px;
-  max-height: 200px; overflow-y: auto;
-}
-.heatmap-sidebar__tag {
-  display: flex; align-items: center; gap: 6px;
-  padding: 3px 0; font-size: 13px; cursor: pointer;
-}
-.heatmap-sidebar__tag-dot {
-  width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0;
-}
 .heatmap-sidebar__count {
   font-size: 12px; color: var(--text-secondary, #999);
   padding: 4px 0;
@@ -92,7 +81,6 @@ function Icon({ path, size = 20 }: { path: string; size?: number }) {
 export function HeatmapSidebar({ onClose }: { onClose: () => void }) {
 	const [, rerender] = useState(0);
 	const s = getSettings();
-	const tags = MMA.getCurrentMap()?.meta.tags ?? {};
 
 	useEffect(() => {
 		injectCSS();
@@ -108,30 +96,9 @@ export function HeatmapSidebar({ onClose }: { onClose: () => void }) {
 		[],
 	);
 
-	const toggleTag = useCallback(
-		(tagId: number) => {
-			const current = s.filterTags;
-			const next = new Set(current ?? []);
-			if (next.has(tagId)) next.delete(tagId);
-			else next.add(tagId);
-			updateSettings({ filterTags: next.size > 0 ? next : null });
-		},
-		[s.filterTags],
-	);
-
-	const clearFilters = useCallback(() => {
-		updateSettings({ filterTags: null });
-	}, []);
-
 	const reset = useCallback(() => {
 		updateSettings({ ...DEFAULT_SETTINGS });
 	}, []);
-
-	const tagEntries = Object.entries(tags).map(([id, tag]) => ({
-		id: Number(id),
-		name: tag.name,
-		color: tag.color,
-	}));
 
 	const count = getLocationCount();
 
@@ -159,10 +126,6 @@ export function HeatmapSidebar({ onClose }: { onClose: () => void }) {
 					/>
 				</div>
 
-				<div className="heatmap-sidebar__count">
-					{count.toLocaleString()} location{count !== 1 ? "s" : ""}
-				</div>
-
 				<div className="heatmap-sidebar__section">
 					<p className="heatmap-sidebar__section-title">Settings</p>
 					<Slider label="Intensity" value={s.intensity} min={0.1} max={10} step={0.1}
@@ -174,38 +137,6 @@ export function HeatmapSidebar({ onClose }: { onClose: () => void }) {
 					<Slider label="Threshold" value={s.threshold} min={0} max={1} step={0.01}
 						onChange={(v) => setSlider("threshold", v)} />
 				</div>
-
-				{tagEntries.length > 0 && (
-					<div className="heatmap-sidebar__section">
-						<p className="heatmap-sidebar__section-title">
-							Filter by tag
-							{s.filterTags && (
-								<>
-									{" "}
-									<button className="heatmap-sidebar__reset" onClick={clearFilters}>
-										clear
-									</button>
-								</>
-							)}
-						</p>
-						<div className="heatmap-sidebar__tags">
-							{tagEntries.map((tag) => (
-								<label key={tag.id} className="heatmap-sidebar__tag">
-									<input
-										type="checkbox"
-										checked={s.filterTags?.has(tag.id) ?? false}
-										onChange={() => toggleTag(tag.id)}
-									/>
-									<span
-										className="heatmap-sidebar__tag-dot"
-										style={{ background: tag.color }}
-									/>
-									{tag.name}
-								</label>
-							))}
-						</div>
-					</div>
-				)}
 			</div>
 		</section>
 	);

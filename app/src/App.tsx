@@ -13,7 +13,7 @@ import { useSetting } from "@/store/settings.add";
 import { Icon } from "@/components/primitives/Icon";
 import { mdiCog, mdiPuzzle, mdiClose } from "@mdi/js";
 import { ToastContainer } from "@/components/primitives/Toast.add";
-import { useUpdateAvailable, dismissUpdate } from "@/lib/util/updateCheck";
+import { useUpdateState, dismissUpdate, installUpdate, relaunchApp } from "@/lib/util/updateCheck";
 import "@/plugins";
 
 const isEditorWindow = getCurrentWindow().label.startsWith("map-");
@@ -24,7 +24,7 @@ export default function App() {
 	const [showSettings, setShowSettings] = useState(false);
 	const [showPlugins, setShowPlugins] = useState(false);
 	const customCss = useSetting("customCss");
-	const updateInfo = useUpdateAvailable();
+	const update = useUpdateState();
 
 	useHotkey(useBinding("toggleStats"), () => setShowStats((s) => !s));
 
@@ -74,21 +74,36 @@ export default function App() {
 					className="bottom-bar"
 					style={{ position: "fixed", bottom: 12, right: 12, zIndex: 5, display: "flex", gap: 4 }}
 				>
-					{updateInfo && !updateInfo.dismissed && (
+					{update.version && !update.dismissed && (
 						<div className="update-pill">
-							<button
-								className="update-pill__label"
-								onClick={() => setShowSettings(true)}
-							>
-								v{updateInfo.version} available
-							</button>
-							<button
-								className="update-pill__dismiss"
-								onClick={dismissUpdate}
-								title="Dismiss"
-							>
-								<Icon path={mdiClose} size={14} />
-							</button>
+							{update.phase === "available" && (
+								<>
+									<button className="update-pill__label" onClick={installUpdate}>
+										v{update.version} - download update
+									</button>
+									<button className="update-pill__dismiss" onClick={dismissUpdate} title="Dismiss">
+										<Icon path={mdiClose} size={14} />
+									</button>
+								</>
+							)}
+							{update.phase === "downloading" && (
+								<span className="update-pill__label">Downloading {update.percent}%</span>
+							)}
+							{update.phase === "ready" && (
+								<button className="update-pill__label" onClick={relaunchApp}>
+									Restart to update
+								</button>
+							)}
+							{update.phase === "error" && (
+								<>
+									<button className="update-pill__label" onClick={installUpdate}>
+										Update failed - retry
+									</button>
+									<button className="update-pill__dismiss" onClick={dismissUpdate} title="Dismiss">
+										<Icon path={mdiClose} size={14} />
+									</button>
+								</>
+							)}
 						</div>
 					)}
 					{!map && <BulkActions />}

@@ -1,7 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { Dialog, DialogContent } from "@/components/primitives/Dialog";
 import { DatabaseManager } from "@/components/dialogs/DatabaseManager.add";
-import { log } from "@/lib/util/log";
 import {
 	getAllBindings,
 	useBinding,
@@ -29,6 +28,7 @@ import {
 	type TagViewMode,
 	type BorderDetail,
 } from "@/store/settings.add";
+import { useUpdateState, checkForUpdate, installUpdate, relaunchApp } from "@/lib/util/updateCheck";
 
 const IS_MAC = /Mac|iPod|iPhone|iPad/i.test(navigator.platform);
 
@@ -830,71 +830,9 @@ function StreetViewTab() {
 
 declare const __APP_VERSION__: string;
 
-type UpdateStatus =
-	| { state: "idle" }
-	| { state: "checking" }
-	| { state: "up-to-date" }
-	| { state: "available"; version: string; notes: string }
-	| { state: "downloading"; percent: number }
-	| { state: "ready" }
-	| { state: "error"; message: string };
-
 function UpdateSection() {
-	const [status, setStatus] = useState<UpdateStatus>({ state: "idle" });
-	const updateRef = useRef<Awaited<ReturnType<typeof import("@tauri-apps/plugin-updater").check>> | null>(null);
+	const update = useUpdateState();
 	const version = typeof __APP_VERSION__ !== "undefined" ? __APP_VERSION__ : "dev";
-
-	const handleCheck = async () => {
-		setStatus({ state: "checking" });
-		try {
-			const { check } = await import("@tauri-apps/plugin-updater");
-			const update = await check();
-			if (update) {
-				updateRef.current = update;
-				setStatus({
-					state: "available",
-					version: update.version,
-					notes: update.body ?? "",
-				});
-			} else {
-				setStatus({ state: "up-to-date" });
-			}
-		} catch (e) {
-			log.error("[updater] check failed:", e);
-			setStatus({ state: "error", message: e instanceof Error ? e.message : String(e) });
-		}
-	};
-
-	const handleInstall = async () => {
-		const update = updateRef.current;
-		if (!update) return;
-		setStatus({ state: "downloading", percent: 0 });
-		try {
-			let totalBytes = 0;
-			let downloadedBytes = 0;
-			await update.downloadAndInstall((event) => {
-				if (event.event === "Started" && event.data.contentLength) {
-					totalBytes = event.data.contentLength;
-				} else if (event.event === "Progress") {
-					downloadedBytes += event.data.chunkLength;
-					if (totalBytes > 0) {
-						setStatus({ state: "downloading", percent: Math.round((downloadedBytes / totalBytes) * 100) });
-					}
-				} else if (event.event === "Finished") {
-					setStatus({ state: "ready" });
-				}
-			});
-			setStatus({ state: "ready" });
-		} catch (e) {
-			log.error("[updater] install failed:", e);
-			setStatus({ state: "error", message: e instanceof Error ? e.message : String(e) });
-		}
-	};
-
-	const handleRelaunch = async () => {
-		const { relaunch } = await import("@tauri-apps/plugin-process");
-		await relaunch();
-	};
 
 	return (
 		<fieldset className="fieldset">
@@ -904,56 +842,45 @@ function UpdateSection() {
 			<div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
 				<div style={{ display: "flex", alignItems: "center", gap: 8 }}>
 					<span>Current version: {version}</span>
-					{status.state === "idle" && (
-						<button className="button" onClick={handleCheck}>
-							Check for updates
+					{(update.phase === "idle" || update.phase === "up-to-date") && (
+						<button className="button" onClick={checkForUpdate}>
+							{update.phase === "up-to-date" ? "Check again" : "Check for updates"}
 						</button>
 					)}
-					{status.state === "checking" && <span>Checking...</span>}
-					{status.state === "up-to-date" && (
+					{update.phase === "checking" && <span>Checking...</span>}
+					{update.phase === "up-to-date" && <span>Up to date</span>}
+					{update.phase === "error" && (
 						<>
-							<span>Up to date</span>
-							<button className="button" onClick={handleCheck}>
-								Check again
-							</button>
-						</>
-					)}
-					{status.state === "error" && (
-						<>
-							<span style={{ color: "var(--color-error, #e53935)" }}>
-								{status.message}
-							</span>
-							<button className="button" onClick={handleCheck}>
+							<span style={{ color: "var(--color-error, #e53935)" }}>{update.error}</span>
+							<button className="button" onClick={checkForUpdate}>
 								Retry
 							</button>
 						</>
 					)}
 				</div>
-				{status.state === "available" && (
+				{update.phase === "available" && (
 					<div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-						<span>
-							Version {status.version} is available
-						</span>
-						{status.notes && (
+						<span>Version {update.version} is available</span>
+						{update.notes && (
 							<pre style={{ maxHeight: 120, overflow: "auto", fontSize: 12, whiteSpace: "pre-wrap", margin: 0 }}>
-								{status.notes}
+								{update.notes}
 							</pre>
 						)}
-						<button className="button button--primary" onClick={handleInstall}>
+						<button className="button button--primary" onClick={installUpdate}>
 							Download and install
 						</button>
 					</div>
 				)}
-				{status.state === "downloading" && (
+				{update.phase === "downloading" && (
 					<div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-						<progress value={status.percent} max={100} style={{ flex: 1 }} />
-						<span>{status.percent}%</span>
+						<progress value={update.percent} max={100} style={{ flex: 1 }} />
+						<span>{update.percent}%</span>
 					</div>
 				)}
-				{status.state === "ready" && (
+				{update.phase === "ready" && (
 					<div style={{ display: "flex", alignItems: "center", gap: 8 }}>
 						<span>Update installed. Restart to apply.</span>
-						<button className="button button--primary" onClick={handleRelaunch}>
+						<button className="button button--primary" onClick={relaunchApp}>
 							Restart now
 						</button>
 					</div>

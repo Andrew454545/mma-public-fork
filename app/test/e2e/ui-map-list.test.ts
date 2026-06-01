@@ -1,4 +1,4 @@
-import { waitForReady, closeMap, deleteMap, withApi } from "./helpers";
+import { waitForReady, closeMap, deleteMap, withApi, clearInput } from "./helpers";
 
 describe("UI: Map list", () => {
 	const createdIds: string[] = [];
@@ -66,8 +66,7 @@ describe("UI: Map list - rename and delete", () => {
 
 		// Clear any lingering search filter — the create test above types the name
 		// into the search box, which also filters the list and would hide this map.
-		const search = await browser.$('.page-map-list input[placeholder="Search maps..."]');
-		await search.clearValue();
+		await clearInput('.page-map-list input[placeholder="Search maps..."]');
 
 		mapId = await withApi(async (api) => {
 			const map = await api.cmd.storeCreateMap("Rename Me", null);
@@ -95,8 +94,8 @@ describe("UI: Map list - rename and delete", () => {
 
 	it("can rename map via dialog", async () => {
 		// Dialog remains open from the previous test.
+		await clearInput('.edit-map-modal input[name="name"]');
 		const input = await browser.$('.edit-map-modal input[name="name"]');
-		await input.clearValue();
 		await input.setValue("Renamed Via UI");
 
 		await browser.$(".edit-map-modal .button--primary").click();

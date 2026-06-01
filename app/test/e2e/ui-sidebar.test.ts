@@ -8,6 +8,7 @@ import {
 	getLocCount,
 	createTag,
 	withApi,
+	clearInput,
 } from "./helpers";
 
 describe("UI: Tag manager", () => {
@@ -116,7 +117,7 @@ describe("UI: Tag manager", () => {
 		expect(coastalFound).toBe(true);
 
 		// Clear filter
-		await input.clearValue();
+		await clearInput(".tag-manager .input");
 		await browser.pause(100);
 	});
 

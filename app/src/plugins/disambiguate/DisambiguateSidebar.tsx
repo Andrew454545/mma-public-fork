@@ -160,20 +160,25 @@ export function DisambiguateSidebar({ onClose }: { onClose: () => void }) {
 
 	useEffect(() => {
 		let cancelled = false;
-		setLoading(true);
-		setError(null);
-		analyze()
-			.then((a) => {
-				if (!cancelled) setAnalysis(a);
-			})
-			.catch((e) => {
-				if (!cancelled) setError(e instanceof Error ? e.message : String(e));
-			})
-			.finally(() => {
-				if (!cancelled) setLoading(false);
-			});
+		const run = () => {
+			setLoading(true);
+			setError(null);
+			analyze()
+				.then((a) => {
+					if (!cancelled) setAnalysis(a);
+				})
+				.catch((e) => {
+					if (!cancelled) setError(e instanceof Error ? e.message : String(e));
+				})
+				.finally(() => {
+					if (!cancelled) setLoading(false);
+				});
+		};
+		run();
+		const unsub = MMA.on("selection:change", run);
 		return () => {
 			cancelled = true;
+			unsub();
 		};
 	}, []);
 

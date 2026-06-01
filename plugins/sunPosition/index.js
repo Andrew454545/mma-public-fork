@@ -209,7 +209,7 @@ var require_suncalc = __commonJS({
 var import_suncalc = __toESM(require_suncalc());
 var DEG = 180 / Math.PI;
 var FIELDS = {
-  sunAzimuth: { type: "number", label: "Sun azimuth" },
+  sunAzimuth: { type: "number", label: "Sun azimuth", comparison: { type: "circular", period: 360 } },
   sunAltitude: { type: "number", label: "Sun altitude" }
 };
 function computeSun(lat, lng, unixSeconds) {

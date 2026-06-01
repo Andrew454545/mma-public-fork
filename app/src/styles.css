@@ -2931,7 +2931,8 @@ summary.button {
 	white-space: nowrap;
 }
 .manage-fields-modal {
-	max-width: 36rem;
+	width: min(52rem, 92vw);
+	max-width: 92vw;
 }
 .manage-fields-table {
 	width: 100%;
@@ -2960,6 +2961,10 @@ summary.button {
 }
 .manage-fields-table .nselect {
 	height: 28px;
+}
+.manage-fields-table .manage-fields-table__period {
+	width: 6em;
+	margin-top: 4px;
 }
 .manage-fields-modal__actions {
 	display: flex;

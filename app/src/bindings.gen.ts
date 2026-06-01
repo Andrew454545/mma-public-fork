@@ -66,16 +66,16 @@ export const commands = {
 	/**  Lightweight status query: location count, version, and dirty flag. */
 	storeGetSummary: () => typedError<SummaryResult, string>(__TAURI_INVOKE("store_get_summary")),
 	/**  Return metadata for every map in the database. */
-	storeListMaps: () => typedError<MapMeta[], string>(__TAURI_INVOKE("store_list_maps")),
+	storeListMaps: () => typedError<MapMeta[], string>(__TAURI_INVOKE("store_list_maps")).then((v) => ((v.status === "ok" ? { ...v, data: v.data.map(i=>({...i,extra:({...i.extra,fields:i.extra.fields==null?i.extra.fields:Object.fromEntries(Object.entries(i.extra.fields).map(([k,v])=>[k,({...v,comparison:v.comparison==null?v.comparison:v.comparison})]))})})) } : v) as typeof v)),
 	/**  Fetch a single map's metadata by ID. Returns `None` if not found. */
 	storeGetMap: (id: string) => typedError<{
 	meta: MapMeta,
-} | null, string>(__TAURI_INVOKE("store_get_map", { id })),
+} | null, string>(__TAURI_INVOKE("store_get_map", { id })).then((v) => ((v.status === "ok" ? { ...v, data: v.data==null?v.data:({...v.data,meta:({...v.data.meta,extra:({...v.data.meta.extra,fields:v.data.meta.extra.fields==null?v.data.meta.extra.fields:Object.fromEntries(Object.entries(v.data.meta.extra.fields).map(([k,v])=>[k,({...v,comparison:v.comparison==null?v.comparison:v.comparison})]))})})}) } : v) as typeof v)),
 	/**
 	 *  Create a new empty map with default settings. Returns the full metadata
 	 *  (including the generated UUID) so the frontend can navigate to it immediately.
 	 */
-	storeCreateMap: (name: string, folder: string | null) => typedError<MapData, string>(__TAURI_INVOKE("store_create_map", { name, folder })),
+	storeCreateMap: (name: string, folder: string | null) => typedError<MapData, string>(__TAURI_INVOKE("store_create_map", { name, folder })).then((v) => ((v.status === "ok" ? { ...v, data: ({...v.data,meta:({...v.data.meta,extra:({...v.data.meta.extra,fields:v.data.meta.extra.fields==null?v.data.meta.extra.fields:Object.fromEntries(Object.entries(v.data.meta.extra.fields).map(([k,v])=>[k,({...v,comparison:v.comparison==null?v.comparison:v.comparison})]))})})}) } : v) as typeof v)),
 	/**
 	 *  Delete a map and all associated data: SQLite rows (maps, edit_history,
 	 *  commits) and Arrow base/delta/commit files on disk.
@@ -87,7 +87,7 @@ export const commands = {
 	 *  on the in-memory store when extra fields change, so auto-registration
 	 *  doesn't re-discover fields the user explicitly defined.
 	 */
-	storeUpdateMapMeta: (id: string, patch: MapMetaPatch_Deserialize) => typedError<null, string>(__TAURI_INVOKE("store_update_map_meta", { id, patch: ({...patch,scoreBounds:patch.scoreBounds==null?patch.scoreBounds:patch.scoreBounds}) })),
+	storeUpdateMapMeta: (id: string, patch: MapMetaPatch_Deserialize) => typedError<null, string>(__TAURI_INVOKE("store_update_map_meta", { id, patch: ({...patch,scoreBounds:patch.scoreBounds==null?patch.scoreBounds:patch.scoreBounds,extra:patch.extra==null?patch.extra:({...patch.extra,fields:patch.extra.fields==null?patch.extra.fields:Object.fromEntries(Object.entries(patch.extra.fields).map(([k,v])=>[k,({...v,comparison:v.comparison==null?v.comparison:v.comparison})]))})}) })),
 	/**
 	 *  Update `last_opened_at` to the current timestamp. Used to sort the map
 	 *  list by recency in the dashboard.
@@ -103,15 +103,15 @@ export const commands = {
 	 *  Add new locations. IDs are allocated server-side (monotonic). Records an undo entry
 	 *  and clears the redo stack.
 	 */
-	storeAddLocations: (locations: Location_Deserialize[]) => typedError<MutationResult_Serialize, string>(__TAURI_INVOKE("store_add_locations", { locations: locations.map(i=>i) })).then((v) => ((v.status === "ok" ? { ...v, data: ({...v.data,delta:({...v.data.delta,added:v.data.delta.added.map(i=>i),updated:v.data.delta.updated.map(i=>({...i,lng:i.lng==null?i.lng:i.lng,lat:i.lat==null?i.lat:i.lat,heading:i.heading==null?i.heading:i.heading}))})}) } : v) as typeof v)),
+	storeAddLocations: (locations: Location_Deserialize[]) => typedError<MutationResult_Serialize, string>(__TAURI_INVOKE("store_add_locations", { locations: locations.map(i=>i) })).then((v) => ((v.status === "ok" ? { ...v, data: ({...v.data,delta:({...v.data.delta,added:v.data.delta.added.map(i=>i),updated:v.data.delta.updated.map(i=>({...i,lng:i.lng==null?i.lng:i.lng,lat:i.lat==null?i.lat:i.lat,heading:i.heading==null?i.heading:i.heading}))}),newFieldDefs:v.data.newFieldDefs==null?v.data.newFieldDefs:Object.fromEntries(Object.entries(v.data.newFieldDefs).map(([k,v])=>[k,({...v,comparison:v.comparison==null?v.comparison:v.comparison})]))}) } : v) as typeof v)),
 	/**  Remove locations by ID. Snapshots the full location data for undo before deleting. */
-	storeRemoveLocations: (ids: number[]) => typedError<MutationResult_Serialize, string>(__TAURI_INVOKE("store_remove_locations", { ids })).then((v) => ((v.status === "ok" ? { ...v, data: ({...v.data,delta:({...v.data.delta,added:v.data.delta.added.map(i=>i),updated:v.data.delta.updated.map(i=>({...i,lng:i.lng==null?i.lng:i.lng,lat:i.lat==null?i.lat:i.lat,heading:i.heading==null?i.heading:i.heading}))})}) } : v) as typeof v)),
+	storeRemoveLocations: (ids: number[]) => typedError<MutationResult_Serialize, string>(__TAURI_INVOKE("store_remove_locations", { ids })).then((v) => ((v.status === "ok" ? { ...v, data: ({...v.data,delta:({...v.data.delta,added:v.data.delta.added.map(i=>i),updated:v.data.delta.updated.map(i=>({...i,lng:i.lng==null?i.lng:i.lng,lat:i.lat==null?i.lat:i.lat,heading:i.heading==null?i.heading:i.heading}))}),newFieldDefs:v.data.newFieldDefs==null?v.data.newFieldDefs:Object.fromEntries(Object.entries(v.data.newFieldDefs).map(([k,v])=>[k,({...v,comparison:v.comparison==null?v.comparison:v.comparison})]))}) } : v) as typeof v)),
 	/**
 	 *  Apply partial patches to existing locations. `record_undo` defaults to true;
 	 *  set to false for ephemeral updates (e.g., plugin-driven batch modifications
 	 *  that manage their own undo).
 	 */
-	storeUpdateLocations: (updates: ([number, LocationPatch_Deserialize])[], recordUndo: boolean | null) => typedError<MutationResult_Serialize, string>(__TAURI_INVOKE("store_update_locations", { updates: updates.map(i=>([i[0],({...i[1],lat:i[1].lat==null?i[1].lat:i[1].lat,lng:i[1].lng==null?i[1].lng:i[1].lng,heading:i[1].heading==null?i[1].heading:i[1].heading,pitch:i[1].pitch==null?i[1].pitch:i[1].pitch,zoom:i[1].zoom==null?i[1].zoom:i[1].zoom})])), recordUndo })).then((v) => ((v.status === "ok" ? { ...v, data: ({...v.data,delta:({...v.data.delta,added:v.data.delta.added.map(i=>i),updated:v.data.delta.updated.map(i=>({...i,lng:i.lng==null?i.lng:i.lng,lat:i.lat==null?i.lat:i.lat,heading:i.heading==null?i.heading:i.heading}))})}) } : v) as typeof v)),
+	storeUpdateLocations: (updates: ([number, LocationPatch_Deserialize])[], recordUndo: boolean | null) => typedError<MutationResult_Serialize, string>(__TAURI_INVOKE("store_update_locations", { updates: updates.map(i=>([i[0],({...i[1],lat:i[1].lat==null?i[1].lat:i[1].lat,lng:i[1].lng==null?i[1].lng:i[1].lng,heading:i[1].heading==null?i[1].heading:i[1].heading,pitch:i[1].pitch==null?i[1].pitch:i[1].pitch,zoom:i[1].zoom==null?i[1].zoom:i[1].zoom})])), recordUndo })).then((v) => ((v.status === "ok" ? { ...v, data: ({...v.data,delta:({...v.data.delta,added:v.data.delta.added.map(i=>i),updated:v.data.delta.updated.map(i=>({...i,lng:i.lng==null?i.lng:i.lng,lat:i.lat==null?i.lat:i.lat,heading:i.heading==null?i.heading:i.heading}))}),newFieldDefs:v.data.newFieldDefs==null?v.data.newFieldDefs:Object.fromEntries(Object.entries(v.data.newFieldDefs).map(([k,v])=>[k,({...v,comparison:v.comparison==null?v.comparison:v.comparison})]))}) } : v) as typeof v)),
 	/**
 	 *  Set (or clear) the active location. Fire-and-forget from JS; no re-render triggered.
 	 *  JS patches the cell buffer synchronously to hide/show the active marker.
@@ -171,27 +171,27 @@ export const commands = {
 	 *  Create tags by name. Deduplicates case-insensitively: if a tag with the same name
 	 *  already exists, it is made visible instead of creating a duplicate.
 	 */
-	storeCreateTags: (names: string[]) => typedError<MutationResult_Serialize, string>(__TAURI_INVOKE("store_create_tags", { names })).then((v) => ((v.status === "ok" ? { ...v, data: ({...v.data,delta:({...v.data.delta,added:v.data.delta.added.map(i=>i),updated:v.data.delta.updated.map(i=>({...i,lng:i.lng==null?i.lng:i.lng,lat:i.lat==null?i.lat:i.lat,heading:i.heading==null?i.heading:i.heading}))})}) } : v) as typeof v)),
+	storeCreateTags: (names: string[]) => typedError<MutationResult_Serialize, string>(__TAURI_INVOKE("store_create_tags", { names })).then((v) => ((v.status === "ok" ? { ...v, data: ({...v.data,delta:({...v.data.delta,added:v.data.delta.added.map(i=>i),updated:v.data.delta.updated.map(i=>({...i,lng:i.lng==null?i.lng:i.lng,lat:i.lat==null?i.lat:i.lat,heading:i.heading==null?i.heading:i.heading}))}),newFieldDefs:v.data.newFieldDefs==null?v.data.newFieldDefs:Object.fromEntries(Object.entries(v.data.newFieldDefs).map(([k,v])=>[k,({...v,comparison:v.comparison==null?v.comparison:v.comparison})]))}) } : v) as typeof v)),
 	/**
 	 *  Update a tag's name and/or color. If the new name collides with an existing
 	 *  tag (case-insensitive), merges: remaps all locations from `tag_id` to the
 	 *  existing tag, removes `tag_id`. Returns MutationResult with `tags` populated.
 	 */
-	storeUpdateTag: (tagId: number, name: string | null, color: string | null) => typedError<MutationResult_Serialize, string>(__TAURI_INVOKE("store_update_tag", { tagId, name, color })).then((v) => ((v.status === "ok" ? { ...v, data: ({...v.data,delta:({...v.data.delta,added:v.data.delta.added.map(i=>i),updated:v.data.delta.updated.map(i=>({...i,lng:i.lng==null?i.lng:i.lng,lat:i.lat==null?i.lat:i.lat,heading:i.heading==null?i.heading:i.heading}))})}) } : v) as typeof v)),
+	storeUpdateTag: (tagId: number, name: string | null, color: string | null) => typedError<MutationResult_Serialize, string>(__TAURI_INVOKE("store_update_tag", { tagId, name, color })).then((v) => ((v.status === "ok" ? { ...v, data: ({...v.data,delta:({...v.data.delta,added:v.data.delta.added.map(i=>i),updated:v.data.delta.updated.map(i=>({...i,lng:i.lng==null?i.lng:i.lng,lat:i.lat==null?i.lat:i.lat,heading:i.heading==null?i.heading:i.heading}))}),newFieldDefs:v.data.newFieldDefs==null?v.data.newFieldDefs:Object.fromEntries(Object.entries(v.data.newFieldDefs).map(([k,v])=>[k,({...v,comparison:v.comparison==null?v.comparison:v.comparison})]))}) } : v) as typeof v)),
 	/**
 	 *  Strip tags from all locations. Tags stay in `store.tags` with count=0 /
 	 *  visible=false so undo can revive them. Returns MutationResult with `tags`.
 	 */
-	storeDeleteTags: (tagIds: number[]) => typedError<MutationResult_Serialize, string>(__TAURI_INVOKE("store_delete_tags", { tagIds })).then((v) => ((v.status === "ok" ? { ...v, data: ({...v.data,delta:({...v.data.delta,added:v.data.delta.added.map(i=>i),updated:v.data.delta.updated.map(i=>({...i,lng:i.lng==null?i.lng:i.lng,lat:i.lat==null?i.lat:i.lat,heading:i.heading==null?i.heading:i.heading}))})}) } : v) as typeof v)),
+	storeDeleteTags: (tagIds: number[]) => typedError<MutationResult_Serialize, string>(__TAURI_INVOKE("store_delete_tags", { tagIds })).then((v) => ((v.status === "ok" ? { ...v, data: ({...v.data,delta:({...v.data.delta,added:v.data.delta.added.map(i=>i),updated:v.data.delta.updated.map(i=>({...i,lng:i.lng==null?i.lng:i.lng,lat:i.lat==null?i.lat:i.lat,heading:i.heading==null?i.heading:i.heading}))}),newFieldDefs:v.data.newFieldDefs==null?v.data.newFieldDefs:Object.fromEntries(Object.entries(v.data.newFieldDefs).map(([k,v])=>[k,({...v,comparison:v.comparison==null?v.comparison:v.comparison})]))}) } : v) as typeof v)),
 	/**
 	 *  Persist tag ordering. `ordered_ids` specifies the desired order; each tag's
 	 *  `order` field is set to its index in the list.
 	 */
-	storeReorderTags: (orderedIds: number[]) => typedError<MutationResult_Serialize, string>(__TAURI_INVOKE("store_reorder_tags", { orderedIds })).then((v) => ((v.status === "ok" ? { ...v, data: ({...v.data,delta:({...v.data.delta,added:v.data.delta.added.map(i=>i),updated:v.data.delta.updated.map(i=>({...i,lng:i.lng==null?i.lng:i.lng,lat:i.lat==null?i.lat:i.lat,heading:i.heading==null?i.heading:i.heading}))})}) } : v) as typeof v)),
+	storeReorderTags: (orderedIds: number[]) => typedError<MutationResult_Serialize, string>(__TAURI_INVOKE("store_reorder_tags", { orderedIds })).then((v) => ((v.status === "ok" ? { ...v, data: ({...v.data,delta:({...v.data.delta,added:v.data.delta.added.map(i=>i),updated:v.data.delta.updated.map(i=>({...i,lng:i.lng==null?i.lng:i.lng,lat:i.lat==null?i.lat:i.lat,heading:i.heading==null?i.heading:i.heading}))}),newFieldDefs:v.data.newFieldDefs==null?v.data.newFieldDefs:Object.fromEntries(Object.entries(v.data.newFieldDefs).map(([k,v])=>[k,({...v,comparison:v.comparison==null?v.comparison:v.comparison})]))}) } : v) as typeof v)),
 	/**  Pop the undo stack and reverse the last edit. Pushes the entry onto the redo stack. */
-	storeUndo: () => typedError<MutationResult_Serialize, string>(__TAURI_INVOKE("store_undo")).then((v) => ((v.status === "ok" ? { ...v, data: ({...v.data,delta:({...v.data.delta,added:v.data.delta.added.map(i=>i),updated:v.data.delta.updated.map(i=>({...i,lng:i.lng==null?i.lng:i.lng,lat:i.lat==null?i.lat:i.lat,heading:i.heading==null?i.heading:i.heading}))})}) } : v) as typeof v)),
+	storeUndo: () => typedError<MutationResult_Serialize, string>(__TAURI_INVOKE("store_undo")).then((v) => ((v.status === "ok" ? { ...v, data: ({...v.data,delta:({...v.data.delta,added:v.data.delta.added.map(i=>i),updated:v.data.delta.updated.map(i=>({...i,lng:i.lng==null?i.lng:i.lng,lat:i.lat==null?i.lat:i.lat,heading:i.heading==null?i.heading:i.heading}))}),newFieldDefs:v.data.newFieldDefs==null?v.data.newFieldDefs:Object.fromEntries(Object.entries(v.data.newFieldDefs).map(([k,v])=>[k,({...v,comparison:v.comparison==null?v.comparison:v.comparison})]))}) } : v) as typeof v)),
 	/**  Pop the redo stack and replay the edit forward. Pushes the entry back onto undo. */
-	storeRedo: () => typedError<MutationResult_Serialize, string>(__TAURI_INVOKE("store_redo")).then((v) => ((v.status === "ok" ? { ...v, data: ({...v.data,delta:({...v.data.delta,added:v.data.delta.added.map(i=>i),updated:v.data.delta.updated.map(i=>({...i,lng:i.lng==null?i.lng:i.lng,lat:i.lat==null?i.lat:i.lat,heading:i.heading==null?i.heading:i.heading}))})}) } : v) as typeof v)),
+	storeRedo: () => typedError<MutationResult_Serialize, string>(__TAURI_INVOKE("store_redo")).then((v) => ((v.status === "ok" ? { ...v, data: ({...v.data,delta:({...v.data.delta,added:v.data.delta.added.map(i=>i),updated:v.data.delta.updated.map(i=>({...i,lng:i.lng==null?i.lng:i.lng,lat:i.lat==null?i.lat:i.lat,heading:i.heading==null?i.heading:i.heading}))}),newFieldDefs:v.data.newFieldDefs==null?v.data.newFieldDefs:Object.fromEntries(Object.entries(v.data.newFieldDefs).map(([k,v])=>[k,({...v,comparison:v.comparison==null?v.comparison:v.comparison})]))}) } : v) as typeof v)),
 	/**  Clear both undo and redo stacks. Called after a commit to start fresh. */
 	storeResetUndo: () => typedError<null, string>(__TAURI_INVOKE("store_reset_undo")),
 	/**
@@ -222,7 +222,7 @@ export const commands = {
 	 *  set-unioned across the group; `extra` is merged with the survivor winning key conflicts;
 	 *  all other survivor fields are kept. Applied as a single undoable edit.
 	 */
-	storeMergeDuplicates: (distance: number) => typedError<MutationResult_Serialize, string>(__TAURI_INVOKE("store_merge_duplicates", { distance })).then((v) => ((v.status === "ok" ? { ...v, data: ({...v.data,delta:({...v.data.delta,added:v.data.delta.added.map(i=>i),updated:v.data.delta.updated.map(i=>({...i,lng:i.lng==null?i.lng:i.lng,lat:i.lat==null?i.lat:i.lat,heading:i.heading==null?i.heading:i.heading}))})}) } : v) as typeof v)),
+	storeMergeDuplicates: (distance: number) => typedError<MutationResult_Serialize, string>(__TAURI_INVOKE("store_merge_duplicates", { distance })).then((v) => ((v.status === "ok" ? { ...v, data: ({...v.data,delta:({...v.data.delta,added:v.data.delta.added.map(i=>i),updated:v.data.delta.updated.map(i=>({...i,lng:i.lng==null?i.lng:i.lng,lat:i.lat==null?i.lat:i.lat,heading:i.heading==null?i.heading:i.heading}))}),newFieldDefs:v.data.newFieldDefs==null?v.data.newFieldDefs:Object.fromEntries(Object.entries(v.data.newFieldDefs).map(([k,v])=>[k,({...v,comparison:v.comparison==null?v.comparison:v.comparison})]))}) } : v) as typeof v)),
 	/**
 	 *  Full render rebuild: single-pass over all alive locations, writes binary to a temp file.
 	 *  Returns the file path for JS to fetch via `mma-buf://`. Only called on map open or full reset.
@@ -262,7 +262,7 @@ export const commands = {
 	 *  `store_import_preview`/`store_import_paste_preview`. Fields in `dropped_fields`
 	 *  (e.g. `"heading"`, `"extra.countryCode"`) are zeroed/removed.
 	 */
-	storeImportFile: (droppedFields: string[], tagName: string | null) => typedError<EditorImportResult_Serialize, string>(__TAURI_INVOKE("store_import_file", { droppedFields, tagName })).then((v) => ((v.status === "ok" ? { ...v, data: ({...v.data,delta:({...v.data.delta,added:v.data.delta.added.map(i=>i),updated:v.data.delta.updated.map(i=>({...i,lng:i.lng==null?i.lng:i.lng,lat:i.lat==null?i.lat:i.lat,heading:i.heading==null?i.heading:i.heading}))})}) } : v) as typeof v)),
+	storeImportFile: (droppedFields: string[], tagName: string | null) => typedError<EditorImportResult_Serialize, string>(__TAURI_INVOKE("store_import_file", { droppedFields, tagName })).then((v) => ((v.status === "ok" ? { ...v, data: ({...v.data,delta:({...v.data.delta,added:v.data.delta.added.map(i=>i),updated:v.data.delta.updated.map(i=>({...i,lng:i.lng==null?i.lng:i.lng,lat:i.lat==null?i.lat:i.lat,heading:i.heading==null?i.heading:i.heading}))}),newFieldDefs:v.data.newFieldDefs==null?v.data.newFieldDefs:Object.fromEntries(Object.entries(v.data.newFieldDefs).map(([k,v])=>[k,({...v,comparison:v.comparison==null?v.comparison:v.comparison})]))}) } : v) as typeof v)),
 	/**
 	 *  Export locations as a map-making.app-compatible JSON file.
 	 * 
@@ -418,6 +418,14 @@ export type CommitInfo = {
 	createdAt: string,
 };
 
+/**
+ *  How a field's values are compared when measuring how strongly it separates
+ *  groups (selection disambiguation). The only un-inferrable property a field can
+ *  declare is circularity (heading/azimuth=360, hour-of-day=24, month=12);
+ *  everything else is inferred from `ExtraFieldType`.
+ */
+export type ComparisonType = { type: "linear" } | { type: "circular"; period: number } | { type: "categorical" };
+
 /**  Aggregate database statistics for the debug panel. */
 export type DbStats = {
 	maps: number,
@@ -504,6 +512,11 @@ export type ExtraFieldDef = {
 	label?: string | null,
 	values?: string[] | null,
 	labels?: { [key in string]: string } | null,
+	/**
+	 *  Optional override for how this field is compared during disambiguation.
+	 *  `None` => inferred from `field_type` on the analysis side.
+	 */
+	comparison?: ComparisonType | null,
 };
 
 /**

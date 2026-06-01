@@ -75,6 +75,20 @@ export type CommitInfo = {
 	locationCount: number;
 	createdAt: string;
 };
+/**
+ *  How a field's values are compared when measuring how strongly it separates
+ *  groups (selection disambiguation). The only un-inferrable property a field can
+ *  declare is circularity (heading/azimuth=360, hour-of-day=24, month=12);
+ *  everything else is inferred from `ExtraFieldType`.
+ */
+export type ComparisonType = {
+	type: "linear";
+} | {
+	type: "circular";
+	period: number;
+} | {
+	type: "categorical";
+};
 /**  Aggregate database statistics for the debug panel. */
 export type DbStats = {
 	maps: number;
@@ -100,14 +114,15 @@ export type EditorImportPreview = {
 	tags: Tag[];
 	fields: FieldCount[];
 	warnings: string[];
-	/**
-	 *  `[lng, lat]` pairs for staged preview markers, capped at `PREVIEW_POS_CAP`.
-	 *  Truncated for very large imports to bound the render/IPC cost.
-	 */
-	previewPositions: ([
+	/**  Temp-file path to preview positions: interleaved LE f32 `[lng, lat]` pairs. */
+	previewPositionsPath: string;
+	/**  `[west, south, east, north]` bounding box of the import, for map auto-focus. */
+	bounds: [
+		number,
+		number,
 		number,
 		number
-	])[];
+	] | null;
 };
 /**
  *  Combined result of an editor import: the mutation delta (for render pipeline)
@@ -116,12 +131,6 @@ export type EditorImportPreview = {
 export type EditorImportResult_Serialize = {
 	importedCount: number;
 	warnings: string[];
-	bounds: [
-		number,
-		number,
-		number,
-		number
-	] | null;
 } & MutationResult_Serialize;
 /**
  *  Configuration for JSON export. Controls which fields are included and
@@ -153,6 +162,11 @@ export type ExtraFieldDef = {
 	labels?: {
 		[key in string]: string;
 	} | null;
+	/**
+	 *  Optional override for how this field is compared during disambiguation.
+	 *  `None` => inferred from `field_type` on the analysis side.
+	 */
+	comparison?: ComparisonType | null;
 };
 /**
  *  Type discriminant for `Location.extra` field definitions.
@@ -649,7 +663,6 @@ declare function createLocation(partial: Partial<Location$1> & {
 	lng: number;
 }): Location$1;
 export type WorkArea = "overview" | "location" | "duplicates" | "import" | "plugin";
-export type RenderDelta = RenderDelta_Serialize;
 /** Variants that wrap children — derived as exactly those carrying a `selections` array. */
 export type CompositeType = Extract<SelectionProps, {
 	selections: Selection$1[];
@@ -666,9 +679,10 @@ declare enum ValidationState {
 	GoodcamAvailable = 6
 }
 export type FilterOp = "eq" | "neq" | "gt" | "lt" | "gte" | "lte" | "between" | "between_anyyear" | "between_anytime" | "has" | "nothas";
-/** Staged (parsed-but-not-committed) import. Set while `workArea === "import"`.
- *  The parse itself lives in Rust's EDITOR_IMPORT_CACHE; this is the preview the
- *  sidebar renders + the positions the map draws as green markers. */
+/** When a move target already holds a value, which field's value survives. */
+export type MergeWinner = "from" | "to";
+export type RenderDelta = RenderDelta_Serialize;
+/** Parsed-but-not-committed import shown while `workArea === "import"`. */
 export interface ImportStaging {
 	preview: ImportPreview;
 	source: "file" | "paste";
@@ -1172,7 +1186,7 @@ export interface AppSettings {
 	geocodeProvider: GeocodeProvider;
 	nominatimApiKey: string;
 	tagViewMode: TagViewMode;
-	panOnPaste: boolean;
+	panToImported: boolean;
 	borderDetail: BorderDetail;
 	savedSelections: SavedSelection[];
 }
@@ -1180,7 +1194,7 @@ declare function setSetting<K extends keyof AppSettings>(key: K, value: AppSetti
 declare function getSeenEntries(limit?: number, offset?: number, filter?: SeenFilter): Promise<SeenEntry[]>;
 declare function getSeenCount(filter?: SeenFilter): Promise<number>;
 declare function clearSeen(): Promise<void>;
-declare function loadSeenPano(entry: SeenEntry): void;
+declare function loadSeenPano(entry: SeenEntry): Promise<void>;
 export interface ValidationProgress {
 	progress: number;
 	results: Map<ValidationState, Location$1[]>;
@@ -1308,10 +1322,6 @@ declare const mma: {
 		storeImportPreview: (path: string) => Promise<EditorImportPreview>;
 		storeImportPastePreview: (text: string) => Promise<EditorImportPreview>;
 		storeImportFile: (droppedFields: string[], tagName: string | null) => Promise<EditorImportResult_Serialize>;
-		storeImportPaste: (text: string) => Promise<[
-			EditorImportResult_Serialize,
-			number | null
-		]>;
 		storeExportJson: (opts: ExportOpts) => Promise<string>;
 		storeExportCsv: (scope: number[] | null) => Promise<string>;
 		storeExportGeojson: (scope: number[] | null, tagsJson: string) => Promise<string>;
@@ -1394,7 +1404,7 @@ declare const mma: {
 		geocodeProvider: GeocodeProvider;
 		nominatimApiKey: string;
 		tagViewMode: TagViewMode;
-		panOnPaste: boolean;
+		panToImported: boolean;
 		borderDetail: BorderDetail;
 		savedSelections: SavedSelection[];
 	};
@@ -1412,10 +1422,7 @@ declare const mma: {
 	getTagCounts(): Record<number, number>;
 	refreshAfterMutation(): void;
 	getVisibleTags(): Tag$1[];
-	getImportPreviewPositions(): [
-		number,
-		number
-	][];
+	getImportPreviewPositions(): Float32Array<ArrayBuffer>;
 	hasCommitDiff(): boolean;
 	useCommitDiff(): {
 		added: number;
@@ -1461,6 +1468,8 @@ declare const mma: {
 		id: number;
 		patch: Partial<Location$1>;
 	}[]): Promise<void | MutationResult_Serialize>;
+	renameField(from: string, to: string, winner?: MergeWinner): Promise<void>;
+	deleteField(key: string): Promise<void>;
 	patchLocationExtra(loc: Location$1, extraPatch: Record<string, unknown>, replace?: boolean): Promise<void>;
 	addSelections(props: SelectionProps[]): Promise<void>;
 	removeSelections(keys: string[]): Promise<void>;

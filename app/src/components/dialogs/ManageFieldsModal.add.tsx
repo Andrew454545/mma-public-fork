@@ -1,6 +1,12 @@
 import { useState } from "react";
 import { Dialog, DialogContent } from "@/components/primitives/Dialog";
-import { setMapExtraFields, getKnownFieldKeys, renameField, deleteField } from "@/store/useMapStore";
+import {
+	setMapExtraFields,
+	getKnownFieldKeys,
+	renameField,
+	deleteField,
+	fetchAllLocations,
+} from "@/store/useMapStore";
 import type { ExtraFieldDef } from "@/types";
 import type { MergeWinner } from "@/lib/data/fieldOps.add";
 import { getFieldDef, getAllFieldDefs } from "@/lib/data/fieldDefRegistry";
@@ -41,16 +47,22 @@ function tokenToComp(t: CompToken, period: number): Comparison | undefined {
 
 interface FieldRow {
 	key: string;
+	// Editable key. Diverges from `key` while the user types; a rename/merge is
+	// proposed on blur when it differs. `key` stays the stable row identity.
+	draftKey: string;
 	label: string;
 	type: ExtraFieldDef["type"];
 	comparison: ExtraFieldDef["comparison"];
 	hasData: boolean;
 }
 
-// A pending field-identity operation (rename/merge or delete) awaiting confirmation.
-type Action =
-	| { kind: "rename"; key: string; target: string; winner: MergeWinner }
-	| { kind: "delete"; key: string };
+interface RenamePrompt {
+	key: string;
+	target: string;
+	winner: MergeWinner;
+	affected: number;
+	merge: boolean;
+}
 
 function buildRows(): FieldRow[] {
 	const knownKeys = getKnownFieldKeys();
@@ -60,6 +72,7 @@ function buildRows(): FieldRow[] {
 		const def = getFieldDef(key);
 		return {
 			key,
+			draftKey: key,
 			label: def?.label ?? key,
 			type: def?.type ?? "string",
 			comparison: def?.comparison ?? null,
@@ -70,7 +83,8 @@ function buildRows(): FieldRow[] {
 
 export function ManageFieldsModal({ onClose }: { onClose: () => void }) {
 	const [rows, setRows] = useState(buildRows);
-	const [action, setAction] = useState<Action | null>(null);
+	const [renamePrompt, setRenamePrompt] = useState<RenamePrompt | null>(null);
+	const [deleteKey, setDeleteKey] = useState<string | null>(null);
 	const [busy, setBusy] = useState(false);
 	// Open period prompt for circular comparison: { key, value } while picking, else null.
 	const [periodPrompt, setPeriodPrompt] = useState<{ key: string; value: string } | null>(null);
@@ -104,38 +118,51 @@ export function ManageFieldsModal({ onClose }: { onClose: () => void }) {
 		onClose();
 	};
 
-	const applyRename = async () => {
-		if (action?.kind !== "rename") return;
-		const target = action.target.trim();
-		if (!target || target === action.key) {
-			setAction(null);
+	const proposeRename = async (row: FieldRow) => {
+		const target = row.draftKey.trim();
+		if (!target || target === row.key) {
+			updateRow(row.key, { draftKey: row.key });
 			return;
 		}
+		const locs = await fetchAllLocations();
+		const affected = locs.filter((l) => l.extra && row.key in l.extra).length;
+		setRenamePrompt({
+			key: row.key,
+			target,
+			winner: "from",
+			affected,
+			merge: existingKeys.has(target),
+		});
+	};
+
+	const confirmRename = async () => {
+		if (!renamePrompt) return;
 		setBusy(true);
 		try {
-			await renameField(action.key, target, action.winner);
+			await renameField(renamePrompt.key, renamePrompt.target, renamePrompt.winner);
 		} finally {
 			setBusy(false);
 		}
+		setRenamePrompt(null);
 		setRows(buildRows());
-		setAction(null);
 	};
 
-	const applyDelete = async () => {
-		if (action?.kind !== "delete") return;
+	const cancelRename = () => {
+		if (renamePrompt) updateRow(renamePrompt.key, { draftKey: renamePrompt.key });
+		setRenamePrompt(null);
+	};
+
+	const confirmDelete = async () => {
+		if (!deleteKey) return;
 		setBusy(true);
 		try {
-			await deleteField(action.key);
+			await deleteField(deleteKey);
 		} finally {
 			setBusy(false);
 		}
+		setDeleteKey(null);
 		setRows(buildRows());
-		setAction(null);
 	};
-
-	const renameTarget = action?.kind === "rename" ? action.target.trim() : "";
-	const isMerge =
-		action?.kind === "rename" && existingKeys.has(renameTarget) && renameTarget !== action.key;
 
 	return (
 		<Dialog
@@ -162,7 +189,14 @@ export function ManageFieldsModal({ onClose }: { onClose: () => void }) {
 							{rows.map((row) => (
 								<tr key={row.key}>
 									<td className="manage-fields-table__key">
-										{row.key}
+										<input
+											className="input"
+											value={row.draftKey}
+											disabled={busy}
+											onChange={(e) => updateRow(row.key, { draftKey: e.target.value })}
+											onBlur={() => proposeRename(row)}
+											onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
+										/>
 										{!row.hasData && (
 											<span className="manage-fields-table__no-data"> (no data)</span>
 										)}
@@ -216,20 +250,10 @@ export function ManageFieldsModal({ onClose }: { onClose: () => void }) {
 									</td>
 									<td className="manage-fields-table__actions">
 										<button
-											className="button button--small"
-											type="button"
-											disabled={busy}
-											onClick={() =>
-												setAction({ kind: "rename", key: row.key, target: row.key, winner: "from" })
-											}
-										>
-											Rename / merge
-										</button>
-										<button
 											className="button button--small button--danger"
 											type="button"
 											disabled={busy}
-											onClick={() => setAction({ kind: "delete", key: row.key })}
+											onClick={() => setDeleteKey(row.key)}
 										>
 											Delete
 										</button>
@@ -240,84 +264,75 @@ export function ManageFieldsModal({ onClose }: { onClose: () => void }) {
 					</table>
 				)}
 
-				{action?.kind === "rename" && (
-					<div className="manage-fields-action">
-						<label>
-							Rename <code>{action.key}</code> to:
-							<input
-								className="input"
-								list="manage-fields-keys"
-								autoFocus
-								value={action.target}
-								onChange={(e) => setAction({ ...action, target: e.target.value })}
-								placeholder="new or existing field name"
-							/>
-						</label>
-						<datalist id="manage-fields-keys">
-							{rows.map((r) => (
-								<option key={r.key} value={r.key} />
-							))}
-						</datalist>
-						{isMerge && (
-							<fieldset className="manage-fields-action__winner">
-								<legend>
-									<code>{renameTarget}</code> already exists. On conflict, keep:
-								</legend>
-								<label>
-									<input
-										type="radio"
-										checked={action.winner === "from"}
-										onChange={() => setAction({ ...action, winner: "from" })}
-									/>{" "}
-									{action.key}&apos;s values
-								</label>
-								<label>
-									<input
-										type="radio"
-										checked={action.winner === "to"}
-										onChange={() => setAction({ ...action, winner: "to" })}
-									/>{" "}
-									{renameTarget}&apos;s values
-								</label>
-							</fieldset>
+				<Dialog open={renamePrompt !== null} onOpenChange={(open) => !open && cancelRename()}>
+					<DialogContent title={renamePrompt?.merge ? "Merge field" : "Rename field"} className="period-prompt">
+						{renamePrompt && (
+							<>
+								<p className="period-prompt__help">
+									{renamePrompt.merge ? (
+										<>
+											Merge <code>{renamePrompt.key}</code> into existing field{" "}
+											<code>{renamePrompt.target}</code> across {renamePrompt.affected} location
+											{renamePrompt.affected === 1 ? "" : "s"}. This cannot be undone.
+										</>
+									) : (
+										<>
+											Rename <code>{renamePrompt.key}</code> to <code>{renamePrompt.target}</code> across{" "}
+											{renamePrompt.affected} location{renamePrompt.affected === 1 ? "" : "s"}. This cannot be
+											undone.
+										</>
+									)}
+								</p>
+								{renamePrompt.merge && (
+									<fieldset className="manage-fields-action__winner">
+										<legend>On conflict, keep:</legend>
+										<label>
+											<input
+												type="radio"
+												checked={renamePrompt.winner === "from"}
+												onChange={() => setRenamePrompt({ ...renamePrompt, winner: "from" })}
+											/>{" "}
+											<code>{renamePrompt.key}</code>&apos;s values
+										</label>
+										<label>
+											<input
+												type="radio"
+												checked={renamePrompt.winner === "to"}
+												onChange={() => setRenamePrompt({ ...renamePrompt, winner: "to" })}
+											/>{" "}
+											<code>{renamePrompt.target}</code>&apos;s values
+										</label>
+									</fieldset>
+								)}
+								<div className="period-prompt__actions">
+									<button className="button button--primary" type="button" disabled={busy} onClick={confirmRename}>
+										{renamePrompt.merge ? "Merge" : "Rename"}
+									</button>
+									<button className="button" type="button" disabled={busy} onClick={cancelRename}>
+										Cancel
+									</button>
+								</div>
+							</>
 						)}
-						<div className="manage-fields-action__buttons">
-							<button
-								className="button button--primary"
-								type="button"
-								disabled={busy || !renameTarget || renameTarget === action.key}
-								onClick={applyRename}
-							>
-								{isMerge ? "Merge" : "Rename"}
-							</button>
-							<button className="button" type="button" disabled={busy} onClick={() => setAction(null)}>
-								Cancel
-							</button>
-						</div>
-					</div>
-				)}
+					</DialogContent>
+				</Dialog>
 
-				{action?.kind === "delete" && (
-					<div className="manage-fields-action">
-						<p>
-							Delete <code>{action.key}</code> and clear its values from every location? This cannot be
-							undone after committing.
+				<Dialog open={deleteKey !== null} onOpenChange={(open) => !open && setDeleteKey(null)}>
+					<DialogContent title="Delete field" className="period-prompt">
+						<p className="period-prompt__help">
+							Delete <code>{deleteKey}</code> and clear its values from every location? This cannot be
+							undone.
 						</p>
-						<div className="manage-fields-action__buttons">
-							<button
-								className="button button--danger"
-								type="button"
-								disabled={busy}
-								onClick={applyDelete}
-							>
+						<div className="period-prompt__actions">
+							<button className="button button--danger" type="button" disabled={busy} onClick={confirmDelete}>
 								Delete field
 							</button>
-							<button className="button" type="button" disabled={busy} onClick={() => setAction(null)}>
+							<button className="button" type="button" disabled={busy} onClick={() => setDeleteKey(null)}>
 								Cancel
 							</button>
 						</div>
-					</div>
-				)}
+					</DialogContent>
+				</Dialog>
 
 				<div className="manage-fields-modal__actions">
 					<button className="button button--primary" type="button" disabled={busy} onClick={handleSave}>

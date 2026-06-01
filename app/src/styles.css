@@ -2962,9 +2962,19 @@ summary.button {
 .manage-fields-table .nselect {
 	height: 28px;
 }
-.manage-fields-table .manage-fields-table__period {
-	width: 6em;
-	margin-top: 4px;
+.period-prompt {
+	width: min(22rem, 92vw);
+}
+.period-prompt__help {
+	margin: 0 0 0.75rem;
+	color: var(--stone-7);
+	font-size: 0.85em;
+}
+.period-prompt__actions {
+	display: flex;
+	justify-content: flex-end;
+	gap: 0.5rem;
+	margin-top: 0.75rem;
 }
 .manage-fields-modal__actions {
 	display: flex;

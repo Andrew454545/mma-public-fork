@@ -65,9 +65,20 @@ export function ManageFieldsModal({ onClose }: { onClose: () => void }) {
 	});
 
 	const [rows, setRows] = useState(initialRows);
+	// Open period prompt for circular comparison: { key, value } while picking, else null.
+	const [periodPrompt, setPeriodPrompt] = useState<{ key: string; value: string } | null>(null);
 
 	const updateRow = (key: string, patch: Partial<FieldRow>) => {
 		setRows((prev) => prev.map((r) => (r.key === key ? { ...r, ...patch } : r)));
+	};
+
+	const confirmPeriod = () => {
+		if (!periodPrompt) return;
+		const period = parseFloat(periodPrompt.value);
+		updateRow(periodPrompt.key, {
+			comparison: { type: "circular", period: Number.isFinite(period) && period > 0 ? period : DEFAULT_PERIOD },
+		});
+		setPeriodPrompt(null);
 	};
 
 	const handleSave = async () => {
@@ -139,32 +150,26 @@ export function ManageFieldsModal({ onClose }: { onClose: () => void }) {
 										<select
 											className="nselect"
 											value={compToToken(row.comparison)}
-											onChange={(e) =>
-												updateRow(row.key, { comparison: tokenToComp(e.target.value as CompToken, row.comparison?.type === "circular" ? row.comparison.period : DEFAULT_PERIOD) ?? null })
-											}
+											onChange={(e) => {
+												const token = e.target.value as CompToken;
+												// Circular needs a period: prompt for it instead of committing inline,
+												// so the cell never grows. Cancelling leaves the select on its old value.
+												if (token === "circular") {
+													const current = row.comparison?.type === "circular" ? row.comparison.period : DEFAULT_PERIOD;
+													setPeriodPrompt({ key: row.key, value: String(current) });
+												} else {
+													updateRow(row.key, { comparison: tokenToComp(token, DEFAULT_PERIOD) ?? null });
+												}
+											}}
 										>
 											{COMP_OPTIONS.map((o) => (
 												<option key={o.token} value={o.token}>
-													{o.label}
+													{o.token === "circular" && row.comparison?.type === "circular"
+														? `Circular · ${row.comparison.period}`
+														: o.label}
 												</option>
 											))}
 										</select>
-										{row.comparison?.type === "circular" && (
-											<input
-												className="input manage-fields-table__period"
-												type="number"
-												min="0"
-												step="any"
-												value={row.comparison.period}
-												title="Value at which the field wraps around (e.g. 360 for degrees, 24 for hours, 12 for months)"
-												onChange={(e) => {
-													const period = parseFloat(e.target.value);
-													updateRow(row.key, {
-														comparison: { type: "circular", period: Number.isFinite(period) ? period : DEFAULT_PERIOD },
-													});
-												}}
-											/>
-										)}
 									</td>
 								</tr>
 							))}
@@ -179,6 +184,38 @@ export function ManageFieldsModal({ onClose }: { onClose: () => void }) {
 						Cancel
 					</button>
 				</div>
+
+				<Dialog open={periodPrompt !== null} onOpenChange={(open) => !open && setPeriodPrompt(null)}>
+					<DialogContent title="Circular period" className="period-prompt">
+						<p className="period-prompt__help">
+							Value at which this field wraps around (e.g. 360 for degrees, 24 for hours, 12 for months).
+						</p>
+						<form
+							onSubmit={(e) => {
+								e.preventDefault();
+								confirmPeriod();
+							}}
+						>
+							<input
+								className="input"
+								type="number"
+								min="0"
+								step="any"
+								autoFocus
+								value={periodPrompt?.value ?? ""}
+								onChange={(e) => setPeriodPrompt((p) => (p ? { ...p, value: e.target.value } : p))}
+							/>
+							<div className="period-prompt__actions">
+								<button className="button button--primary" type="submit">
+									Set
+								</button>
+								<button className="button" type="button" onClick={() => setPeriodPrompt(null)}>
+									Cancel
+								</button>
+							</div>
+						</form>
+					</DialogContent>
+				</Dialog>
 			</DialogContent>
 		</Dialog>
 	);

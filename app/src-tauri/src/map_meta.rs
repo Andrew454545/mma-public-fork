@@ -195,6 +195,13 @@ pub fn known_field_def(key: &str) -> Option<ExtraFieldDef> {
             labels: None,
             comparison: None,
         }),
+        "drivingDirection" => Some(ExtraFieldDef {
+            field_type: ExtraFieldType::Number,
+            label: Some("Driving direction".into()),
+            values: None,
+            labels: None,
+            comparison: Some(ComparisonType::Circular { period: 360.0 }),
+        }),
         _ => None,
     }
 }

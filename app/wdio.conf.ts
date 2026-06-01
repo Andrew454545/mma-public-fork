@@ -1,5 +1,6 @@
 import path from "path";
 import fs from "fs";
+import { installSvMock } from "./test/e2e/svMock";
 
 process.env.MMA_TEST_DB = "1";
 
@@ -56,6 +57,18 @@ export const config: WebdriverIO.Config = {
 	mochaOpts: {
 		ui: "bdd",
 		timeout: 120000,
+	},
+	// Monkey-patch Street View (window.fetch + google.maps) from the test side when
+	// --mock is on, so the network-bound specs run deterministically with no network.
+	// Per-suite + idempotent so it survives any per-spec session reset.
+	beforeSuite: async () => {
+		if (process.env.MMA_TEST_MOCK_SV) {
+			try {
+				await browser.execute(installSvMock);
+			} catch (e) {
+				console.log("[sv-mock] install failed:", (e as Error).message);
+			}
+		}
 	},
 	onComplete: () => {
 		if (logStream) {

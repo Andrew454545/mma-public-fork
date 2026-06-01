@@ -6,6 +6,8 @@
 #   scripts/e2e.sh                                  # full suite, single container
 #   scripts/e2e.sh test/e2e/foo.test.ts [more...]   # only the given spec files
 #   scripts/e2e.sh --shard [N]                      # full suite split across N containers (default 3)
+#   scripts/e2e.sh --mock [...]                     # add --mock (any position before specs) to
+#                                                   #   monkey-patch Street View (deterministic, no network)
 #
 # Rebuild the image first (after app source changes) with: scripts/e2e-build.sh
 set -uo pipefail
@@ -13,6 +15,13 @@ set -uo pipefail
 # Windows paths before they reach docker. Disable that; harmless on Linux hosts.
 export MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*'
 cd "$(dirname "$0")/.."
+
+# Optional leading --mock: enable the test-side Street View monkey-patch.
+MOCK_ENV=()
+if [ "${1:-}" = "--mock" ]; then
+	MOCK_ENV=(-e MMA_TEST_MOCK_SV=1)
+	shift
+fi
 
 COMPOSE="docker compose -f docker-compose.e2e.yml -f docker-compose.e2e.dev.yml"
 RUNNER="sh /repo/scripts/docker-e2e.sh"
@@ -22,7 +31,7 @@ if [ "${1:-}" = "--shard" ]; then
 	echo "Running e2e suite across $N parallel containers..."
 	pids=()
 	for i in $(seq 1 "$N"); do
-		$COMPOSE run --rm e2e $RUNNER --shard "$i/$N" >"shard-$i.log" 2>&1 &
+		$COMPOSE run "${MOCK_ENV[@]}" --rm e2e $RUNNER --shard "$i/$N" >"shard-$i.log" 2>&1 &
 		pids+=("$!")
 	done
 	rc=0
@@ -42,4 +51,4 @@ fi
 # Subset: prefix each spec file with --spec. No args => full suite.
 args=()
 for s in "$@"; do args+=(--spec "$s"); done
-exec $COMPOSE run --rm e2e $RUNNER "${args[@]}"
+exec $COMPOSE run "${MOCK_ENV[@]}" --rm e2e $RUNNER "${args[@]}"

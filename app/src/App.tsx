@@ -1,12 +1,15 @@
 import { useState, useEffect } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
+import { listen } from "@tauri-apps/api/event";
 import { useCurrentMap, openMap, closeMap, getCurrentMapId } from "@/store/useMapStore";
 import { MapList, BulkActions } from "@/components/map-list/MapList";
 import { MapEditor } from "@/components/editor/MapEditor";
 import { StatsForNerds } from "@/components/dialogs/StatsForNerds.add";
 import { SettingsPage } from "@/components/dialogs/SettingsPage.add";
 import { PluginMarketplace } from "@/components/dialogs/PluginMarketplace.add";
+import { Manual } from "@/components/dialogs/Manual.add";
+import { ManualSearch } from "@/components/dialogs/ManualSearch.add";
 import { useHotkey } from "@/lib/hooks/useHotkey";
 import { useBinding } from "@/lib/util/hotkeys.add";
 import { useSetting } from "@/store/settings.add";
@@ -23,10 +26,25 @@ export default function App() {
 	const [showStats, setShowStats] = useState(false);
 	const [showSettings, setShowSettings] = useState(false);
 	const [showPlugins, setShowPlugins] = useState(false);
+	const [manualOpen, setManualOpen] = useState(false);
+	const [manualChapterId, setManualChapterId] = useState<string | undefined>(undefined);
+	const [manualSearchOpen, setManualSearchOpen] = useState(false);
 	const customCss = useSetting("customCss");
 	const update = useUpdateState();
 
 	useHotkey(useBinding("toggleStats"), () => setShowStats((s) => !s));
+	useHotkey(useBinding("openManualSearch"), () => setManualSearchOpen((v) => !v));
+
+	// The manual only ever lives in the main window. Editor windows route their
+	// requests here via emitTo("main", ...) in openManualInMain.
+	useEffect(() => {
+		if (isEditorWindow) return;
+		const unlisten = listen<string | null>("open-manual", (e) => {
+			setManualChapterId(e.payload ?? undefined);
+			setManualOpen(true);
+		});
+		return () => void unlisten.then((f) => f());
+	}, []);
 
 	useEffect(() => {
 		if (isEditorWindow && !map) {
@@ -118,6 +136,10 @@ export default function App() {
 			{showStats && <StatsForNerds onClose={() => setShowStats(false)} />}
 			<SettingsPage open={showSettings} onOpenChange={setShowSettings} />
 			<PluginMarketplace open={showPlugins} onOpenChange={setShowPlugins} />
+			<ManualSearch open={manualSearchOpen} onOpenChange={setManualSearchOpen} />
+			{!isEditorWindow && manualOpen && (
+				<Manual initialChapterId={manualChapterId} onClose={() => setManualOpen(false)} />
+			)}
 			<ToastContainer />
 		</>
 	);

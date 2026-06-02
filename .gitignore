@@ -37,5 +37,8 @@ app/src-tauri/icons/ios/
 test-*
 lint.json
 docs/*
+!docs/manual/
+!docs/manual/img/
+!docs/manual/img/*
 CLAUDE.md
 mma-source/*

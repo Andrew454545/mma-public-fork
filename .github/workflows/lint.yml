@@ -77,3 +77,19 @@ jobs:
         working-directory: app
       - run: npx vitest run
         working-directory: app
+
+  generated:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - run: npm ci
+        working-directory: app
+      - run: npm run gen:image-dims
+        working-directory: app
+      - name: Fail if image dimensions are stale (run npm run gen:image-dims)
+        run: git diff --exit-code -- app/src/components/dialogs/manual-img-dims.gen.ts

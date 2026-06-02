@@ -11,6 +11,7 @@ export type HotkeyAction =
 	| "save"
 	// UI-level actions (binding defined here)
 	| "openCommandPalette"
+	| "openManualSearch"
 	| "toggleStats"
 	| "locationSave"
 	| "locationClose"
@@ -89,6 +90,12 @@ const RAW_HOTKEY_DEFS: HotkeyDef[] = [
 		label: "Open command palette",
 		group: "Global",
 		defaultBinding: "Mod+k",
+	},
+	{
+		action: "openManualSearch",
+		label: "Search the manual",
+		group: "Global",
+		defaultBinding: "Mod+?",
 	},
 	{
 		action: "toggleStats",

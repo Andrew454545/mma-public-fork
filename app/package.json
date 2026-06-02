@@ -6,8 +6,9 @@
 	"scripts": {
 		"gen:plugin-types": "node ../plugins/types/generate.js",
 		"gen:plugin-registry": "node ../plugins/generate-registry.js",
+		"gen:image-dims": "node scripts/gen-image-dims.mjs",
 		"dev": "vite",
-		"build": "npm run gen:plugin-types && npm run gen:plugin-registry && vite build",
+		"build": "npm run gen:plugin-types && npm run gen:plugin-registry && npm run gen:image-dims && vite build",
 		"build:opensv": "node opensv-build/build-opensv.mjs",
 		"lint": "eslint .",
 		"preview": "vite preview",
@@ -73,6 +74,7 @@
 		"eslint-plugin-react-hooks": "^7.1.1",
 		"eslint-plugin-react-refresh": "^0.5.2",
 		"globals": "^17.5.0",
+		"image-size": "^2.0.2",
 		"jsdom": "^27.0.1",
 		"lint-staged": "^17.0.5",
 		"prettier": "^3.8.3",

@@ -1173,6 +1173,7 @@ export interface AppSettings {
 	hidePanoUI: boolean;
 	fullscreenMap: boolean;
 	showFullscreenMinimap: boolean;
+	fullscreenMinimapScale: number;
 	showFullscreenTagbar: boolean;
 	customCss: string;
 	enableSeen: boolean;
@@ -1391,6 +1392,7 @@ declare const mma: {
 		hidePanoUI: boolean;
 		fullscreenMap: boolean;
 		showFullscreenMinimap: boolean;
+		fullscreenMinimapScale: number;
 		showFullscreenTagbar: boolean;
 		customCss: string;
 		enableSeen: boolean;
@@ -1471,6 +1473,9 @@ declare const mma: {
 	renameField(from: string, to: string, winner?: MergeWinner): Promise<void>;
 	deleteField(key: string): Promise<void>;
 	patchLocationExtra(loc: Location$1, extraPatch: Record<string, unknown>, replace?: boolean): Promise<void>;
+	isSelectionGhosted(key: string): boolean;
+	toggleGhostSelection(key: string): Promise<void>;
+	toggleGhostAllSelections(): Promise<void>;
 	addSelections(props: SelectionProps[]): Promise<void>;
 	removeSelections(keys: string[]): Promise<void>;
 	resetSelections(): Promise<void>;
@@ -1489,6 +1494,7 @@ declare const mma: {
 	selectTag(tagId: number): Promise<void>;
 	selectPolygon(polygon: PolygonGeometry, includeInformational?: boolean): Promise<void>;
 	selectFilter(field: string, op: FilterOp, value: unknown, value2?: unknown): Promise<void>;
+	updateFilterSelection(oldKey: string, props: SelectionProps): Promise<void>;
 	setPolygonName(key: string, name: string): Promise<void>;
 	setSelectionColors(entries: {
 		key: string;
@@ -1579,6 +1585,7 @@ declare const mma: {
 	} | null;
 	useKnownFieldKeys: () => ReadonlySet<string>;
 	useSelections: () => Selection$1[];
+	useGhostedSelections: () => Set<string>;
 	useActivePluginId: () => string | null;
 	useUndoRedo: () => {
 		canUndo: boolean;

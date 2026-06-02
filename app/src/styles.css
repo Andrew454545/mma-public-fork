@@ -1103,6 +1103,10 @@ summary.button {
 	--item-color: #e5a800;
 	font-weight: 600;
 }
+.updates__item--manual {
+	--item-color: var(--constructive);
+	font-weight: 600;
+}
 .updates__item:before {
 	content: " ";
 	background: var(--item-color);
@@ -5009,37 +5013,6 @@ body {
 	pointer-events: none;
 }
 
-/* Guide dialog */
-.guide-dialog {
-	width: 680px;
-	max-width: 95vw;
-}
-.guide-content h2 {
-	font-size: 1.1rem;
-	margin: 0 0 0.5rem;
-}
-.guide-content h3 {
-	font-size: 0.95rem;
-	margin: 1rem 0 0.25rem;
-}
-.guide-content p {
-	margin: 0.4rem 0;
-	font-size: 0.85rem;
-	line-height: 1.5;
-}
-.guide-content ul {
-	margin: 0.25rem 0;
-	padding-left: 1.25rem;
-	font-size: 0.85rem;
-	line-height: 1.6;
-}
-.guide-content kbd {
-	background: #eee;
-	border: 1px solid #ccc;
-	border-radius: 3px;
-	padding: 1px 4px;
-	font-size: 0.8rem;
-}
 .button--danger {
 	background: #e53e3e;
 	color: #fff;

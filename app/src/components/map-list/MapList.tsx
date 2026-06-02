@@ -10,7 +10,7 @@ import {
 	invalidateMapList,
 	updateMapLabels,
 } from "@/store/useMapStore";
-import { openMapWindow } from "@/lib/window.add";
+import { openMapWindow, openManualInMain } from "@/lib/window.add";
 import { log } from "@/lib/util/log";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { cmd } from "@/lib/commands";
@@ -37,7 +37,6 @@ import clsx from "clsx";
 import type { MapMeta, SortMode } from "@/types";
 import { fmt, relativeTime, shortDateFmt } from "@/lib/util/format";
 import { useSetting, type MapListField } from "@/store/settings.add";
-import { GuideDialog } from "@/components/dialogs/Guide.add";
 import { toast } from "@/lib/util/toast.add";
 
 // --- Drag types ---
@@ -464,7 +463,6 @@ function ImportPreviewModal({
 	);
 }
 
-
 export function BulkActions() {
 	const maps = useMapList();
 	const [exporting, setExporting] = useState(false);
@@ -643,7 +641,6 @@ function applyFilter(listEl: HTMLElement | null, query: string) {
 export function MapList() {
 	const maps = useMapList();
 	const [sortMode, setSortMode] = useState<SortMode>(loadSortMode);
-	const [showGuide, setShowGuide] = useState(false);
 	const [syntheticFolders, setSyntheticFolders] = useState<string[]>([]);
 	const [dragItem, setDragItem] = useState<DragItem | null>(null);
 	const previewRef = useRef<HTMLDivElement>(null);
@@ -854,9 +851,7 @@ export function MapList() {
 								toast("Type a name to create a folder");
 								return;
 							}
-							setSyntheticFolders((prev) =>
-								prev.includes(name) ? prev : [...prev, name],
-							);
+							setSyntheticFolders((prev) => (prev.includes(name) ? prev : [...prev, name]));
 						}}
 						aria-label="New folder"
 					>
@@ -920,19 +915,21 @@ export function MapList() {
 							.
 						</p>
 					</li>
-					<li className="updates__item updates__item--new">
+					<li className="updates__item updates__item--manual">
 						<span className="updates__circle" />
-						<time className="updates__time">Guide</time>
+						<time className="updates__time">Manual</time>
 						<p>
+							New here?{" "}
 							<a
 								href="#"
 								onClick={(e) => {
 									e.preventDefault();
-									setShowGuide(true);
+									void openManualInMain();
 								}}
 							>
-								Guide for new users here.
+								Open the manual
 							</a>{" "}
+							for a guide to every feature.
 						</p>
 					</li>
 				</ul>
@@ -955,7 +952,6 @@ export function MapList() {
 			>
 				{dragItem?.name}
 			</div>
-			<GuideDialog open={showGuide} onOpenChange={setShowGuide} />
 			{activeAction && (
 				<Dialog
 					open

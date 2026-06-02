@@ -16,6 +16,7 @@ import { CellManager } from "@/lib/render/CellManager";
 import {
 	useMeasure,
 	useLatLngAnchor,
+	useScoreMaxError,
 	openContextMenuLatLng,
 	openContextMenuLocation,
 } from "@/lib/sv/measure";
@@ -200,9 +201,7 @@ function initStackedMapType() {
 	};
 }
 
-function createCompositeMapType(
-	layers: google.maps.ImageMapType[],
-): google.maps.ImageMapType {
+function createCompositeMapType(layers: google.maps.ImageMapType[]): google.maps.ImageMapType {
 	initStackedMapType();
 	return new StackedMapType(layers, {
 		tileSize: new google.maps.Size(256, 256),
@@ -365,6 +364,7 @@ export function MapEmbed() {
 	const setShowPreviews = pref("showPreviews");
 	const coordDisplayRef = useRef<HTMLSpanElement>(null);
 	const [mapZoom, setMapZoom] = useState(2);
+	const scoreMaxError = useScoreMaxError();
 
 	const [pointAlongRoad] = useMapSetting("pointAlongRoad");
 	const [preferDirection] = useMapSetting("preferDirection");
@@ -550,7 +550,7 @@ export function MapEmbed() {
 			}
 		}
 
-		if (cm.selOverlayCount > 0) {			
+		if (cm.selOverlayCount > 0) {
 			if (markerStyle === "circle") {
 				layers.push(
 					new ScatterplotLayer({
@@ -668,14 +668,17 @@ export function MapEmbed() {
 
 		if (showPerfectScoreCircle && activeLocRef.current && cm.totalCount > 0) {
 			const loc = activeLocRef.current;
+			const trail = getTrail();
+			const last = trail.length ? trail[trail.length - 1] : null;
+			const center = last ? { lng: last[0], lat: last[1] } : { lat: loc.lat, lng: loc.lng };
 			layers.push(
 				new ScatterplotLayer({
 					id: PERFECT_SCORE_LAYER_ID,
-					data: [loc],
-					getPosition: (d: Location) => [d.lng, d.lat],
+					data: [center],
+					getPosition: (d: { lat: number; lng: number }) => [d.lng, d.lat],
 					getFillColor: [200, 0, 0, 26],
 					getLineColor: [200, 0, 0, 128],
-					getRadius: Math.max(25, 150),
+					getRadius: Math.max(25, scoreMaxError),
 					radiusUnits: "meters" as const,
 					stroked: true,
 					filled: true,
@@ -763,7 +766,10 @@ export function MapEmbed() {
 				layers.push(
 					new ScatterplotLayer({
 						id: "import-preview",
-						data: { length: previewCount, attributes: { getPosition: { value: previewPos, size: 2 } } },
+						data: {
+							length: previewCount,
+							attributes: { getPosition: { value: previewPos, size: 2 } },
+						},
 						getRadius: 4,
 						radiusUnits: "pixels",
 						radiusMinPixels: 2,
@@ -780,6 +786,7 @@ export function MapEmbed() {
 		markerVisibility,
 		markerStyle,
 		showPerfectScoreCircle,
+		scoreMaxError,
 		svPanoramas,
 		panoDots,
 		allSelections,
@@ -886,39 +893,35 @@ export function MapEmbed() {
 		[isMeasuring, dispatchContextMenu],
 	);
 
-	const handleHover = useCallback(
-		(info: PickingInfo, event: OverlayEvent) => {
-			const hasObject =
-				info.object != null ||
-				(isLocationLayer(info.layer?.id) === true &&
-					typeof info.index === "number" &&
-					info.index >= 0);
-			const domEvent = event?.srcEvent?.domEvent;
-			if (domEvent instanceof MouseEvent) {
-				const target = domEvent.target as HTMLElement | null;
-				if (target) target.style.cursor = hasObject ? "pointer" : "";
-			}
-		},
-		[],
-	);
+	const handleHover = useCallback((info: PickingInfo, event: OverlayEvent) => {
+		const hasObject =
+			info.object != null ||
+			(isLocationLayer(info.layer?.id) === true &&
+				typeof info.index === "number" &&
+				info.index >= 0);
+		const domEvent = event?.srcEvent?.domEvent;
+		if (domEvent instanceof MouseEvent) {
+			const target = domEvent.target as HTMLElement | null;
+			if (target) target.style.cursor = hasObject ? "pointer" : "";
+		}
+	}, []);
 
 	const svLayerRef = useRef<google.maps.ImageMapType>(null);
 
 	const buildMapStack = useCallback(
 		(opts: {
-				type: MapTypeKey;
-				labels: boolean;
-				terrain: boolean;
-				color: SvColor;
-				coverageType: SvCoverageType;
-				thickness: SvThickness;
-				useBlobby: boolean;
-				boldCountry: boolean;
-				boldSubdivision: boolean;
-				style: string;
-				customStyles?: MapStyle[];
-			},
-		) => {
+			type: MapTypeKey;
+			labels: boolean;
+			terrain: boolean;
+			color: SvColor;
+			coverageType: SvCoverageType;
+			thickness: SvThickness;
+			useBlobby: boolean;
+			boldCountry: boolean;
+			boldSubdivision: boolean;
+			style: string;
+			customStyles?: MapStyle[];
+		}) => {
 			const tileSize = new google.maps.Size(256, 256);
 			const layers: google.maps.ImageMapType[] = [];
 
@@ -1201,7 +1204,11 @@ export function MapEmbed() {
 				if (cancelled) return;
 
 				cellMgrRef.current.initFromBinary(buf);
-				t.end({ cells: cellMgrRef.current.cells.size, total: cellMgrRef.current.totalCount, bytes: buf.byteLength });
+				t.end({
+					cells: cellMgrRef.current.cells.size,
+					total: cellMgrRef.current.totalCount,
+					bytes: buf.byteLength,
+				});
 				setRenderTick((t) => t + 1);
 			} catch (e) {
 				log.error("[render] fetchRender failed:", e);

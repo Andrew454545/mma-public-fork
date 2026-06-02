@@ -1,8 +1,15 @@
 import { useState, useEffect } from "react";
-import { useMeasureState, endMeasure, formatDistance, computeScore } from "@/lib/sv/measure";
+import {
+	useMeasureState,
+	endMeasure,
+	formatDistance,
+	computeScore,
+	useScoreMaxError,
+} from "@/lib/sv/measure";
 
 export function MeasurementBar() {
 	const { isMeasuring, instance } = useMeasureState();
+	const maxError = useScoreMaxError();
 	const [, forceUpdate] = useState({});
 
 	useEffect(() => {
@@ -23,7 +30,7 @@ export function MeasurementBar() {
 				<p className="measurement-control__measurements">
 					Distance: {formatDistance(instance.length ?? 0)}
 					<br />
-					Score: {computeScore(instance.length ?? 0)}
+					Score: {computeScore(instance.length ?? 0, maxError)}
 				</p>
 				<button className="button measurement-control__end" onClick={endMeasure}>
 					End

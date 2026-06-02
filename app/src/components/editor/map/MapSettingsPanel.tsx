@@ -8,6 +8,7 @@ import { Icon } from "@/components/primitives/Icon";
 import { mdiCogOutline } from "@mdi/js";
 import { type SvColor, SV_COLORS, type MapTypeKey } from "./mapSettingsTypes";
 import { useMapSetting } from "./useMapSetting";
+import { ScoreBoundsEditor } from "./ScoreBoundsEditor";
 
 const MAP_TYPE_LABELS: Record<MapTypeKey, string> = {
 	map: "Map",
@@ -60,7 +61,13 @@ export interface MapSettingsDropdownProps {
 	setShowPreviews: (v: boolean) => void;
 }
 
-function SearchRadiusSlider({ value, onChange }: { value: number | null; onChange: (v: number | null) => void }) {
+function SearchRadiusSlider({
+	value,
+	onChange,
+}: {
+	value: number | null;
+	onChange: (v: number | null) => void;
+}) {
 	const [dragging, setDragging] = useState<number | null>(null);
 	const display = dragging ?? value ?? 50;
 	return (
@@ -81,8 +88,8 @@ function SearchRadiusSlider({ value, onChange }: { value: number | null; onChang
 					}
 				}}
 				style={{ width: 80, verticalAlign: "middle" }}
-			/>
-			{" "}{display}m
+			/>{" "}
+			{display}m
 		</label>
 	);
 }
@@ -463,6 +470,7 @@ export function MapSettingsDropdown({ settings: s }: { settings: MapSettingsDrop
 							</button>
 						</label>
 					</fieldset>
+					<ScoreBoundsEditor />
 					<fieldset className="fieldset">
 						<legend className="fieldset__header">
 							Generation <span className="fieldset__divider" />
@@ -525,7 +533,11 @@ export function MapSettingsDropdown({ settings: s }: { settings: MapSettingsDrop
 					{getEnrichFieldOptions().map((f) => {
 						const enabled = enrichFields ? enrichFields.includes(f.key) : !f.defaultOff;
 						return (
-							<label key={f.key} className="settings-popup__item" style={{ display: "flex", alignItems: "center", gap: ".5rem" }}>
+							<label
+								key={f.key}
+								className="settings-popup__item"
+								style={{ display: "flex", alignItems: "center", gap: ".5rem" }}
+							>
 								<input
 									type="checkbox"
 									checked={enabled}

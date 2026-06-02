@@ -173,6 +173,12 @@ pub(crate) struct TagState {
     pub all: HashMap<u32, Tag>,
     pub dirty: bool,
     pub next_id: u32,
+    /// `tag_id -> set of member location ids`. Lets a `Tag` selection resolve by
+    /// cloning a set instead of scanning every row's tag list. Maintained
+    /// incrementally in `update_tag_counts` (the single choke point for tag
+    /// membership changes) and rebuilt from the batch on map open. Covers committed
+    /// base rows + overlay adds; patched/dead rows are reconciled at resolve time.
+    pub sets: HashMap<u32, RoaringBitmap>,
 }
 
 pub(crate) struct EditStacks {
@@ -243,6 +249,7 @@ impl Store {
                 all: HashMap::new(),
                 dirty: false,
                 next_id: 1,
+                sets: HashMap::new(),
             },
             edits: EditStacks {
                 undo: Vec::new(),
@@ -544,33 +551,10 @@ impl Store {
     /// selected_colors from scratch. O(S * N). Does NOT build the bitmask file.
     fn resolve_selection_membership(&mut self) {
         let props: Vec<SelectionProps> = self.selections.all.iter().map(|s| s.props.clone()).collect();
-        let masks: Vec<Vec<bool>> = {
+        self.selections.loc_sets = {
             let view = self.loc_view();
-            props.iter().map(|p| selections::resolve_bitmask(&view, p)).collect()
+            props.iter().map(|p| selections::resolve_set(&view, p)).collect()
         };
-
-        let num_sels = masks.len();
-        let batch_len = self.batch.as_ref().map_or(0, |b| b.num_rows());
-        self.selections.loc_sets = vec![RoaringBitmap::new(); num_sels];
-        for si in 0..num_sels {
-            let mask = &masks[si];
-            // Batch ids are iterated in ascending order (sorted-id invariant)
-            if let Some(ref b) = self.batch {
-                let id_col = col_id(b);
-                for i in 0..b.num_rows() {
-                    if self.overlay.dead.contains(&id_col.value(i)) { continue; }
-                    if i < mask.len() && mask[i] {
-                        self.selections.loc_sets[si].insert(id_col.value(i));
-                    }
-                }
-            }
-            for (j, loc) in self.overlay.adds.iter().enumerate() {
-                let mi = batch_len + j;
-                if mi < mask.len() && mask[mi] {
-                    self.selections.loc_sets[si].insert(loc.id);
-                }
-            }
-        }
 
         let mut all_selected = RoaringBitmap::new();
         for set in &self.selections.loc_sets {
@@ -647,8 +631,41 @@ impl Store {
                     });
                     self.tags.dirty = true;
                 }
+                // Maintain the membership index alongside counts (same choke point).
+                if delta > 0 {
+                    self.tags.sets.entry(tag_id).or_default().insert(loc.id);
+                } else if let Some(set) = self.tags.sets.get_mut(&tag_id) {
+                    set.remove(loc.id);
+                }
             }
         }
+    }
+
+    /// Rebuild the `tag_id -> member ids` index from scratch over the live data
+    /// (alive base rows + overlay adds, with patches applied). O(N * tags/loc). Called
+    /// on map open; incremental edits maintain it via `update_tag_counts`.
+    pub(crate) fn rebuild_tag_sets(&mut self) {
+        let mut sets: HashMap<u32, RoaringBitmap> = HashMap::new();
+        if let Some(ref b) = self.batch {
+            let id_col = col_id(b);
+            let tags_col = col_tags(b);
+            for i in 0..b.num_rows() {
+                let id = id_col.value(i);
+                if self.overlay.dead.contains(&id) { continue; }
+                // Patched rows: use the patch's tags, not the stale base row.
+                if let Some(p) = self.overlay.patches.get(&id) {
+                    for &t in &p.tags { sets.entry(t).or_default().insert(id); }
+                } else {
+                    let list = tags_col.value(i);
+                    let ids = list.as_any().downcast_ref::<UInt32Array>().unwrap();
+                    for j in 0..ids.len() { sets.entry(ids.value(j)).or_default().insert(id); }
+                }
+            }
+        }
+        for loc in &self.overlay.adds {
+            for &t in &loc.tags { sets.entry(t).or_default().insert(loc.id); }
+        }
+        self.tags.sets = sets;
     }
 
     /// Increment tag counts for all tags referenced by `locs`.
@@ -818,11 +835,12 @@ impl Store {
 
     /// Construct a read-only view over all alive locations for selection resolution.
     fn loc_view(&self) -> selections::LocView<'_> {
-        selections::LocView::new(
+        selections::LocView::with_tag_index(
             self.batch.as_ref(),
             &self.overlay.dead,
             &self.overlay.patches,
             &self.overlay.adds,
+            Some(&self.tags.sets),
         )
     }
 
@@ -1338,6 +1356,7 @@ pub async fn store_open_map(
         store.tags.all = tags;
         store.tags.dirty = false;
         store.tags.next_id = max_tag_id + 1;
+        store.rebuild_tag_sets();
         let extra_str: String = conn.query_row(
             "SELECT extra FROM maps WHERE id = ?1",
             rusqlite::params![map_id],
@@ -2604,30 +2623,12 @@ pub async fn store_sync_selections(
 
         let num_sels = sels.len();
 
-        // 1. Resolve bitmasks (parallel via rayon inside resolve_bitmask)
+        // 1. Resolve each selection directly to a Roaring id-set. Tag leaves hit the
+        //    membership index; composites combine natively. (Geometric leaves still scan.)
         let view = store.loc_view();
-        let masks: Vec<Vec<bool>> = sels.iter()
-            .map(|sel| selections::resolve_bitmask(&view, &sel.props))
+        let sel_sets: Vec<RoaringBitmap> = sels.iter()
+            .map(|sel| selections::resolve_set(&view, &sel.props))
             .collect();
-
-        // 2. Build one Roaring bitmap per selection from its mask. Batch ids are
-        // ascending (sorted-id invariant) so the bitmaps fill sequentially.
-        let batch_rows = view.batch_rows();
-        let sel_sets: Vec<RoaringBitmap> = (0..num_sels).into_par_iter().map(|si| {
-            let mask = &masks[si];
-            let mut bm = RoaringBitmap::new();
-            for i in 0..batch_rows {
-                if mask[i] && view.is_alive(i) {
-                    bm.insert(view.id_at(i));
-                }
-            }
-            for (j, loc) in view.adds().iter().enumerate() {
-                if mask[batch_rows + j] {
-                    bm.insert(loc.id);
-                }
-            }
-            bm
-        }).collect();
         drop(view);
 
         let mut all_selected = RoaringBitmap::new();
@@ -2668,11 +2669,11 @@ pub async fn store_sync_selections(
         store.selections.version += 1;
 
         let render_total: usize = store.render.cells.iter().filter_map(|o| o.as_ref()).map(|cr| cr.id_order.len()).sum();
-        log::debug!("[cmd] store_sync_selections total={}ms sels={} selected={} cells={} buf_size={} batch_rows={} overlay_adds={} dead={} alive={} render_total={} mask_len={} counts={:?}",
+        log::debug!("[cmd] store_sync_selections total={}ms sels={} selected={} cells={} buf_size={} batch_rows={} overlay_adds={} dead={} alive={} render_total={} first_set_len={} counts={:?}",
             _t.elapsed().as_millis(), sels.len(), selected_count, num_cells, buf.len(),
             store.batch.as_ref().map_or(0, |b| b.num_rows()), store.overlay.adds.len(),
             store.overlay.dead.len(), store.alive_count, render_total,
-            masks.first().map_or(0, |m| m.len()), counts);
+            store.selections.loc_sets.first().map_or(0, |s| s.len() as usize), counts);
 
         (counts, buf, selected_count, num_cells, map_id_str)
     };

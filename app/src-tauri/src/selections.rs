@@ -9,6 +9,7 @@
 
 use std::collections::{HashMap, HashSet};
 use arrow::array::{RecordBatch, StringArray, Float64Array, UInt32Array, ListArray, Array};
+use roaring::RoaringBitmap;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use crate::types::{Location, LOAD_AS_PANO_ID, INFORMATIONAL};
@@ -91,6 +92,9 @@ pub struct LocView<'a> {
     batch_rows: usize,
     has_dead: bool,
     has_patches: bool,
+    /// Optional `tag_id -> member location ids` index. When present, a `Tag` leaf
+    /// resolves by cloning the set instead of scanning every row's tag list.
+    tag_sets: Option<&'a HashMap<u32, RoaringBitmap>>,
 }
 
 impl<'a> LocView<'a> {
@@ -99,6 +103,17 @@ impl<'a> LocView<'a> {
         dead: &'a HashSet<u32>,
         patches: &'a HashMap<u32, Location>,
         adds: &'a [Location],
+    ) -> Self {
+        Self::with_tag_index(batch, dead, patches, adds, None)
+    }
+
+    /// Like `new` but with a tag membership index for index-speed `Tag` leaves.
+    pub fn with_tag_index(
+        batch: Option<&'a RecordBatch>,
+        dead: &'a HashSet<u32>,
+        patches: &'a HashMap<u32, Location>,
+        adds: &'a [Location],
+        tag_sets: Option<&'a HashMap<u32, RoaringBitmap>>,
     ) -> Self {
         let batch_rows = batch.map_or(0, |b| b.num_rows());
         let ids = batch.map(|b| b.column(0).as_any().downcast_ref::<UInt32Array>().unwrap());
@@ -114,7 +129,7 @@ impl<'a> LocView<'a> {
         let modified_ats = batch.map(|b| b.column(11).as_any().downcast_ref::<StringArray>().unwrap());
         let has_dead = !dead.is_empty();
         let has_patches = !patches.is_empty();
-        Self { batch, dead, patches, adds, ids, lats, lngs, headings, pitches, zooms, flags, tags, extras, created_ats, modified_ats, batch_rows, has_dead, has_patches }
+        Self { batch, dead, patches, adds, ids, lats, lngs, headings, pitches, zooms, flags, tags, extras, created_ats, modified_ats, batch_rows, has_dead, has_patches, tag_sets }
     }
 
     /// Total logical row count (batch rows + overlay adds).
@@ -149,47 +164,6 @@ impl<'a> LocView<'a> {
             if let Some(p) = self.patches.get(&self.batch_id(i)) { return p.id; }
         }
         self.batch_id(i)
-    }
-
-    /// Map each selected location ID to its selection index (last writer wins). O(S * N).
-    pub fn collect_id_to_selection(&self, masks: &[Vec<bool>]) -> HashMap<u32, usize> {
-        let mut id_to_sel: HashMap<u32, usize> = HashMap::new();
-        for (si, mask) in masks.iter().enumerate() {
-            for i in 0..self.batch_rows {
-                if mask[i] && self.is_alive(i) {
-                    id_to_sel.insert(self.id_at(i), si);
-                }
-            }
-            for (j, loc) in self.adds.iter().enumerate() {
-                if mask[self.batch_rows + j] {
-                    id_to_sel.insert(loc.id, si);
-                }
-            }
-        }
-        id_to_sel
-    }
-
-    /// Collect all selected IDs and their colors (last selection wins). O(S * N).
-    pub fn collect_selected_ids(&self, masks: &[Vec<bool>], colors: &[[u8; 3]]) -> (HashSet<u32>, HashMap<u32, [u8; 3]>) {
-        let mut all_selected = HashSet::new();
-        let mut color_map = HashMap::new();
-        for (si, mask) in masks.iter().enumerate() {
-            let color = colors[si];
-            for i in 0..self.batch_rows {
-                if mask[i] {
-                    let id = self.id_at(i);
-                    color_map.insert(id, color);
-                    all_selected.insert(id);
-                }
-            }
-            for (j, loc) in self.adds.iter().enumerate() {
-                if mask[self.batch_rows + j] {
-                    color_map.insert(loc.id, color);
-                    all_selected.insert(loc.id);
-                }
-            }
-        }
-        (all_selected, color_map)
     }
 
     /// Build a bool mask over all locations (batch + adds) using per-row predicates.
@@ -318,50 +292,105 @@ pub(crate) fn test_add_row(loc: &Location, props: &SelectionProps) -> bool {
 /// per-chunk overhead while keeping cache-friendly access patterns.
 const CHUNK_SIZE: usize = 64 * 1024;
 
-/// Resolve a selection into a bool mask. O(N) for simple selections (parallel),
-/// O(N^2) for Duplicates (grid-accelerated), O(S*N) for composites (S children).
-pub fn resolve_bitmask(view: &LocView, props: &SelectionProps) -> Vec<bool> {
-    let n = view.batch_rows + view.adds.len();
+/// Resolve a selection into a `RoaringBitmap` of matching (alive) location **ids**.
+///
+/// This is the primary resolve path. Composites (`Intersection`/`Union`/`Invert`)
+/// combine child bitmaps with native roaring set ops (`&`/`|`/`Sub`) — branchless,
+/// sparse-aware, no per-row scanning. A `Tag` leaf hits the membership index when
+/// present (O(1)-ish clone) instead of scanning every row's tag list. Geometric
+/// leaves (`Polygon`/`Filter`/`Duplicates`) still scan, producing a positional mask
+/// that is converted to an id set.
+pub fn resolve_set(view: &LocView, props: &SelectionProps) -> RoaringBitmap {
+    match props {
+        // Tag leaf via index: clone the precomputed member set, minus dead ids.
+        SelectionProps::Tag { tag_id } => {
+            if let Some(idx) = view.tag_sets {
+                let mut set = idx.get(tag_id).cloned().unwrap_or_default();
+                if view.has_dead {
+                    for &d in view.dead.iter() { set.remove(d); }
+                }
+                // Overlay adds aren't in the batch-built index; fold them in by scan.
+                for loc in view.adds.iter() {
+                    if loc.tags.contains(tag_id) { set.insert(loc.id); }
+                }
+                // Patches can change a row's tags vs the indexed (base) value: re-test
+                // patched rows so the index can't go stale under uncommitted edits.
+                if view.has_patches {
+                    for p in view.patches.values() {
+                        if p.tags.contains(tag_id) { set.insert(p.id); } else { set.remove(p.id); }
+                    }
+                }
+                return set;
+            }
+            // No index: fall through to the scan path below.
+        }
+        SelectionProps::Intersection { selections } => {
+            if selections.is_empty() { return RoaringBitmap::new(); }
+            let mut acc = resolve_set(view, &selections[0].props);
+            for s in &selections[1..] {
+                acc &= resolve_set(view, &s.props);
+                if acc.is_empty() { break; } // short-circuit: nothing left to intersect
+            }
+            return acc;
+        }
+        SelectionProps::Union { selections } => {
+            let mut acc = RoaringBitmap::new();
+            for s in selections { acc |= resolve_set(view, &s.props); }
+            return acc;
+        }
+        SelectionProps::Invert { selections } => {
+            // Invert = (all alive ids) - (child ids). roaring-rs has no native flip,
+            // so this is a difference against the universe set.
+            let universe = alive_id_set(view);
+            if selections.is_empty() { return universe; }
+            let inner = resolve_set(view, &selections[0].props);
+            return universe - inner;
+        }
+        _ => {}
+    }
+    // Scan leaves (incl. Tag with no index): build a positional mask, convert to ids.
+    let mask = resolve_leaf_mask(view, props);
+    mask_to_set(view, &mask)
+}
 
+/// Set of all alive location ids (batch minus dead, plus overlay adds).
+fn alive_id_set(view: &LocView) -> RoaringBitmap {
+    let mut set = RoaringBitmap::new();
+    for i in 0..view.batch_rows {
+        if view.is_alive(i) { set.insert(view.id_at(i)); }
+    }
+    for loc in view.adds.iter() { set.insert(loc.id); }
+    set
+}
+
+/// Convert a positional mask (batch rows then adds) into a roaring id set. Excludes
+/// dead batch rows. O(N).
+fn mask_to_set(view: &LocView, mask: &[bool]) -> RoaringBitmap {
+    let mut set = RoaringBitmap::new();
+    for i in 0..view.batch_rows {
+        if mask[i] && view.is_alive(i) { set.insert(view.id_at(i)); }
+    }
+    for (j, loc) in view.adds.iter().enumerate() {
+        if mask[view.batch_rows + j] { set.insert(loc.id); }
+    }
+    set
+}
+
+/// Resolve a single non-composite leaf into a positional bool mask. O(N) parallel
+/// (or O(N^2) grid-accelerated for Duplicates). Composites are handled by `resolve_set`.
+fn resolve_leaf_mask(view: &LocView, props: &SelectionProps) -> Vec<bool> {
+    let n = view.batch_rows + view.adds.len();
     match props {
         SelectionProps::Locations { locations, .. }
         | SelectionProps::Manual { locations }
         | SelectionProps::ValidationState { locations, .. } => {
             let set: HashSet<u32> = locations.iter().copied().collect();
-            return view.resolve_mask(|i| set.contains(&view.id_at(i)), |_, loc| set.contains(&loc.id));
+            view.resolve_mask(|i| set.contains(&view.id_at(i)), |_, loc| set.contains(&loc.id))
         }
         SelectionProps::Duplicates { distance } => {
             let mut mask = vec![false; n];
             find_duplicates_bitmask(view, *distance, &mut mask);
-            return mask;
-        }
-        SelectionProps::Intersection { selections } => {
-            if selections.is_empty() { return vec![false; n]; }
-            let mut mask = resolve_bitmask(view, &selections[0].props);
-            for s in &selections[1..] {
-                let other = resolve_bitmask(view, &s.props);
-                mask.par_iter_mut().zip(other.par_iter()).for_each(|(m, o)| *m = *m && *o);
-            }
-            return mask;
-        }
-        SelectionProps::Union { selections } => {
-            let mut mask = vec![false; n];
-            for s in selections {
-                let other = resolve_bitmask(view, &s.props);
-                mask.par_iter_mut().zip(other.par_iter()).for_each(|(m, o)| *m = *m || *o);
-            }
-            return mask;
-        }
-        SelectionProps::Invert { selections } => {
-            if selections.is_empty() {
-                let mut mask = vec![true; n];
-                if view.has_dead {
-                    for i in 0..view.batch_rows { if !view.is_alive(i) { mask[i] = false; } }
-                }
-                return mask;
-            }
-            let inner = resolve_bitmask(view, &selections[0].props);
-            return view.resolve_mask(|i| !inner[i], |j, _| !inner[view.batch_rows + j]);
+            mask
         }
         SelectionProps::Polygon { polygon, include_informational } => {
             // Broad-phase: a point outside the geometry's bbox can't be inside any ring,
@@ -369,54 +398,33 @@ pub fn resolve_bitmask(view: &LocView, props: &SelectionProps) -> Vec<bool> {
             // computed once here, not per point.
             let inc = *include_informational;
             match geometry_bbox(polygon) {
-                None => return vec![false; n],
-                Some(bb) => {
-                    return view.resolve_mask(
-                        |i| {
-                            if let Some(p) = view.patch_at(i) {
-                                if !inc && (p.flags & INFORMATIONAL != 0) { return false; }
-                                in_bbox(p.lng, p.lat, &bb) && point_in_geometry(p.lng, p.lat, polygon)
-                            } else {
-                                if !inc && (view.flags.unwrap().value(i) & INFORMATIONAL != 0) { return false; }
-                                let lng = view.lngs.unwrap().value(i);
-                                let lat = view.lats.unwrap().value(i);
-                                in_bbox(lng, lat, &bb) && point_in_geometry(lng, lat, polygon)
-                            }
-                        },
-                        |_, loc| {
-                            if !inc && (loc.flags & INFORMATIONAL != 0) { return false; }
-                            in_bbox(loc.lng, loc.lat, &bb) && point_in_geometry(loc.lng, loc.lat, polygon)
-                        },
-                    );
-                }
+                None => vec![false; n],
+                Some(bb) => view.resolve_mask(
+                    |i| {
+                        if let Some(p) = view.patch_at(i) {
+                            if !inc && (p.flags & INFORMATIONAL != 0) { return false; }
+                            in_bbox(p.lng, p.lat, &bb) && point_in_geometry(p.lng, p.lat, polygon)
+                        } else {
+                            if !inc && (view.flags.unwrap().value(i) & INFORMATIONAL != 0) { return false; }
+                            let lng = view.lngs.unwrap().value(i);
+                            let lat = view.lats.unwrap().value(i);
+                            in_bbox(lng, lat, &bb) && point_in_geometry(lng, lat, polygon)
+                        }
+                    },
+                    |_, loc| {
+                        if !inc && (loc.flags & INFORMATIONAL != 0) { return false; }
+                        in_bbox(loc.lng, loc.lat, &bb) && point_in_geometry(loc.lng, loc.lat, polygon)
+                    },
+                ),
             }
         }
-        _ => {}
+        _ => view.resolve_mask(|i| test_batch_row(view, i, props), |_, loc| test_add_row(loc, props)),
     }
-
-    view.resolve_mask(|i| test_batch_row(view, i, props), |_, loc| test_add_row(loc, props))
 }
 
-/// Convert a bitmask to a Vec of matching location IDs. O(N).
-pub fn mask_to_ids(view: &LocView, mask: &[bool]) -> Vec<u32> {
-    let mut ids = Vec::new();
-    for i in 0..view.batch_rows {
-        if mask[i] {
-            ids.push(view.id_at(i));
-        }
-    }
-    for (j, loc) in view.adds.iter().enumerate() {
-        if mask[view.batch_rows + j] {
-            ids.push(loc.id);
-        }
-    }
-    ids
-}
-
-/// Resolve a selection to a Vec of matching location IDs. O(N) + allocation.
+/// Resolve a selection to a Vec of matching location IDs (sorted ascending). O(N).
 pub fn resolve(view: &LocView, props: &SelectionProps) -> Vec<u32> {
-    let mask = resolve_bitmask(view, props);
-    mask_to_ids(view, &mask)
+    resolve_set(view, props).into_iter().collect()
 }
 
 // --- Geometry (ray-casting point-in-polygon) ---

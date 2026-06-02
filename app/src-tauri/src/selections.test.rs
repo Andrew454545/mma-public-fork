@@ -325,6 +325,101 @@ fn resolve_untagged() {
     assert_eq!(ids, vec![2]);
 }
 
+// -----------------------------------------------------------------------
+// Tag membership index (roaring fast-path) — must match the scan path exactly.
+// -----------------------------------------------------------------------
+
+// Build a batch of tagged locations + the matching tag index, so the indexed Tag
+// leaf and the scan-path Tag leaf can be compared on identical data.
+fn tagged_batch_and_index(locs: &[Location]) -> (RecordBatch, HashMap<u32, RoaringBitmap>) {
+    let batch = locations_to_batch(locs);
+    let mut sets: HashMap<u32, RoaringBitmap> = HashMap::new();
+    for l in locs {
+        for &t in &l.tags { sets.entry(t).or_default().insert(l.id); }
+    }
+    (batch, sets)
+}
+
+#[test]
+fn tag_index_matches_scan_path() {
+    let mut a = loc(1, 0.0, 0.0); a.tags = vec![10, 20];
+    let mut b = loc(2, 0.0, 0.0); b.tags = vec![20];
+    let mut c = loc(3, 0.0, 0.0); c.tags = vec![10];
+    let locs = vec![a, b, c];
+    let (batch, sets) = tagged_batch_and_index(&locs);
+    let dead = HashSet::new();
+    let patches = HashMap::new();
+    let adds: Vec<Location> = vec![];
+
+    let scan = LocView::new(Some(&batch), &dead, &patches, &adds);
+    let idx = LocView::with_tag_index(Some(&batch), &dead, &patches, &adds, Some(&sets));
+
+    for tag_id in [10u32, 20, 99] {
+        let s = resolve(&scan, &SelectionProps::Tag { tag_id });
+        let i = resolve(&idx, &SelectionProps::Tag { tag_id });
+        assert_eq!(s, i, "tag {tag_id}: scan {s:?} != index {i:?}");
+    }
+    // sanity on the actual membership
+    assert_eq!(resolve(&idx, &SelectionProps::Tag { tag_id: 10 }), vec![1, 3]);
+}
+
+#[test]
+fn tag_index_excludes_dead_includes_adds() {
+    let mut a = loc(1, 0.0, 0.0); a.tags = vec![10];
+    let mut b = loc(2, 0.0, 0.0); b.tags = vec![10];
+    let (batch, sets) = tagged_batch_and_index(&[a, b]);
+    let mut dead = HashSet::new();
+    dead.insert(2u32); // kill row 2
+    let patches = HashMap::new();
+    let mut add = loc(3, 0.0, 0.0); add.tags = vec![10]; // overlay add carries the tag
+    let adds = vec![add];
+
+    let idx = LocView::with_tag_index(Some(&batch), &dead, &patches, &adds, Some(&sets));
+    // 2 is dead -> excluded; 3 is an overlay add -> included; 1 stays.
+    assert_eq!(resolve(&idx, &SelectionProps::Tag { tag_id: 10 }), vec![1, 3]);
+}
+
+#[test]
+fn tag_index_honors_patches() {
+    // Base: loc 1 has tag 10, loc 2 has nothing. Index reflects the base.
+    let mut a = loc(1, 0.0, 0.0); a.tags = vec![10];
+    let b = loc(2, 0.0, 0.0);
+    let (batch, sets) = tagged_batch_and_index(&[a, b]);
+    let dead = HashSet::new();
+    // Patch: loc 1 LOSES tag 10, loc 2 GAINS tag 10 (uncommitted edits the index can't see).
+    let mut p1 = loc(1, 0.0, 0.0); p1.tags = vec![];
+    let mut p2 = loc(2, 0.0, 0.0); p2.tags = vec![10];
+    let mut patches = HashMap::new();
+    patches.insert(1u32, p1);
+    patches.insert(2u32, p2);
+    let adds: Vec<Location> = vec![];
+
+    let idx = LocView::with_tag_index(Some(&batch), &dead, &patches, &adds, Some(&sets));
+    // Patches must override the stale index: 1 dropped, 2 added.
+    assert_eq!(resolve(&idx, &SelectionProps::Tag { tag_id: 10 }), vec![2]);
+}
+
+#[test]
+fn tag_index_in_composite() {
+    let mut a = loc(1, 0.0, 0.0); a.tags = vec![10, 20];
+    let mut b = loc(2, 0.0, 0.0); b.tags = vec![10];
+    let mut c = loc(3, 0.0, 0.0); c.tags = vec![20];
+    let (batch, sets) = tagged_batch_and_index(&[a, b, c]);
+    let dead = HashSet::new();
+    let patches = HashMap::new();
+    let adds: Vec<Location> = vec![];
+    let idx = LocView::with_tag_index(Some(&batch), &dead, &patches, &adds, Some(&sets));
+
+    let t10 = Selection { key: "t10".into(), color: [0,0,0], props: SelectionProps::Tag { tag_id: 10 }, count: None };
+    let t20 = Selection { key: "t20".into(), color: [0,0,0], props: SelectionProps::Tag { tag_id: 20 }, count: None };
+    // 10 AND 20 -> only loc 1
+    let inter = resolve(&idx, &SelectionProps::Intersection { selections: vec![t10.clone(), t20.clone()] });
+    assert_eq!(inter, vec![1]);
+    // 10 OR 20 -> all three
+    let union = resolve(&idx, &SelectionProps::Union { selections: vec![t10, t20] });
+    assert_eq!(union, vec![1, 2, 3]);
+}
+
 #[test]
 fn resolve_unpanned() {
     let dead = HashSet::new();

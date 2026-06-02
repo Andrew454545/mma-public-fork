@@ -434,6 +434,64 @@ pub(crate) fn point_in_geometry(lng: f64, lat: f64, geom: &PolygonGeometry) -> b
 
 // --- Duplicates (bitmask version) ---
 
+/// Cell-hashed spatial grid in CSR layout (Müller, "Blazing Fast Neighbor Search
+/// with Spatial Hashing"). Cells are hashed into a fixed table sized to the point
+/// count, so the structure is O(n) regardless of spatial extent — no dense world
+/// array. Build is two linear passes (count → prefix-sum → scatter); neighbor
+/// iteration walks a contiguous slice. Hash collisions are harmless: distinct cells
+/// may share a bucket, and the caller's distance test rejects any foreign points.
+struct SpatialHash {
+    table_size: usize,
+    cell_start: Vec<u32>, // len table_size + 1; CSR offsets
+    entries: Vec<u32>,    // len n; point indices grouped by bucket
+}
+
+#[inline]
+fn hash_cell(cx: i32, cy: i32, table_size: usize) -> usize {
+    let h = (cx.wrapping_mul(92_837_111)) ^ (cy.wrapping_mul(689_287_499));
+    (h.unsigned_abs() as usize) % table_size
+}
+
+impl SpatialHash {
+    /// Build from per-point integer cell coords. `table_size = max(n, 1)`.
+    fn build(cells: &[(i32, i32)]) -> Self {
+        let n = cells.len();
+        let table_size = n.max(1);
+        let mut cell_start = vec![0u32; table_size + 1];
+        for &(cx, cy) in cells {
+            cell_start[hash_cell(cx, cy, table_size)] += 1;
+        }
+        // Prefix-sum into start offsets.
+        let mut sum = 0u32;
+        for slot in cell_start.iter_mut() {
+            let c = *slot;
+            *slot = sum;
+            sum += c;
+        }
+        // Scatter point indices; cell_start[b] temporarily advances as a write cursor.
+        let mut entries = vec![0u32; n];
+        for (pi, &(cx, cy)) in cells.iter().enumerate() {
+            let b = hash_cell(cx, cy, table_size);
+            entries[cell_start[b] as usize] = pi as u32;
+            cell_start[b] += 1;
+        }
+        // Restore offsets: shift right by one (the scatter advanced each cursor to its end).
+        for b in (1..=table_size).rev() {
+            cell_start[b] = cell_start[b - 1];
+        }
+        cell_start[0] = 0;
+        SpatialHash { table_size, cell_start, entries }
+    }
+
+    /// Point indices in the bucket that `(cx, cy)` hashes to. May include points from
+    /// other cells that collide on the same bucket — caller must distance-filter.
+    #[inline]
+    fn bucket(&self, cx: i32, cy: i32) -> &[u32] {
+        let b = hash_cell(cx, cy, self.table_size);
+        &self.entries[self.cell_start[b] as usize..self.cell_start[b + 1] as usize]
+    }
+}
+
 /// Grid-accelerated spatial duplicate detection. O(N) average with uniform distribution,
 /// O(N^2) worst case if all points fall in one grid cell.
 fn find_duplicates_bitmask(view: &LocView, distance_m: f64, mask: &mut [bool]) {
@@ -457,30 +515,31 @@ fn find_duplicates_bitmask(view: &LocView, distance_m: f64, mask: &mut [bool]) {
     let n = points.len();
     if n < 2 { return; }
 
-    let mut grid: HashMap<(i32, i32), Vec<usize>> = HashMap::new();
-    for (pi, pt) in points.iter().enumerate() {
-        let cx = (pt.lng / cell_deg).floor() as i32;
-        let cy = (pt.lat / cell_deg).floor() as i32;
-        grid.entry((cx, cy)).or_default().push(pi);
-    }
+    let cells: Vec<(i32, i32)> = points.iter()
+        .map(|pt| ((pt.lng / cell_deg).floor() as i32, (pt.lat / cell_deg).floor() as i32))
+        .collect();
+    let grid = SpatialHash::build(&cells);
 
+    let thresh_m2 = distance_m * distance_m;
     let mut in_group = vec![false; n];
     for pi in 0..n {
         if in_group[pi] { continue; }
         let pt = &points[pi];
-        let cx = (pt.lng / cell_deg).floor() as i32;
-        let cy = (pt.lat / cell_deg).floor() as i32;
+        let (cx, cy) = cells[pi];
+        let cos_lat = pt.lat.to_radians().cos();
         let mut found_dup = false;
         for dx in -1..=1 {
             for dy in -1..=1 {
-                if let Some(cell) = grid.get(&(cx + dx, cy + dy)) {
-                    for &pj in cell {
-                        if pj <= pi || in_group[pj] { continue; }
-                        if haversine_m(pt.lat, pt.lng, points[pj].lat, points[pj].lng) <= distance_m {
-                            in_group[pj] = true;
-                            mask[points[pj].global_idx] = true;
-                            found_dup = true;
-                        }
+                for &pj in grid.bucket(cx + dx, cy + dy) {
+                    let pj = pj as usize;
+                    // Bucket may hold points from collided cells; the cell-coord check
+                    // keeps us to the true 3x3 neighborhood. Then the distance test.
+                    if pj <= pi || in_group[pj] { continue; }
+                    if cells[pj] != (cx + dx, cy + dy) { continue; }
+                    if equirect_m2(pt.lat, pt.lng, points[pj].lat, points[pj].lng, cos_lat) <= thresh_m2 {
+                        in_group[pj] = true;
+                        mask[points[pj].global_idx] = true;
+                        found_dup = true;
                     }
                 }
             }
@@ -525,27 +584,26 @@ pub fn find_duplicate_groups(view: &LocView, distance_m: f64) -> Vec<Vec<u32>> {
     }
     let mut parent: Vec<usize> = (0..n).collect();
 
-    let mut grid: HashMap<(i32, i32), Vec<usize>> = HashMap::new();
-    for (pi, pt) in points.iter().enumerate() {
-        let cx = (pt.lng / cell_deg).floor() as i32;
-        let cy = (pt.lat / cell_deg).floor() as i32;
-        grid.entry((cx, cy)).or_default().push(pi);
-    }
+    let cells: Vec<(i32, i32)> = points.iter()
+        .map(|pt| ((pt.lng / cell_deg).floor() as i32, (pt.lat / cell_deg).floor() as i32))
+        .collect();
+    let grid = SpatialHash::build(&cells);
 
+    let thresh_m2 = distance_m * distance_m;
     for pi in 0..n {
         let (lat, lng) = (points[pi].lat, points[pi].lng);
-        let cx = (lng / cell_deg).floor() as i32;
-        let cy = (lat / cell_deg).floor() as i32;
+        let (cx, cy) = cells[pi];
+        let cos_lat = lat.to_radians().cos();
         for dx in -1..=1 {
             for dy in -1..=1 {
-                if let Some(cell) = grid.get(&(cx + dx, cy + dy)) {
-                    for &pj in cell {
-                        if pj <= pi { continue; }
-                        if haversine_m(lat, lng, points[pj].lat, points[pj].lng) <= distance_m {
-                            let ra = find(&mut parent, pi);
-                            let rb = find(&mut parent, pj);
-                            if ra != rb { parent[ra] = rb; }
-                        }
+                for &pj in grid.bucket(cx + dx, cy + dy) {
+                    let pj = pj as usize;
+                    if pj <= pi { continue; }
+                    if cells[pj] != (cx + dx, cy + dy) { continue; }
+                    if equirect_m2(lat, lng, points[pj].lat, points[pj].lng, cos_lat) <= thresh_m2 {
+                        let ra = find(&mut parent, pi);
+                        let rb = find(&mut parent, pj);
+                        if ra != rb { parent[ra] = rb; }
                     }
                 }
             }
@@ -574,6 +632,19 @@ pub(crate) fn haversine_m(lat1: f64, lng1: f64, lat2: f64, lng2: f64) -> f64 {
     let a = (dlat / 2.0).sin().powi(2)
         + lat1.to_radians().cos() * lat2.to_radians().cos() * (dlng / 2.0).sin().powi(2);
     2.0 * r * a.sqrt().asin()
+}
+
+const EARTH_R_M: f64 = 6_371_000.0;
+
+/// Squared equirectangular distance in metres², for cheap threshold tests at small
+/// separations (no trig, no sqrt). `cos_lat` is `cos(reference latitude)`, precomputed
+/// once per query point. Error vs haversine is sub-mm under ~1km — negligible for the
+/// meter-scale radii dedup/find-nearby use. Compare against `threshold * threshold`.
+#[inline]
+pub(crate) fn equirect_m2(lat1: f64, lng1: f64, lat2: f64, lng2: f64, cos_lat: f64) -> f64 {
+    let x = (lng2 - lng1).to_radians() * cos_lat;
+    let y = (lat2 - lat1).to_radians();
+    (x * x + y * y) * EARTH_R_M * EARTH_R_M
 }
 
 // --- Filter: field-level comparison predicates ---

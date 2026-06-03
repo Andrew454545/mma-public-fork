@@ -56,17 +56,16 @@ export function cameraTypeFromHeight(height: number): CameraType {
 	}
 }
 
-function detectCameraType(data: google.maps.StreetViewResolvedPanoramaData): CameraType {
+export function detectCameraType(data: google.maps.StreetViewResolvedPanoramaData): CameraType {
 	const base = cameraTypeFromHeight(data.tiles.worldSize.height);
 	if (base !== "gen2") return base;
-	if (data.extra?._levelId != null) return "tripod";
 	const imgDate = data.imageDate ? new Date(data.imageDate) : null;
 	if (imgDate && imgDate.getFullYear() > 2000) {
 		const cc = data.extra?.countryCode;
 		const check = cc && BADCAM_THRESHOLDS.get(cc);
 		if (check && check(imgDate, data.location.latLng.lat())) return "badcam";
 	}
-	return "gen2";
+	return data.extra?._levelId != null ? "tripod" : "gen2";
 }
 
 /* Pano ID → imageKey array for protobuf request */

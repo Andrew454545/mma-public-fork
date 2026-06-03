@@ -1,14 +1,14 @@
-import { PanoType, hasLoadAsPanoId } from "@/types";
+import { hasLoadAsPanoId } from "@/types";
 import type { Location } from "@/types";
 import { ValidationState } from "@/store/selections";
 import { fetchSvMetadata } from "./svMeta";
 import { isOfficialPano } from "./panoId";
-import { getPanoAtCoords } from "./lookup.add";
+import { getPanoAtCoords, isUnofficial } from "./lookup.add";
 import { runConcurrent } from "@/lib/util/concurrent";
 
 const GOOD_CAM_TYPES = new Set(["gen4", "gen2"]);
 
-async function validateOne(loc: Location, signal?: AbortSignal): Promise<ValidationState> {
+export async function validateOne(loc: Location, signal?: AbortSignal): Promise<ValidationState> {
 	signal?.throwIfAborted();
 
 	const n = hasLoadAsPanoId(loc);
@@ -37,7 +37,7 @@ async function validateOne(loc: Location, signal?: AbortSignal): Promise<Validat
 	r ??= i;
 
 	if (r == null) return ValidationState.NotFound;
-	if (r.extra?.panoType === PanoType.UserUploaded) return ValidationState.Unofficial;
+	if (isUnofficial(r)) return ValidationState.Unofficial;
 
 	// Badcam check (only when !n)
 	if (!n && r.extra?.cameraType === "badcam" && r.time?.length) {
@@ -55,7 +55,7 @@ async function validateOne(loc: Location, signal?: AbortSignal): Promise<Validat
 
 	// Timeline check
 	const time = r.time ?? [];
-	const o = time.filter((t) => !isOfficialPano(t.pano));
+	const o = time.filter((t) => isOfficialPano(t.pano));
 	const s = o.findIndex((t) => t.pano === loc.panoId);
 	if (s !== -1 && s !== o.length - 1) {
 		return n ? ValidationState.UpdateAvailable : ValidationState.UpdateApplied;

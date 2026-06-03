@@ -1,5 +1,5 @@
-const { registerPlugin } = window.MMA;
-import { mdiAccountGroup } from "@mdi/js";
+// const { registerPlugin } = window.MMA;
+// import { mdiAccountGroup } from "@mdi/js";
 
 // registerPlugin({
 // 	id: "collab",

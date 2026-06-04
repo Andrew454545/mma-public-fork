@@ -1,8 +1,11 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import type { Location } from "@/types";
 import { Icon } from "@/components/primitives/Icon";
 import { mdiArrowLeft } from "@mdi/js";
+import { cmd } from "@/lib/commands";
 import "./distribution.css";
+
+type Source = "coords" | "metadata";
 
 const countryNames = new Intl.DisplayNames(["en"], { type: "region" });
 
@@ -46,6 +49,9 @@ export function DistributionSidebar({ onClose }: { onClose: () => void }) {
 	const [entries, setEntries] = useState<CountryEntry[]>([]);
 	const [unknown, setUnknown] = useState(0);
 	const [total, setTotal] = useState(0);
+	const [source, setSource] = useState<Source>("coords");
+	const [metaAvailable, setMetaAvailable] = useState(false);
+	const autoDefaulted = useRef(false);
 
 	const refresh = useCallback(async () => {
 		const map = MMA.getCurrentMap();
@@ -53,10 +59,35 @@ export function DistributionSidebar({ onClose }: { onClose: () => void }) {
 		const { fetchAllLocations } = await import("@/store/useMapStore");
 		const locs = await fetchAllLocations();
 		setTotal(locs.length);
-		const dist = computeDistribution(locs);
-		setEntries(dist.entries);
-		setUnknown(dist.unknown);
-	}, []);
+
+		const meta = computeDistribution(locs);
+		const hasMeta = locs.length > 0 && meta.unknown < locs.length;
+		setMetaAvailable(hasMeta);
+
+		// One-time: prefer enriched metadata when it's actually present, else stay on
+		// coordinates (offline geocoder) so the view works with zero enrichment.
+		let active = source;
+		if (!autoDefaulted.current) {
+			autoDefaulted.current = true;
+			if (hasMeta) {
+				active = "metadata";
+				setSource("metadata");
+			}
+		}
+
+		if (active === "metadata") {
+			setEntries(meta.entries);
+			setUnknown(meta.unknown);
+		} else {
+			const counts = await cmd.storeCountryDistribution();
+			setEntries(
+				counts
+					.map(([code, count]) => ({ code, name: getCountryName(code), count }))
+					.sort((a, b) => b.count - a.count),
+			);
+			setUnknown(0);
+		}
+	}, [source]);
 
 	useEffect(() => {
 		refresh();
@@ -82,6 +113,24 @@ export function DistributionSidebar({ onClose }: { onClose: () => void }) {
 			</header>
 
 			<div className="distribution-sidebar__body">
+				<div className="distribution-sidebar__source" role="tablist">
+					<button
+						type="button"
+						className={`distribution-sidebar__source-btn${source === "coords" ? " is-active" : ""}`}
+						onClick={() => setSource("coords")}
+					>
+						Coordinates
+					</button>
+					<button
+						type="button"
+						className={`distribution-sidebar__source-btn${source === "metadata" ? " is-active" : ""}`}
+						onClick={() => setSource("metadata")}
+						disabled={!metaAvailable}
+						title={metaAvailable ? undefined : "Enrich metadata fields to enable"}
+					>
+						Metadata
+					</button>
+				</div>
 				<div className="distribution-sidebar__summary">
 					{total} location{total !== 1 ? "s" : ""} across {entries.length} countr
 					{entries.length !== 1 ? "ies" : "y"}

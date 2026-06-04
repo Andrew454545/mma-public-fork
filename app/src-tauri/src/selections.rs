@@ -99,6 +99,14 @@ pub struct LocView<'a> {
     tag_sets: Option<&'a HashMap<u32, RoaringBitmap>>,
 }
 
+/// One alive location yielded by [`LocView::for_each`]: either a base-batch row
+/// (read its columns via `lat_raw`/`lng_raw`/`loc_at` at the index) or an effective
+/// `Location` -- an overlay patch or add.
+pub enum Row<'a> {
+    Base(usize),
+    Loc(&'a Location),
+}
+
 impl<'a> LocView<'a> {
     pub fn new(
         batch: Option<&'a RecordBatch>,
@@ -134,11 +142,6 @@ impl<'a> LocView<'a> {
         Self { batch, dead, patches, adds, ids, lats, lngs, headings, pitches, zooms, flags, tags, extras, created_ats, modified_ats, batch_rows, has_dead, has_patches, tag_sets }
     }
 
-    /// Total logical row count (batch rows + overlay adds).
-    pub fn len(&self) -> usize {
-        self.batch_rows + self.adds.len()
-    }
-
     /// Number of rows in the Arrow batch (before overlay).
     pub fn batch_rows(&self) -> usize { self.batch_rows }
     /// Overlay add locations (appended after batch rows in logical order).
@@ -166,6 +169,33 @@ impl<'a> LocView<'a> {
             if let Some(p) = self.patches.get(&self.batch_id(i)) { return p.id; }
         }
         self.batch_id(i)
+    }
+
+    /// Read the raw lat/lng column value at batch row `i` (no overlay check).
+    #[inline] pub fn lat_raw(&self, i: usize) -> f64 { self.lats.unwrap().value(i) }
+    #[inline] pub fn lng_raw(&self, i: usize) -> f64 { self.lngs.unwrap().value(i) }
+
+    /// Materialize batch row `i` into a full `Location`. Callers reach this only via
+    /// `Row::Base`, which already excludes dead and patched rows.
+    pub fn loc_at(&self, i: usize) -> Location {
+        crate::arrow_bridge::row_to_location(self.batch.unwrap(), i)
+    }
+
+    /// Visit every alive location once, overlay applied: dead rows skipped, patched
+    /// rows surfaced as `Row::Loc`, then the overlay adds. The patch is resolved a
+    /// single time per row. Serial; `f` may accumulate.
+    #[inline]
+    pub fn for_each(&self, mut f: impl FnMut(Row)) {
+        for i in 0..self.batch_rows {
+            if !self.is_alive(i) { continue; }
+            match self.patch_at(i) {
+                Some(p) => f(Row::Loc(p)),
+                None => f(Row::Base(i)),
+            }
+        }
+        for loc in self.adds {
+            f(Row::Loc(loc));
+        }
     }
 
     /// Build a bool mask over all locations (batch + adds) using per-row predicates.

@@ -632,13 +632,13 @@ export type SelectionProps = {
 	value2: any | null;
 };
 /**
- *  Selection bitmask sync payload. `patch_file` points to a temp binary that JS reads
- *  via `mma-buf://` to update the selection overlay colors. `counts` gives per-selection
- *  match counts for sidebar display.
+ *  Selection bitmask sync payload. `bitmask` carries the packed per-cell bitmask bytes
+ *  inline in the IPC response (no shared temp file → no clobber race under concurrent
+ *  mutations). `None` when nothing changed. `counts` gives per-selection match counts.
  */
 export type SelectionSync = {
 	counts: number[];
-	patchFile: string | null;
+	bitmask: number[] | null;
 	selectedCount: number;
 };
 /**
@@ -667,7 +667,7 @@ export type SummaryResult = {
 /**  Result of `store_sync_selections`: per-selection counts and the bitmask patch file path. */
 export type SyncSelectionsResult = {
 	counts: number[];
-	patchFile: string | null;
+	bitmask: number[] | null;
 	selectedCount: number;
 };
 /**
@@ -742,6 +742,10 @@ export interface CommitDiffPreview {
 	added: Float32Array;
 	removed: Float32Array;
 	modified: Float32Array;
+}
+export interface PruneResult {
+	session: ReviewSession | null;
+	cursorMoved: boolean;
 }
 declare function preloadModules(ids: string[]): Promise<void>;
 declare function getAvailableExternals(): string[];
@@ -1144,6 +1148,7 @@ export interface EditorEventMap {
 		id: number;
 	};
 	"selection:change": Selection$1[];
+	"active:change": number | null;
 	"map:open": MapData;
 	"map:close": void;
 }
@@ -1199,15 +1204,51 @@ export type SavedSelectionProps = {
 	type: "Invert";
 	selections: SavedSelectionProps[];
 };
-export type MovementMode = "moving" | "no-move" | "nmpz";
-export type ExactDateFormat = "date" | "datetime";
-export type DateTimezone = "location" | "utc";
-export type SeenResolution = "low" | "medium" | "high";
-export type MapListField = "locationCount" | "lastOpened" | "created";
-export type GeocodeProvider = "local" | "nominatim";
-export type TagViewMode = "flat" | "tree";
-export type BorderDetail = "light" | "medium" | "heavy";
-export interface AppSettings {
+declare const MOVEMENT_MODES: {
+	readonly moving: "Moving";
+	readonly "no-move": "No Move";
+	readonly nmpz: "NMPZ";
+};
+declare const SEEN_RESOLUTIONS: {
+	readonly low: "Low (160x90)";
+	readonly medium: "Medium (320x180)";
+	readonly high: "High (640x360)";
+};
+declare const EXACT_DATE_FORMATS: {
+	readonly date: "Date only";
+	readonly datetime: "Date + time";
+};
+declare const DATE_TIMEZONES: {
+	readonly location: "Location timezone";
+	readonly utc: "UTC";
+};
+declare const MAP_LIST_FIELDS: {
+	readonly locationCount: "Location count";
+	readonly lastOpened: "Last opened";
+	readonly created: "Date created";
+};
+declare const GEOCODE_PROVIDERS: {
+	readonly local: "Local (offline)";
+	readonly nominatim: "Nominatim (online)";
+};
+declare const TAG_VIEW_MODES: {
+	readonly flat: "Flat";
+	readonly tree: "Tree";
+};
+declare const BORDER_DETAILS: {
+	readonly light: "Standard (bundled)";
+	readonly medium: "High (~10MB)";
+	readonly heavy: "Ultra (~46MB)";
+};
+export type MovementMode = keyof typeof MOVEMENT_MODES;
+export type ExactDateFormat = keyof typeof EXACT_DATE_FORMATS;
+export type DateTimezone = keyof typeof DATE_TIMEZONES;
+export type SeenResolution = keyof typeof SEEN_RESOLUTIONS;
+export type MapListField = keyof typeof MAP_LIST_FIELDS;
+export type GeocodeProvider = keyof typeof GEOCODE_PROVIDERS;
+export type TagViewMode = keyof typeof TAG_VIEW_MODES;
+export type BorderDetail = keyof typeof BORDER_DETAILS;
+declare const DEFAULTS: {
 	showCameraBadges: boolean;
 	showLinksControl: boolean;
 	clickToGo: boolean;
@@ -1244,11 +1285,12 @@ export interface AppSettings {
 	mapListFields: MapListField[];
 	geocodeProvider: GeocodeProvider;
 	nominatimApiKey: string;
-	tagViewMode: TagViewMode;
 	panToImported: boolean;
+	tagViewMode: TagViewMode;
 	borderDetail: BorderDetail;
 	savedSelections: SavedSelection[];
-}
+};
+export type AppSettings = typeof DEFAULTS;
 declare function setSetting<K extends keyof AppSettings>(key: K, value: AppSettings[K]): void;
 declare function getSeenEntries(limit?: number, offset?: number, filter?: SeenFilter): Promise<SeenEntry[]>;
 declare function getSeenCount(filter?: SeenFilter): Promise<number>;
@@ -1343,6 +1385,10 @@ declare const mma: {
 		} | null>;
 		storeGetLocationsByIds: (ids: number[]) => Promise<Location_Serialize[]>;
 		storeGetAllLocations: () => Promise<string>;
+		storeCountryDistribution: () => Promise<[
+			string,
+			number
+		][]>;
 		storeLocationCount: () => Promise<number>;
 		storeBounds: () => Promise<[
 			number,
@@ -1481,8 +1527,8 @@ declare const mma: {
 		mapListFields: MapListField[];
 		geocodeProvider: GeocodeProvider;
 		nominatimApiKey: string;
-		tagViewMode: TagViewMode;
 		panToImported: boolean;
+		tagViewMode: TagViewMode;
 		borderDetail: BorderDetail;
 		savedSelections: SavedSelection[];
 	};
@@ -1496,6 +1542,25 @@ declare const mma: {
 	validateLocations: typeof validateLocations;
 	needsEnrichment: (loc: Pick<Location$1, "extra">) => boolean;
 	mmaBufUrl: typeof mmaBufUrl;
+	pruneSession(s: ReviewSession, removed: Set<number>): PruneResult;
+	advance(s: ReviewSession): {
+		session: ReviewSession;
+		done: boolean;
+	};
+	retreat(s: ReviewSession): ReviewSession | null;
+	reviewIndex(s: ReviewSession): number;
+	isAtStart(s: ReviewSession): boolean;
+	isCurrentReviewed(s: ReviewSession): boolean;
+	useReviewSession(): ReviewSession | null;
+	getReviewSession(): ReviewSession | null;
+	beginReview(ids: number[], source?: Selection$1): Promise<void>;
+	resumeReview(s: ReviewSession): Promise<void>;
+	reviewNext(): Promise<void>;
+	reviewPrev(): Promise<void>;
+	reviewDelete(): Promise<void>;
+	cancelReview(): void;
+	deleteSession(id: string): Promise<void>;
+	listSessions(status?: "active" | "done"): Promise<ReviewSession[]>;
 	invalidateMapList(): Promise<void>;
 	getTagCounts(): Record<number, number>;
 	refreshAfterMutation(): void;

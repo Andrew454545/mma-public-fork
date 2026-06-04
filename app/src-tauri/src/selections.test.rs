@@ -19,6 +19,35 @@ fn make_view<'a>(
     LocView::new(batch, dead, patches, adds)
 }
 
+// for_each must visit every alive location exactly once, overlay applied: dead rows
+// skipped, patched rows surfaced with the patch's coordinates, then the overlay adds.
+#[test]
+fn for_each_visits_alive_overlay_applied() {
+    let base = vec![loc(1, 1.0, 1.0), loc(2, 2.0, 2.0), loc(3, 3.0, 3.0)];
+    let batch = locations_to_batch(&base);
+
+    let mut dead = HashSet::new();
+    dead.insert(2); // removed
+
+    let mut patches = HashMap::new();
+    patches.insert(3, loc(3, 30.0, 30.0)); // moved
+
+    let adds = vec![loc(4, 4.0, 4.0)];
+    let view = make_view(Some(&batch), &dead, &patches, &adds);
+
+    let mut seen: Vec<(u32, f64, f64)> = Vec::new();
+    view.for_each(|row| {
+        let (id, lat, lng) = match row {
+            Row::Base(i) => (view.id_at(i), view.lat_raw(i), view.lng_raw(i)),
+            Row::Loc(l) => (l.id, l.lat, l.lng),
+        };
+        seen.push((id, lat, lng));
+    });
+
+    // id 1 from base, id 2 skipped (dead), id 3 with patched coords, id 4 the add.
+    assert_eq!(seen, vec![(1, 1.0, 1.0), (3, 30.0, 30.0), (4, 4.0, 4.0)]);
+}
+
 // -----------------------------------------------------------------------
 // Geometry: point_in_ring / point_in_polygon
 // -----------------------------------------------------------------------

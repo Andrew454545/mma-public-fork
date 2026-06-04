@@ -542,10 +542,9 @@ function syncMutationResult(r: MutationResult) {
 	}
 }
 
-/** Parse a binary bitmask file from Rust and emit to selBitmaskBus. */
-async function emitBitmaskFile(patchFile: string) {
-	const resp = await fetch(mmaBufUrl(patchFile));
-	const buf = await resp.arrayBuffer();
+/** Decode the inline bitmask bytes from Rust and emit to selBitmaskBus. */
+function emitBitmask(bytes: number[]) {
+	const buf = new Uint8Array(bytes).buffer;
 	const dv = new DataView(buf);
 	let off = 0;
 	const numSels = dv.getUint8(off);
@@ -576,13 +575,13 @@ async function emitBitmaskFile(patchFile: string) {
 	});
 }
 
-async function applySelectionSync(sync: {
+function applySelectionSync(sync: {
 	counts: number[];
-	patchFile: string | null;
+	bitmask: number[] | null;
 	selectedCount: number;
 }) {
 	assignCounts(sync.counts);
-	if (sync.patchFile) await emitBitmaskFile(sync.patchFile);
+	if (sync.bitmask) emitBitmask(sync.bitmask);
 
 	mapVersion++;
 	notify();
@@ -814,7 +813,7 @@ async function applySelectionUpdate(updater: (sels: Selection[]) => Selection[])
 	}
 	t.step("ipc");
 	assignCounts(result.counts);
-	if (result.patchFile) await emitBitmaskFile(result.patchFile);
+	if (result.bitmask) emitBitmask(result.bitmask);
 	t.step("apply");
 	t.end({ selected: result.selectedCount });
 

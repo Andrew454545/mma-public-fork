@@ -149,6 +149,13 @@ export const commands = {
 	 *  Used by export and plugins that need the full dataset.
 	 */
 	storeGetAllLocations: () => typedError<string, string>(__TAURI_INVOKE("store_get_all_locations")),
+	/**
+	 *  Count locations by country using the offline reverse geocoder -- no enrichment or
+	 *  network. Returns unsorted (ISO-A2 code, count) pairs; the caller sorts/labels.
+	 *  Scans the Arrow lat/lng columns directly (overlay-aware) rather than materializing
+	 *  `Location` structs -- only two floats per row are needed.
+	 */
+	storeCountryDistribution: () => typedError<([string, number])[], string>(__TAURI_INVOKE("store_country_distribution")),
 	/**  Return the number of alive locations (batch + adds - dead). */
 	storeLocationCount: () => typedError<number, string>(__TAURI_INVOKE("store_location_count")),
 	/**  Compute the bounding box [west, south, east, north] of all alive locations. O(N). */
@@ -1046,13 +1053,13 @@ export type SelectionInput = {
 export type SelectionProps = { type: "Locations"; locations: number[]; name: string | null } | { type: "Everything" } | { type: "Polygon"; polygon: PolygonGeometry; includeInformational: boolean } | { type: "Tag"; tagId: number } | { type: "Untagged" } | { type: "Unpanned" } | { type: "PanoIds" } | { type: "NotPanoIds" } | { type: "Manual"; locations: number[] } | { type: "Duplicates"; distance: number } | { type: "ValidationState"; locations: number[]; state: number } | { type: "Reviewed"; locations: number[]; sessionId: string; mode: string } | { type: "Intersection"; selections: Selection[] } | { type: "Union"; selections: Selection[] } | { type: "Invert"; selections: Selection[] } | { type: "Filter"; field: string; op: string; value: any; value2: any | null };
 
 /**
- *  Selection bitmask sync payload. `patch_file` points to a temp binary that JS reads
- *  via `mma-buf://` to update the selection overlay colors. `counts` gives per-selection
- *  match counts for sidebar display.
+ *  Selection bitmask sync payload. `bitmask` carries the packed per-cell bitmask bytes
+ *  inline in the IPC response (no shared temp file → no clobber race under concurrent
+ *  mutations). `None` when nothing changed. `counts` gives per-selection match counts.
  */
 export type SelectionSync = {
 	counts: number[],
-	patchFile: string | null,
+	bitmask: number[] | null,
 	selectedCount: number,
 };
 
@@ -1079,10 +1086,10 @@ export type SummaryResult = {
 	dirtyCount: number,
 };
 
-/**  Result of `store_sync_selections`: per-selection counts and the bitmask patch file path. */
+/**  Result of `store_sync_selections`: per-selection counts and the inline bitmask bytes. */
 export type SyncSelectionsResult = {
 	counts: number[],
-	patchFile: string | null,
+	bitmask: number[] | null,
 	selectedCount: number,
 };
 

@@ -1667,8 +1667,7 @@ fn partial_bitmask_only_contains_affected_cells() {
     });
 
     let sync = result.selection_sync.unwrap();
-    assert!(sync.patch_file.is_some());
-    let buf = std::fs::read(sync.patch_file.unwrap()).unwrap();
+    let buf = sync.bitmask.expect("should send bitmask");
     let cells = bitmask_cell_chars(&buf);
     assert_eq!(cells.len(), 1, "only the affected cell should be in the bitmask");
 }
@@ -1732,7 +1731,7 @@ fn removal_bitmask_includes_affected_cell() {
 
     // The bitmask should include the cell that l1 was in
     let sync = result.selection_sync.unwrap();
-    assert!(sync.patch_file.is_some(), "should send bitmask for the affected cell");
+    assert!(sync.bitmask.is_some(), "should send bitmask for the affected cell");
 }
 
 // -----------------------------------------------------------------------

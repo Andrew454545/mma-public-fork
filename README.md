@@ -27,6 +27,16 @@ cd app && npm install && cargo tauri build
 
 Requires: Rust toolchain, Node.js, npm.
 
+### Run in a browser
+Serve the app locally and open it in any browser:
+
+```bash
+cd app && npm run build
+cargo run --manifest-path src-tauri/Cargo.toml --bin mma-serve --features web-serve
+```
+
+Then open the printed `http://127.0.0.1:1430`.
+
 ## Plugins
 
 See [plugins/README.md](plugins/README.md).

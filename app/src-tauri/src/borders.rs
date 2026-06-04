@@ -457,3 +457,67 @@ pub fn border_lookup(app: tauri::AppHandle, lat: f64, lng: f64, level: String) -
 
     Ok(None)
 }
+
+/// Ensure a dataset level is loaded into the in-memory cache.
+fn ensure_loaded(app: &tauri::AppHandle, level: &str) -> Result<(), String> {
+    if cache().lock().unwrap().contains_key(level) {
+        return Ok(());
+    }
+    load_dataset(app, level)
+}
+
+/// Classify each coordinate to its containing country (ISO-A2) via point-in-polygon
+/// and tally into `(code, count)` pairs. Used by the distribution plugin -- true border
+/// containment, unlike the nearest-city reverse geocoder. Falls back to the bundled
+/// "light" dataset when the requested level isn't downloaded. Points outside every
+/// border (oceans, gaps) are dropped. Each feature's bbox is a cheap broad-phase reject
+/// before the full crossing test; the scan is parallelized over points with rayon.
+pub fn tally_countries(
+    app: &tauri::AppHandle,
+    level: &str,
+    coords: &[(f64, f64)],
+) -> Result<Vec<(String, u32)>, String> {
+    use rayon::prelude::*;
+
+    let level = if validate_border_level(level).is_ok() && ensure_loaded(app, level).is_ok() {
+        level.to_string()
+    } else {
+        ensure_loaded(app, "light")?;
+        "light".to_string()
+    };
+
+    let datasets = cache().lock().unwrap();
+    let ds = datasets.get(&level).unwrap();
+
+    let feats: Vec<([f64; 4], &BorderFeature)> = ds
+        .features
+        .iter()
+        .filter_map(|f| selections::geometry_bbox(&f.geometry).map(|bb| (bb, f)))
+        .collect();
+
+    let counts = coords
+        .par_iter()
+        .filter_map(|&(lat, lng)| {
+            for (bb, f) in &feats {
+                if lng < bb[0] || lng > bb[2] || lat < bb[1] || lat > bb[3] {
+                    continue;
+                }
+                if selections::point_in_geometry(lng, lat, &f.geometry) {
+                    return Some(f.code.clone());
+                }
+            }
+            None
+        })
+        .fold(HashMap::new, |mut m: HashMap<String, u32>, code| {
+            *m.entry(code).or_insert(0) += 1;
+            m
+        })
+        .reduce(HashMap::new, |mut a, b| {
+            for (k, v) in b {
+                *a.entry(k).or_insert(0) += v;
+            }
+            a
+        });
+
+    Ok(counts.into_iter().collect())
+}

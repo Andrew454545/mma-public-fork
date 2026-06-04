@@ -3,6 +3,7 @@ import type { Location } from "@/types";
 import { Icon } from "@/components/primitives/Icon";
 import { mdiArrowLeft } from "@mdi/js";
 import { cmd } from "@/lib/commands";
+import { getSettings } from "@/store/settings.add";
 import "./distribution.css";
 
 type Source = "coords" | "metadata";
@@ -79,7 +80,7 @@ export function DistributionSidebar({ onClose }: { onClose: () => void }) {
 			setEntries(meta.entries);
 			setUnknown(meta.unknown);
 		} else {
-			const counts = await cmd.storeCountryDistribution();
+			const counts = await cmd.storeCountryDistribution(getSettings().borderDetail);
 			setEntries(
 				counts
 					.map(([code, count]) => ({ code, name: getCountryName(code), count }))

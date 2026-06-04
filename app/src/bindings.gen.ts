@@ -150,12 +150,12 @@ export const commands = {
 	 */
 	storeGetAllLocations: () => typedError<string, string>(__TAURI_INVOKE("store_get_all_locations")),
 	/**
-	 *  Count locations by country using the offline reverse geocoder -- no enrichment or
-	 *  network. Returns unsorted (ISO-A2 code, count) pairs; the caller sorts/labels.
-	 *  Scans the Arrow lat/lng columns directly (overlay-aware) rather than materializing
-	 *  `Location` structs -- only two floats per row are needed.
+	 *  Count locations by country via point-in-polygon against the border dataset (no
+	 *  network). `level` selects the border precision ("light"/"medium"/"heavy"), falling
+	 *  back to bundled "light" if unavailable. Returns unsorted (ISO-A2 code, count) pairs.
+	 *  Coords are gathered under the store lock, then classified after it's released.
 	 */
-	storeCountryDistribution: () => typedError<([string, number])[], string>(__TAURI_INVOKE("store_country_distribution")),
+	storeCountryDistribution: (level: string) => typedError<([string, number])[], string>(__TAURI_INVOKE("store_country_distribution", { level })),
 	/**  Return the number of alive locations (batch + adds - dead). */
 	storeLocationCount: () => typedError<number, string>(__TAURI_INVOKE("store_location_count")),
 	/**  Compute the bounding box [west, south, east, north] of all alive locations. O(N). */

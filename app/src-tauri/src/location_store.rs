@@ -1740,28 +1740,31 @@ pub fn store_get_all_locations(
     })
 }
 
-/// Count locations by country using the offline reverse geocoder -- no enrichment or
-/// network. Returns unsorted (ISO-A2 code, count) pairs; the caller sorts/labels.
-/// Scans the Arrow lat/lng columns directly (overlay-aware) rather than materializing
-/// `Location` structs -- only two floats per row are needed.
+/// Count locations by country via point-in-polygon against the border dataset (no
+/// network). `level` selects the border precision ("light"/"medium"/"heavy"), falling
+/// back to bundled "light" if unavailable. Returns unsorted (ISO-A2 code, count) pairs.
+/// Coords are gathered under the store lock, then classified after it's released.
 #[tauri::command]
 #[specta::specta]
 pub fn store_country_distribution(
+    app: tauri::AppHandle,
     webview: tauri::Webview,
     state: tauri::State<'_, StoreState>,
+    level: String,
 ) -> Result<Vec<(String, u32)>, String> {
-    with_store!(webview, state, |store| {
+    let coords: Vec<(f64, f64)> = with_store!(webview, state, |store| {
         let view = store.loc_view();
-        let mut counts: HashMap<String, u32> = HashMap::new();
+        let mut v = Vec::with_capacity(store.alive_count);
         view.for_each(|row| {
             let (lat, lng) = match row {
                 selections::Row::Base(i) => (view.lat_raw(i), view.lng_raw(i)),
                 selections::Row::Loc(l) => (l.lat, l.lng),
             };
-            *counts.entry(crate::geocoder::country_code_at(lat, lng)).or_insert(0) += 1;
+            v.push((lat, lng));
         });
-        Ok(counts.into_iter().collect())
-    })
+        v
+    });
+    crate::borders::tally_countries(&app, &level, &coords)
 }
 
 /// Msgpack-serialized overlay state written to the `.delta` file on autosave.

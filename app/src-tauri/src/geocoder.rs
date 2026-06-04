@@ -49,9 +49,3 @@ pub fn reverse_geocode(lat: f64, lng: f64) -> Option<GeoResult> {
     let result = gc.search((lat, lng));
     Some(GeoResult::from(&result))
 }
-
-/// ISO 3166-1 alpha-2 country code for a coordinate. Reuses the shared geocoder
-/// singleton; intended for batch classification where the full `GeoResult` is overkill.
-pub fn country_code_at(lat: f64, lng: f64) -> String {
-    get_geocoder().search((lat, lng)).record.cc.to_string()
-}

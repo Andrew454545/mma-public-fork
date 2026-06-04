@@ -254,47 +254,28 @@ trait RowAccessor {
     fn resolve_field(&self, field: &str) -> Option<serde_json::Value>;
 }
 
-/// A single Arrow batch row. Every read prefers the overlay patch (when this row
-/// is patched) over the base column, matching the store's effective view.
+/// A single base Arrow batch row -- reads columns directly, no overlay check.
+/// [`test_batch_row`] resolves the patch once and routes patched rows through the
+/// `Location` accessor instead, so this type is only ever used for unpatched rows.
 struct BatchRow<'a, 'v> {
     view: &'a LocView<'v>,
     i: usize,
 }
 
 impl RowAccessor for BatchRow<'_, '_> {
-    fn id(&self) -> u32 { self.view.id_at(self.i) }
-    fn lat(&self) -> f64 {
-        match self.view.patch_at(self.i) { Some(p) => p.lat, None => self.view.lats.unwrap().value(self.i) }
-    }
-    fn lng(&self) -> f64 {
-        match self.view.patch_at(self.i) { Some(p) => p.lng, None => self.view.lngs.unwrap().value(self.i) }
-    }
-    fn heading(&self) -> f64 {
-        match self.view.patch_at(self.i) { Some(p) => p.heading, None => self.view.headings.unwrap().value(self.i) }
-    }
-    fn flags(&self) -> u32 {
-        match self.view.patch_at(self.i) { Some(p) => p.flags, None => self.view.flags.unwrap().value(self.i) }
-    }
+    fn id(&self) -> u32 { self.view.batch_id(self.i) }
+    fn lat(&self) -> f64 { self.view.lats.unwrap().value(self.i) }
+    fn lng(&self) -> f64 { self.view.lngs.unwrap().value(self.i) }
+    fn heading(&self) -> f64 { self.view.headings.unwrap().value(self.i) }
+    fn flags(&self) -> u32 { self.view.flags.unwrap().value(self.i) }
     fn has_tag(&self, tag_id: u32) -> bool {
-        if let Some(p) = self.view.patch_at(self.i) {
-            p.tags.contains(&tag_id)
-        } else {
-            let list = self.view.tags.unwrap().value(self.i);
-            let ids = list.as_any().downcast_ref::<UInt32Array>().unwrap();
-            (0..ids.len()).any(|k| ids.value(k) == tag_id)
-        }
+        let list = self.view.tags.unwrap().value(self.i);
+        let ids = list.as_any().downcast_ref::<UInt32Array>().unwrap();
+        (0..ids.len()).any(|k| ids.value(k) == tag_id)
     }
-    fn tags_empty(&self) -> bool {
-        match self.view.patch_at(self.i) {
-            Some(p) => p.tags.is_empty(),
-            None => self.view.tags.unwrap().value(self.i).is_empty(),
-        }
-    }
+    fn tags_empty(&self) -> bool { self.view.tags.unwrap().value(self.i).is_empty() }
     fn resolve_field(&self, field: &str) -> Option<serde_json::Value> {
-        match self.view.patch_at(self.i) {
-            Some(p) => resolve_field_loc(p, field),
-            None => resolve_field_arrow(self.view, self.i, field),
-        }
+        resolve_field_arrow(self.view, self.i, field)
     }
 }
 
@@ -335,10 +316,12 @@ fn test_row<R: RowAccessor>(r: &R, props: &SelectionProps) -> bool {
     }
 }
 
-/// Per-row predicate for batch rows. Thread-safe (reads only shared Arrow columns
-/// and immutable overlay refs).
+/// Per-row predicate for batch rows. Thread-safe (reads only shared Arrow columns and immutable overlay refs).
 fn test_batch_row(view: &LocView, i: usize, props: &SelectionProps) -> bool {
-    test_row(&BatchRow { view, i }, props)
+    match view.patch_at(i) {
+        Some(p) => test_row(p, props),
+        None => test_row(&BatchRow { view, i }, props),
+    }
 }
 
 /// Per-row predicate for overlay add locations.

@@ -17,10 +17,10 @@ use rayon::prelude::*;
 use tauri::Manager;
 
 use crate::arrow_bridge;
-use crate::arrow_bridge::{col_id, col_lat, col_lng, col_heading, col_flags, col_tags, col_extra};
+use crate::arrow_bridge::{col_id, col_lat, col_lng, col_heading, col_tags, col_extra};
 use crate::fast_io;
 use crate::map_meta;
-use crate::types::{Location, Tag};
+use crate::types::{Location, Tag, LocationFlags};
 use crate::util;
 use crate::selections::{self, SelectionProps, Selection};
 
@@ -856,7 +856,7 @@ impl Store {
         if let Some(v) = patch.pitch { loc.pitch = v; }
         if let Some(v) = patch.zoom { loc.zoom = v; }
         if let Some(ref v) = patch.pano_id { loc.pano_id = v.clone(); }
-        if let Some(v) = patch.flags { loc.flags = v; }
+        if let Some(v) = patch.flags { loc.flags = LocationFlags::from_bits_retain(v); }
         if let Some(ref v) = patch.tags { loc.tags = v.clone(); }
         if let Some(ref v) = patch.extra { loc.extra = v.clone(); }
         if let Some(ref v) = patch.created_at { loc.created_at = v.clone(); }

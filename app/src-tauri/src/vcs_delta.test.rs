@@ -10,7 +10,7 @@ fn loc(id: u32, lat: f64, lng: f64) -> Location {
         pitch: 0.0,
         zoom: 1.0,
         pano_id: None,
-        flags: 0,
+        flags: crate::types::LocationFlags::empty(),
         tags: vec![],
         extra: None,
         created_at: "2024-01-01T00:00:00Z".into(),

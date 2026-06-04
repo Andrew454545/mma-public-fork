@@ -19,7 +19,7 @@ fn make_parsed(tags: Vec<Tag>, locations: Vec<Location>) -> ParsedMap {
 fn loc_with_tags(id: u32, tags: Vec<u32>) -> Location {
     Location {
         id, lat: 0.0, lng: 0.0, heading: 0.0, pitch: 0.0, zoom: 1.0,
-        pano_id: None, flags: 0, tags, extra: None,
+        pano_id: None, flags: crate::types::LocationFlags::empty(), tags, extra: None,
         created_at: String::new(), modified_at: None,
     }
 }

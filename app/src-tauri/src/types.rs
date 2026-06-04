@@ -51,8 +51,8 @@ pub struct Location {
     /// Street View zoom level (0-5), not map zoom.
     pub zoom: f64,
     pub pano_id: Option<String>,
-    /// Bitfield: see [`LOAD_AS_PANO_ID`] and [`INFORMATIONAL`].
-    pub flags: u32,
+    /// See [`LocationFlags`].
+    pub flags: LocationFlags,
     /// Tag IDs applied to this location. References `Tag.id`.
     pub tags: Vec<u32>,
     /// Arbitrary key-value metadata
@@ -65,9 +65,33 @@ pub struct Location {
     pub modified_at: Option<String>,
 }
 
-// TODO: consider bitflags! crate so these compose into a typed LocationFlags instead of raw u32
-pub const LOAD_AS_PANO_ID: u32 = 1;
-pub const INFORMATIONAL: u32 = 2;
+bitflags::bitflags! {
+    /// Per-location bitfield. Serializes as a plain `u32` over IPC and Arrow so the
+    /// JS side (which models the bits with its own `LocationFlag` enum) is unaffected.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+    pub struct LocationFlags: u32 {
+        const LOAD_AS_PANO_ID = 1;
+        const INFORMATIONAL = 2;
+    }
+}
+
+impl serde::Serialize for LocationFlags {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_u32(self.bits())
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for LocationFlags {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        Ok(Self::from_bits_retain(<u32 as serde::Deserialize>::deserialize(d)?))
+    }
+}
+
+impl specta::Type for LocationFlags {
+    fn definition(types: &mut specta::Types) -> specta::datatype::DataType {
+        <u32 as specta::Type>::definition(types)
+    }
+}
 
 /// Error type for every fallible backend operation and Tauri command.
 #[derive(Debug, Clone)]

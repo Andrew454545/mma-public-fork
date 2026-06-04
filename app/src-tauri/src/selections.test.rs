@@ -5,7 +5,7 @@ use crate::arrow_bridge::locations_to_batch;
 fn loc(id: u32, lat: f64, lng: f64) -> Location {
     Location {
         id, lat, lng, heading: 0.0, pitch: 0.0, zoom: 1.0,
-        pano_id: None, flags: 0, tags: vec![], extra: None,
+        pano_id: None, flags: crate::types::LocationFlags::empty(), tags: vec![], extra: None,
         created_at: String::new(), modified_at: None,
     }
 }
@@ -497,7 +497,7 @@ fn resolve_panoids() {
     let dead = HashSet::new();
     let patches = HashMap::new();
     let mut l1 = loc(1, 0.0, 0.0);
-    l1.flags = LOAD_AS_PANO_ID;
+    l1.flags = crate::types::LocationFlags::LOAD_AS_PANO_ID;
     let l2 = loc(2, 0.0, 0.0);
     let adds = vec![l1, l2];
     let view = make_view(None, &dead, &patches, &adds);
@@ -548,11 +548,11 @@ fn resolve_intersection() {
     let patches = HashMap::new();
     let mut l1 = loc(1, 0.0, 0.0);
     l1.tags = vec![10];
-    l1.flags = LOAD_AS_PANO_ID;
+    l1.flags = crate::types::LocationFlags::LOAD_AS_PANO_ID;
     let mut l2 = loc(2, 0.0, 0.0);
     l2.tags = vec![10];
     let mut l3 = loc(3, 0.0, 0.0);
-    l3.flags = LOAD_AS_PANO_ID;
+    l3.flags = crate::types::LocationFlags::LOAD_AS_PANO_ID;
     let adds = vec![l1, l2, l3];
     let view = make_view(None, &dead, &patches, &adds);
     let props = SelectionProps::Intersection {
@@ -572,7 +572,7 @@ fn resolve_union() {
     let mut l1 = loc(1, 0.0, 0.0);
     l1.tags = vec![10];
     let mut l2 = loc(2, 0.0, 0.0);
-    l2.flags = LOAD_AS_PANO_ID;
+    l2.flags = crate::types::LocationFlags::LOAD_AS_PANO_ID;
     let l3 = loc(3, 0.0, 0.0);
     let adds = vec![l1, l2, l3];
     let view = make_view(None, &dead, &patches, &adds);
@@ -593,7 +593,7 @@ fn resolve_invert() {
     let dead = HashSet::new();
     let patches = HashMap::new();
     let mut l1 = loc(1, 0.0, 0.0);
-    l1.flags = LOAD_AS_PANO_ID;
+    l1.flags = crate::types::LocationFlags::LOAD_AS_PANO_ID;
     let l2 = loc(2, 0.0, 0.0);
     let l3 = loc(3, 0.0, 0.0);
     let adds = vec![l1, l2, l3];

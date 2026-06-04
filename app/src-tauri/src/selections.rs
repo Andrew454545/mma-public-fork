@@ -12,7 +12,7 @@ use arrow::array::{RecordBatch, StringArray, Float64Array, UInt32Array, ListArra
 use roaring::RoaringBitmap;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
-use crate::types::{Location, LOAD_AS_PANO_ID, INFORMATIONAL};
+use crate::types::{Location, LocationFlags};
 use crate::util::{iso_to_unix, unix_to_month_day, unix_to_hour_min};
 
 /// Discriminated union of all selection types. Serialized with `{ "type": "..." }` tag
@@ -248,7 +248,7 @@ trait RowAccessor {
     fn lat(&self) -> f64;
     fn lng(&self) -> f64;
     fn heading(&self) -> f64;
-    fn flags(&self) -> u32;
+    fn flags(&self) -> LocationFlags;
     fn has_tag(&self, tag_id: u32) -> bool;
     fn tags_empty(&self) -> bool;
     fn resolve_field(&self, field: &str) -> Option<serde_json::Value>;
@@ -267,7 +267,7 @@ impl RowAccessor for BatchRow<'_, '_> {
     fn lat(&self) -> f64 { self.view.lats.unwrap().value(self.i) }
     fn lng(&self) -> f64 { self.view.lngs.unwrap().value(self.i) }
     fn heading(&self) -> f64 { self.view.headings.unwrap().value(self.i) }
-    fn flags(&self) -> u32 { self.view.flags.unwrap().value(self.i) }
+    fn flags(&self) -> LocationFlags { LocationFlags::from_bits_retain(self.view.flags.unwrap().value(self.i)) }
     fn has_tag(&self, tag_id: u32) -> bool {
         let list = self.view.tags.unwrap().value(self.i);
         let ids = list.as_any().downcast_ref::<UInt32Array>().unwrap();
@@ -284,7 +284,7 @@ impl RowAccessor for Location {
     fn lat(&self) -> f64 { self.lat }
     fn lng(&self) -> f64 { self.lng }
     fn heading(&self) -> f64 { self.heading }
-    fn flags(&self) -> u32 { self.flags }
+    fn flags(&self) -> LocationFlags { self.flags }
     fn has_tag(&self, tag_id: u32) -> bool { self.tags.contains(&tag_id) }
     fn tags_empty(&self) -> bool { self.tags.is_empty() }
     fn resolve_field(&self, field: &str) -> Option<serde_json::Value> { resolve_field_loc(self, field) }
@@ -302,10 +302,10 @@ fn test_row<R: RowAccessor>(r: &R, props: &SelectionProps) -> bool {
         SelectionProps::Tag { tag_id } => r.has_tag(*tag_id),
         SelectionProps::Untagged => r.tags_empty(),
         SelectionProps::Unpanned => r.heading() == 0.0,
-        SelectionProps::PanoIds => r.flags() & LOAD_AS_PANO_ID != 0,
-        SelectionProps::NotPanoIds => r.flags() & LOAD_AS_PANO_ID == 0,
+        SelectionProps::PanoIds => r.flags().contains(LocationFlags::LOAD_AS_PANO_ID),
+        SelectionProps::NotPanoIds => !r.flags().contains(LocationFlags::LOAD_AS_PANO_ID),
         SelectionProps::Polygon { polygon, include_informational } => {
-            if !include_informational && (r.flags() & INFORMATIONAL != 0) { return false; }
+            if !include_informational && r.flags().contains(LocationFlags::INFORMATIONAL) { return false; }
             point_in_geometry(r.lng(), r.lat(), polygon)
         }
         SelectionProps::Filter { field, op, value, value2 } => match r.resolve_field(field) {
@@ -444,17 +444,17 @@ fn resolve_leaf_mask(view: &LocView, props: &SelectionProps) -> Vec<bool> {
                 Some(bb) => view.resolve_mask(
                     |i| {
                         if let Some(p) = view.patch_at(i) {
-                            if !inc && (p.flags & INFORMATIONAL != 0) { return false; }
+                            if !inc && p.flags.contains(LocationFlags::INFORMATIONAL) { return false; }
                             in_bbox(p.lng, p.lat, &bb) && point_in_geometry(p.lng, p.lat, polygon)
                         } else {
-                            if !inc && (view.flags.unwrap().value(i) & INFORMATIONAL != 0) { return false; }
+                            if !inc && (view.flags.unwrap().value(i) & LocationFlags::INFORMATIONAL.bits() != 0) { return false; }
                             let lng = view.lngs.unwrap().value(i);
                             let lat = view.lats.unwrap().value(i);
                             in_bbox(lng, lat, &bb) && point_in_geometry(lng, lat, polygon)
                         }
                     },
                     |_, loc| {
-                        if !inc && (loc.flags & INFORMATIONAL != 0) { return false; }
+                        if !inc && loc.flags.contains(LocationFlags::INFORMATIONAL) { return false; }
                         in_bbox(loc.lng, loc.lat, &bb) && point_in_geometry(loc.lng, loc.lat, polygon)
                     },
                 ),

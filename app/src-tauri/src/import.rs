@@ -20,7 +20,7 @@ use tauri::Emitter;
 use crate::arrow_bridge;
 use crate::fast_io;
 use crate::location_store;
-use crate::types::{Tag, Location};
+use crate::types::{Tag, Location, LocationFlags};
 
 /// Cached result from `bulk_import_preview` so `bulk_import_confirm` can
 /// skip re-parsing. Keyed by file path to detect stale caches.
@@ -131,7 +131,7 @@ fn parse_csv(text: &str) -> ParsedMap {
             let s = record.get(i)?.trim();
             if s.is_empty() { None } else { Some(s.to_string()) }
         });
-        let flags = if pano_id.is_some() { 1u32 } else { 0u32 };
+        let flags = if pano_id.is_some() { LocationFlags::LOAD_AS_PANO_ID } else { LocationFlags::empty() };
         Some(Location {
             id: 0, lat, lng, heading, pitch, zoom, pano_id, flags,
             tags: Vec::new(), extra: None, created_at: now.clone(), modified_at: None,
@@ -484,7 +484,7 @@ fn parse_single_json_mut(buf: &mut [u8]) -> ParsedMap {
             .and_then(|e| e.as_object())
             .and_then(|e| get_str(e, &["panoId"]));
         let pano_id = top_pano.or(extra_pano);
-        let flags = if top_pano.is_some() { 1u32 } else { 0u32 };
+        let flags = if top_pano.is_some() { LocationFlags::LOAD_AS_PANO_ID } else { LocationFlags::empty() };
 
         let raw_tags: Vec<String> = obj.get("extra")
             .and_then(|e| e.get("tags"))
@@ -1066,7 +1066,7 @@ pub fn store_import_file(
             if drop_set.contains("heading") { loc.heading = 0.0; }
             if drop_set.contains("pitch") { loc.pitch = 0.0; }
             if drop_set.contains("zoom") { loc.zoom = 0.0; }
-            if drop_set.contains("panoId") { loc.pano_id = None; loc.flags &= !1; }
+            if drop_set.contains("panoId") { loc.pano_id = None; loc.flags.remove(LocationFlags::LOAD_AS_PANO_ID); }
             if drop_set.contains("tags") { loc.tags.clear(); }
             if let Some(extra) = &mut loc.extra {
                 extra.retain(|k, _| !drop_set.contains(format!("extra.{k}").as_str()));

@@ -6,7 +6,7 @@ use crate::types::{AppError, AppResult};
 use std::io::Write;
 use crate::fast_io;
 use crate::location_store::StoreState;
-use crate::types::LOAD_AS_PANO_ID;
+use crate::types::LocationFlags;
 use crate::util::hex_to_rgb;
 
 /// Configuration for JSON export. Controls which fields are included and
@@ -64,7 +64,7 @@ pub fn store_export_json(
 
         let mut coords = Vec::with_capacity(locs.len());
         for loc in &locs {
-            let pinned = loc.flags & LOAD_AS_PANO_ID != 0;
+            let pinned = loc.flags.contains(LocationFlags::LOAD_AS_PANO_ID);
             let mut c = serde_json::Map::new();
             c.insert("lat".into(), serde_json::json!(loc.lat));
             c.insert("lng".into(), serde_json::json!(loc.lng));
@@ -274,7 +274,7 @@ pub async fn store_export_bulk_zip(
                     .collect();
 
                 let coords: Vec<serde_json::Value> = locs.iter().map(|loc| {
-                    let pinned = loc.flags & LOAD_AS_PANO_ID != 0;
+                    let pinned = loc.flags.contains(LocationFlags::LOAD_AS_PANO_ID);
                     let mut c = serde_json::Map::new();
                     if let Some(ref e) = loc.extra {
                         for (k, v) in e { c.insert(k.clone(), v.clone()); }

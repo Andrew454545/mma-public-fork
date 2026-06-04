@@ -11,7 +11,7 @@ use arrow::array::{
 };
 use arrow::datatypes::{DataType, Field, Schema};
 
-use crate::types::Location;
+use crate::types::{Location, LocationFlags};
 
 /// The canonical Arrow schema for location data. Column order here determines
 /// the positional indices used by [`row_to_location`] and must stay in sync.
@@ -91,7 +91,7 @@ pub fn locations_to_batch(locs: &[Location]) -> RecordBatch {
         .iter()
         .map(|l| l.pano_id.as_deref())
         .collect();
-    let flags = UInt32Array::from(locs.iter().map(|l| l.flags).collect::<Vec<_>>());
+    let flags = UInt32Array::from(locs.iter().map(|l| l.flags.bits()).collect::<Vec<_>>());
 
     let mut tags_builder =
         GenericListBuilder::<i32, UInt32Builder>::with_capacity(UInt32Builder::new(), n);
@@ -174,7 +174,7 @@ pub fn row_to_location(batch: &RecordBatch, idx: usize) -> Location {
         pitch: col_pitch(batch).value(idx),
         zoom: col_zoom(batch).value(idx),
         pano_id,
-        flags: col_flags(batch).value(idx),
+        flags: LocationFlags::from_bits_retain(col_flags(batch).value(idx)),
         tags,
         extra,
         created_at: crate::util::unix_to_iso(col_created_at(batch).value(idx)),

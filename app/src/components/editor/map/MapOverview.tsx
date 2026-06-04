@@ -96,6 +96,96 @@ function useDragState() {
 	return activeDrag;
 }
 
+function ApplyFieldAsTagsDialog({
+	open,
+	onOpenChange,
+}: {
+	open: boolean;
+	onOpenChange: (v: boolean) => void;
+}) {
+	const [field, setField] = useState("");
+	const keys = useKnownFieldKeys();
+	const fields = useMemo(() => {
+		const entries: { key: string; label: string }[] = [];
+		for (const key of keys) {
+			const def = getFieldDef(key);
+			entries.push({ key, label: def?.label ?? key });
+		}
+		return entries;
+	}, [keys]);
+
+	const handleApply = async () => {
+		if (!field) return;
+		const { fetchLocationsByIds, createTags, addTagToLocations } = await import(
+			"@/store/useMapStore"
+		);
+		const ids = await cmd.storeResolveSelection({ type: "Everything" });
+		if (ids.length === 0) return;
+		const locs = await fetchLocationsByIds(ids);
+		const groups = new Map<string, number[]>();
+		for (const loc of locs) {
+			const v = loc.extra?.[field];
+			if (v == null || v === "") continue;
+			const key = String(v);
+			const arr = groups.get(key);
+			if (arr) arr.push(loc.id);
+			else groups.set(key, [loc.id]);
+		}
+		if (groups.size === 0) return;
+		const names = [...groups.keys()];
+		const created = await createTags(names);
+		const lowerGroups = new Map<string, number[]>();
+		for (const [k, v] of groups) lowerGroups.set(k.toLowerCase(), v);
+		for (const tag of created) {
+			const locIds = lowerGroups.get(tag.name.toLowerCase());
+			if (locIds) await addTagToLocations(tag.id, locIds);
+		}
+		onOpenChange(false);
+	};
+
+	return (
+		<Dialog
+			open={open}
+			onOpenChange={(v) => {
+				onOpenChange(v);
+				if (!v) setField("");
+			}}
+		>
+			<DialogContent title="Apply metadata as tags">
+				<form
+					onSubmit={(e) => {
+						e.preventDefault();
+						handleApply();
+					}}
+					style={{ display: "flex", flexDirection: "column", gap: "0.75rem", marginTop: 4 }}
+				>
+					<select
+						className="input"
+						value={field}
+						onChange={(e) => setField(e.target.value)}
+						autoFocus
+					>
+						<option value="">Select a field...</option>
+						{fields.map((f) => (
+							<option key={f.key} value={f.key}>
+								{f.label}
+							</option>
+						))}
+					</select>
+					<div style={{ display: "flex", justifyContent: "flex-end", gap: "0.5rem" }}>
+						<button className="button" type="button" onClick={() => onOpenChange(false)}>
+							Cancel
+						</button>
+						<button className="button button--primary" type="submit" disabled={!field}>
+							Apply
+						</button>
+					</div>
+				</form>
+			</DialogContent>
+		</Dialog>
+	);
+}
+
 function SelectionRow({
 	selection,
 	depth = 0,
@@ -1054,11 +1144,18 @@ export function MapOverview() {
 	const [showTagFindReplace, setShowTagFindReplace] = useState(false);
 	const [showMergeDuplicates, setShowMergeDuplicates] = useState(false);
 	const [showReviews, setShowReviews] = useState(false);
+	const [showApplyFieldAsTags, setShowApplyFieldAsTags] = useState(false);
 
 	useEffect(() => {
 		const handler = () => setShowTagFindReplace(true);
 		document.addEventListener("open-tag-find-replace", handler);
 		return () => document.removeEventListener("open-tag-find-replace", handler);
+	}, []);
+
+	useEffect(() => {
+		const handler = () => setShowApplyFieldAsTags(true);
+		document.addEventListener("open-apply-field-as-tags", handler);
+		return () => document.removeEventListener("open-apply-field-as-tags", handler);
 	}, []);
 
 	if (!map) return null;
@@ -1298,6 +1395,7 @@ export function MapOverview() {
 				<FilterBuilder key={map.meta.id} mapId={map.meta.id} />
 			</ToolBlock>
 			<TagFindReplaceDialog open={showTagFindReplace} onOpenChange={setShowTagFindReplace} />
+			<ApplyFieldAsTagsDialog open={showApplyFieldAsTags} onOpenChange={setShowApplyFieldAsTags} />
 			<MergeDuplicatesModal
 				open={showMergeDuplicates}
 				onOpenChange={setShowMergeDuplicates}

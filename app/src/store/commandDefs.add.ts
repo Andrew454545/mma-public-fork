@@ -16,6 +16,7 @@ import {
 	mdiHistory,
 	mdiEye,
 	mdiTagRemove,
+	mdiTagMultipleOutline,
 	mdiTrashCanOutline,
 	mdiDatabaseRemoveOutline,
 	mdiDatabaseEditOutline,
@@ -265,6 +266,15 @@ registerCommand({
 	icon: mdiFindReplace,
 	group: "Tags",
 	execute: () => document.dispatchEvent(new CustomEvent("open-tag-find-replace")),
+	enabled: () => getCurrentMap() !== null,
+});
+
+registerCommand({
+	id: "apply-field-as-tags",
+	label: "Apply metadata as tags",
+	icon: mdiTagMultipleOutline,
+	group: "Tags",
+	execute: () => document.dispatchEvent(new CustomEvent("open-apply-field-as-tags")),
 	enabled: () => getCurrentMap() !== null,
 });
 

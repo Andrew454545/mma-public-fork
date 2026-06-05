@@ -39,7 +39,7 @@ pub enum SelectionProps {
     Intersection { selections: Vec<Selection> },
     Union { selections: Vec<Selection> },
     Invert { selections: Vec<Selection> },
-    Filter { field: String, op: String, #[specta(type = specta_typescript::Any)] value: serde_json::Value, #[specta(type = Option<specta_typescript::Any>)] value2: Option<serde_json::Value> },
+    Filter { field: String, op: String, #[specta(type = specta_typescript::Any)] value: serde_json::Value, #[serde(default)] #[specta(type = Option<specta_typescript::Any>)] value2: Option<serde_json::Value> },
 }
 
 /// GeoJSON-like polygon geometry. `coordinates` is the primary polygon (outer ring +

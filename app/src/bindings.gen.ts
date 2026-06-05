@@ -288,6 +288,11 @@ export const commands = {
 	 */
 	storeExportGeojson: (scope: number[] | null, tagsJson: string) => typedError<string, string>(__TAURI_INVOKE("store_export_geojson", { scope, tagsJson })),
 	/**
+	 *  Copy a temp export file to the destination chosen via the native save dialog,
+	 *  then remove the temp source. `dest_path` comes from the frontend save dialog.
+	 */
+	storeSaveExportFile: (srcPath: string, destPath: string) => typedError<null, string>(__TAURI_INVOKE("store_save_export_file", { srcPath, destPath })),
+	/**
 	 *  Export every map in the database as a deflate-compressed ZIP of JSON files.
 	 * 
 	 *  Each map becomes one `{name}.json` file in the archive, with full location

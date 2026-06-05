@@ -221,6 +221,16 @@ pub fn store_export_geojson(
     })
 }
 
+/// Copy a temp export file to the destination chosen via the native save dialog,
+/// then remove the temp source. `dest_path` comes from the frontend save dialog.
+#[tauri::command]
+#[specta::specta]
+pub fn store_save_export_file(src_path: String, dest_path: String) -> AppResult<()> {
+    std::fs::copy(&src_path, &dest_path)?;
+    let _ = std::fs::remove_file(&src_path);
+    Ok(())
+}
+
 /// Export every map in the database as a deflate-compressed ZIP of JSON files.
 ///
 /// Each map becomes one `{name}.json` file in the archive, with full location

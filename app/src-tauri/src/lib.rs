@@ -397,6 +397,7 @@ pub fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             export::store_export_json,
             export::store_export_csv,
             export::store_export_geojson,
+            export::store_save_export_file,
             export::store_export_bulk_zip,
             // --- Version control ---
             map_meta::store_db_clear_table,

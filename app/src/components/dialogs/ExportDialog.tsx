@@ -1,4 +1,5 @@
 import { useState, useEffect, useId } from "react";
+import { save } from "@tauri-apps/plugin-dialog";
 import { Dialog, DialogContent } from "@/components/primitives/Dialog";
 import { useCurrentMap, useSelectedLocationIds } from "@/store/useMapStore";
 import { cmd } from "@/lib/commands";
@@ -22,16 +23,6 @@ async function fetchExportFile(path: string): Promise<string> {
 	return res.text();
 }
 
-function downloadBlob(content: string, filename: string) {
-	const blob = new Blob([content]);
-	const url = URL.createObjectURL(blob);
-	const a = document.createElement("a");
-	a.href = url;
-	a.download = filename;
-	a.click();
-	URL.revokeObjectURL(url);
-}
-
 export function ExportDialog({ onClose }: Props) {
 	const map = useCurrentMap();
 	const selectedIds = useSelectedLocationIds();
@@ -53,8 +44,8 @@ export function ExportDialog({ onClose }: Props) {
 	const baseName = fileName || map.meta.name || "export";
 	const scopeIds = scope === ExportScope.Selection ? [...selectedIds] : undefined;
 
-	const exportJson = async () => {
-		const path = await cmd.storeExportJson({
+	const jsonPath = () =>
+		cmd.storeExportJson({
 			exportZoom: saveZoom,
 			exportUnpanned: bypassUnpanned,
 			exportExtras: saveExtras,
@@ -63,13 +54,24 @@ export function ExportDialog({ onClose }: Props) {
 			tagsJson: JSON.stringify(map.meta.tags),
 			extraFieldsJson: JSON.stringify(getAllFieldDefs()),
 		});
-		return fetchExportFile(path);
+	const csvPath = () => cmd.storeExportCsv(scopeIds ?? null);
+	const geojsonPath = () => cmd.storeExportGeojson(scopeIds ?? null, JSON.stringify(map.meta.tags));
+
+	// Prompt for a destination, then move the temp export there. False = cancelled.
+	const saveToFile = async (srcPath: string, ext: string): Promise<boolean> => {
+		const dest = await save({
+			defaultPath: `${baseName}.${ext}`,
+			filters: [{ name: ext.toUpperCase(), extensions: [ext] }],
+		});
+		if (!dest) return false;
+		await cmd.storeSaveExportFile(srcPath, dest);
+		return true;
 	};
 
-	const withFeedback = (run: () => Promise<void>, success: string) => async () => {
+	const withFeedback = (run: () => Promise<boolean | void>, success: string) => async () => {
 		try {
-			await run();
-			toast(success);
+			const ok = await run();
+			if (ok !== false) toast(success);
 		} catch (e) {
 			log.error("[export] failed:", e);
 			toast("Export failed");
@@ -77,31 +79,27 @@ export function ExportDialog({ onClose }: Props) {
 	};
 
 	const copyJson = withFeedback(
-		async () => navigator.clipboard.writeText(await exportJson()),
+		async () => navigator.clipboard.writeText(await fetchExportFile(await jsonPath())),
 		"Copied JSON to clipboard",
 	);
 	const downloadJson = withFeedback(
-		async () => downloadBlob(await exportJson(), `${baseName}.json`),
+		async () => saveToFile(await jsonPath(), "json"),
 		`Downloaded ${baseName}.json`,
 	);
 
-	const exportCsv = async () => {
-		const path = await cmd.storeExportCsv(scopeIds ?? null);
-		return fetchExportFile(path);
-	};
 	const copyCsv = withFeedback(
-		async () => navigator.clipboard.writeText(await exportCsv()),
+		async () => navigator.clipboard.writeText(await fetchExportFile(await csvPath())),
 		"Copied CSV to clipboard",
 	);
 	const downloadCsv = withFeedback(
-		async () => downloadBlob(await exportCsv(), `${baseName}.csv`),
+		async () => saveToFile(await csvPath(), "csv"),
 		`Downloaded ${baseName}.csv`,
 	);
 
-	const downloadGeoJson = withFeedback(async () => {
-		const path = await cmd.storeExportGeojson(scopeIds ?? null, JSON.stringify(map.meta.tags));
-		downloadBlob(await fetchExportFile(path), `${baseName}.geojson`);
-	}, `Downloaded ${baseName}.geojson`);
+	const downloadGeoJson = withFeedback(
+		async () => saveToFile(await geojsonPath(), "geojson"),
+		`Downloaded ${baseName}.geojson`,
+	);
 
 	return (
 		<Dialog open onOpenChange={(open) => !open && onClose()}>

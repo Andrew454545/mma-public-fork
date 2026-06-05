@@ -629,7 +629,7 @@ export type SelectionProps = {
 	field: string;
 	op: string;
 	value: any;
-	value2: any | null;
+	value2?: any | null;
 };
 /**
  *  Selection bitmask sync payload. `bitmask` carries the packed per-cell bitmask bytes
@@ -1440,6 +1440,7 @@ declare const mma: {
 		storeExportJson: (opts: ExportOpts) => Promise<string>;
 		storeExportCsv: (scope: number[] | null) => Promise<string>;
 		storeExportGeojson: (scope: number[] | null, tagsJson: string) => Promise<string>;
+		storeSaveExportFile: (srcPath: string, destPath: string) => Promise<null>;
 		storeExportBulkZip: () => Promise<string>;
 		storeDbClearTable: (table: string) => Promise<number>;
 		storeDbStats: () => Promise<DbStats>;
@@ -1571,6 +1572,7 @@ declare const mma: {
 	cancelReview(): void;
 	deleteSession(id: string): Promise<void>;
 	listSessions(status?: "active" | "done"): Promise<ReviewSession[]>;
+	selectReviewSet(s: ReviewSession, mode: "reviewed" | "unreviewed"): Promise<void>;
 	invalidateMapList(): Promise<void>;
 	getTagCounts(): Record<number, number>;
 	refreshAfterMutation(): void;

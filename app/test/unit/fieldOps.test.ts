@@ -81,10 +81,10 @@ describe("planFieldSet", () => {
 
 describe("rewriteSelectionFields", () => {
 	const filter = (field: string) =>
-		buildSelection(map, { type: "Filter", field, op: "eq", value: 1, value2: null });
+		buildSelection({ type: "Filter", field, op: "eq", value: 1, value2: null });
 
 	it("rewrites a Filter field and regenerates its key", () => {
-		const out = rewriteSelectionFields(map, [filter("a")], "a", "b");
+		const out = rewriteSelectionFields([filter("a")], "a", "b");
 		expect(out).toHaveLength(1);
 		expect((out[0].props as { field: string }).field).toBe("b");
 		expect(out[0].key).toBe("filter:b:eq:1");
@@ -92,25 +92,25 @@ describe("rewriteSelectionFields", () => {
 
 	it("leaves unrelated filters untouched", () => {
 		const f = filter("c");
-		const out = rewriteSelectionFields(map, [f], "a", "b");
+		const out = rewriteSelectionFields([f], "a", "b");
 		expect(out[0].key).toBe(f.key);
 	});
 
 	it("drops a Filter when the field is deleted (to = null)", () => {
-		expect(rewriteSelectionFields(map, [filter("a")], "a", null)).toEqual([]);
+		expect(rewriteSelectionFields([filter("a")], "a", null)).toEqual([]);
 	});
 
 	it("rewrites filters nested in a composite", () => {
-		const union = buildSelection(map, { type: "Union", selections: [filter("a"), filter("c")] });
-		const out = rewriteSelectionFields(map, [union], "a", "b");
+		const union = buildSelection({ type: "Union", selections: [filter("a"), filter("c")] });
+		const out = rewriteSelectionFields([union], "a", "b");
 		const children = (out[0].props as { selections: { props: { field: string } }[] }).selections;
 		expect(children.map((c) => c.props.field)).toEqual(["b", "c"]);
 	});
 
 	it("collapses a group to its sole survivor when a child is deleted", () => {
-		const tag = buildSelection(map, { type: "Tag", tagId: 1 });
-		const union = buildSelection(map, { type: "Union", selections: [filter("a"), tag] });
-		const out = rewriteSelectionFields(map, [union], "a", null);
+		const tag = buildSelection({ type: "Tag", tagId: 1 });
+		const union = buildSelection({ type: "Union", selections: [filter("a"), tag] });
+		const out = rewriteSelectionFields([union], "a", null);
 		expect(out).toHaveLength(1);
 		expect(out[0].props.type).toBe("Tag");
 	});

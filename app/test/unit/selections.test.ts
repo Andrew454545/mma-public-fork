@@ -66,40 +66,38 @@ describe("colorForKey", () => {
 });
 
 describe("buildSelection", () => {
-	const map = makeMap();
-
 	it("Everything gets correct key", () => {
-		const sel = buildSelection(map, { type: "Everything" });
+		const sel = buildSelection({ type: "Everything" });
 		expect(sel.key).toBe("everything");
 	});
 
 	it("Tag gets key with tagId", () => {
-		const sel = buildSelection(map, { type: "Tag", tagId: 42 });
+		const sel = buildSelection({ type: "Tag", tagId: 42 });
 		expect(sel.key).toBe("tag:42");
 	});
 
 	it("Untagged gets correct key", () => {
-		const sel = buildSelection(map, { type: "Untagged" });
+		const sel = buildSelection({ type: "Untagged" });
 		expect(sel.key).toBe("untagged");
 	});
 
 	it("Unpanned gets correct key", () => {
-		const sel = buildSelection(map, { type: "Unpanned" });
+		const sel = buildSelection({ type: "Unpanned" });
 		expect(sel.key).toBe("unpanned");
 	});
 
 	it("PanoIds / NotPanoIds get correct keys", () => {
-		expect(buildSelection(map, { type: "PanoIds" }).key).toBe("panoids");
-		expect(buildSelection(map, { type: "NotPanoIds" }).key).toBe("notpanoids");
+		expect(buildSelection({ type: "PanoIds" }).key).toBe("panoids");
+		expect(buildSelection({ type: "NotPanoIds" }).key).toBe("notpanoids");
 	});
 
 	it("Manual gets correct key", () => {
-		const sel = buildSelection(map, { type: "Manual", locations: [1, 2] });
+		const sel = buildSelection({ type: "Manual", locations: [1, 2] });
 		expect(sel.key).toBe("manual");
 	});
 
 	it("Filter generates key with field/op/value", () => {
-		const sel = buildSelection(map, {
+		const sel = buildSelection({
 			type: "Filter",
 			field: "altitude",
 			op: "gt",
@@ -109,7 +107,7 @@ describe("buildSelection", () => {
 	});
 
 	it("Filter between includes value2", () => {
-		const sel = buildSelection(map, {
+		const sel = buildSelection({
 			type: "Filter",
 			field: "altitude",
 			op: "between",
@@ -120,66 +118,62 @@ describe("buildSelection", () => {
 	});
 
 	it("assigns a color", () => {
-		const sel = buildSelection(map, { type: "Everything" });
+		const sel = buildSelection({ type: "Everything" });
 		expect(sel.color).toHaveLength(3);
 		expect(sel.color[0]).toBeGreaterThanOrEqual(0);
 	});
 });
 
 describe("addSelection / removeSelection", () => {
-	const map = makeMap();
-
 	it("addSelection appends a new selection", () => {
-		const result = addSelection(map, [], { type: "Everything" });
+		const result = addSelection([], { type: "Everything" });
 		expect(result).toHaveLength(1);
 		expect(result[0].key).toBe("everything");
 	});
 
 	it("addSelection deduplicates by key", () => {
-		const first = addSelection(map, [], { type: "Everything" });
-		const second = addSelection(map, first, { type: "Everything" });
+		const first = addSelection([], { type: "Everything" });
+		const second = addSelection(first, { type: "Everything" });
 		expect(second).toHaveLength(1);
 	});
 
 	it("removeSelection removes by key", () => {
-		const sels = addSelection(map, [], { type: "Everything" });
+		const sels = addSelection([], { type: "Everything" });
 		const result = removeSelection(sels, "everything");
 		expect(result).toHaveLength(0);
 	});
 
 	it("removeSelection decomposes composite on remove", () => {
-		const s1 = buildSelection(map, { type: "PanoIds" });
-		const s2 = buildSelection(map, { type: "Untagged" });
-		const composite = buildSelection(map, { type: "Intersection", selections: [s1, s2] });
+		const s1 = buildSelection({ type: "PanoIds" });
+		const s2 = buildSelection({ type: "Untagged" });
+		const composite = buildSelection({ type: "Intersection", selections: [s1, s2] });
 		const result = removeSelection([composite], composite.key);
 		expect(result).toHaveLength(2);
 	});
 });
 
 describe("intersectSelections", () => {
-	const map = makeMap();
-
 	it("creates intersection of two selections", () => {
-		const s1 = buildSelection(map, { type: "PanoIds" });
-		const s2 = buildSelection(map, { type: "Untagged" });
-		const result = intersectSelections(map, [s1, s2], null);
+		const s1 = buildSelection({ type: "PanoIds" });
+		const s2 = buildSelection({ type: "Untagged" });
+		const result = intersectSelections([s1, s2], null);
 		expect(result).toHaveLength(1);
 		expect(result[0].props.type).toBe("Intersection");
 	});
 
 	it("does nothing with fewer than 2 selections", () => {
-		const s1 = buildSelection(map, { type: "PanoIds" });
-		const result = intersectSelections(map, [s1], null);
+		const s1 = buildSelection({ type: "PanoIds" });
+		const result = intersectSelections([s1], null);
 		expect(result).toHaveLength(1);
 		expect(result[0].props.type).toBe("PanoIds");
 	});
 
 	it("flattens nested intersections", () => {
-		const s1 = buildSelection(map, { type: "PanoIds" });
-		const s2 = buildSelection(map, { type: "Untagged" });
-		const inter = intersectSelections(map, [s1, s2], null);
-		const s3 = buildSelection(map, { type: "Unpanned" });
-		const result = intersectSelections(map, [...inter, s3], null);
+		const s1 = buildSelection({ type: "PanoIds" });
+		const s2 = buildSelection({ type: "Untagged" });
+		const inter = intersectSelections([s1, s2], null);
+		const s3 = buildSelection({ type: "Unpanned" });
+		const result = intersectSelections([...inter, s3], null);
 		expect(result).toHaveLength(1);
 		const children = (result[0].props as { type: "Intersection"; selections: any[] }).selections;
 		expect(children).toHaveLength(3);
@@ -187,22 +181,20 @@ describe("intersectSelections", () => {
 });
 
 describe("unionSelections", () => {
-	const map = makeMap();
-
 	it("creates union of two selections", () => {
-		const s1 = buildSelection(map, { type: "PanoIds" });
-		const s2 = buildSelection(map, { type: "Untagged" });
-		const result = unionSelections(map, [s1, s2], null);
+		const s1 = buildSelection({ type: "PanoIds" });
+		const s2 = buildSelection({ type: "Untagged" });
+		const result = unionSelections([s1, s2], null);
 		expect(result).toHaveLength(1);
 		expect(result[0].props.type).toBe("Union");
 	});
 
 	it("flattens nested unions", () => {
-		const s1 = buildSelection(map, { type: "PanoIds" });
-		const s2 = buildSelection(map, { type: "Untagged" });
-		const union = unionSelections(map, [s1, s2], null);
-		const s3 = buildSelection(map, { type: "Unpanned" });
-		const result = unionSelections(map, [...union, s3], null);
+		const s1 = buildSelection({ type: "PanoIds" });
+		const s2 = buildSelection({ type: "Untagged" });
+		const union = unionSelections([s1, s2], null);
+		const s3 = buildSelection({ type: "Unpanned" });
+		const result = unionSelections([...union, s3], null);
 		expect(result).toHaveLength(1);
 		const children = (result[0].props as { type: "Union"; selections: any[] }).selections;
 		expect(children).toHaveLength(3);
@@ -210,71 +202,65 @@ describe("unionSelections", () => {
 });
 
 describe("invertSelections", () => {
-	const map = makeMap();
-
 	it("wraps a single selection in Invert", () => {
-		const s1 = buildSelection(map, { type: "PanoIds" });
-		const result = invertSelections(map, [s1], null);
+		const s1 = buildSelection({ type: "PanoIds" });
+		const result = invertSelections([s1], null);
 		expect(result).toHaveLength(1);
 		expect(result[0].props.type).toBe("Invert");
 	});
 
 	it("double invert unwraps back to original", () => {
-		const s1 = buildSelection(map, { type: "PanoIds" });
-		const inverted = invertSelections(map, [s1], null);
-		const result = invertSelections(map, inverted, null);
+		const s1 = buildSelection({ type: "PanoIds" });
+		const inverted = invertSelections([s1], null);
+		const result = invertSelections(inverted, null);
 		expect(result).toHaveLength(1);
 		expect(result[0].props.type).toBe("PanoIds");
 	});
 });
 
 describe("toggleManualSelection", () => {
-	const map = makeMap();
-
 	it("creates manual selection if none exists", () => {
-		const result = toggleManualSelection(map, [], 1);
+		const result = toggleManualSelection([], 1);
 		expect(result).toHaveLength(1);
 		expect(result[0].key).toBe("manual");
 	});
 
 	it("adds to existing manual selection", () => {
-		const initial = toggleManualSelection(map, [], 1);
-		const result = toggleManualSelection(map, initial, 2);
+		const initial = toggleManualSelection([], 1);
+		const result = toggleManualSelection(initial, 2);
 		const ids = (result[0].props as { type: "Manual"; locations: number[] }).locations;
 		expect(ids).toContain(1);
 		expect(ids).toContain(2);
 	});
 
 	it("removes from existing manual selection", () => {
-		let sels = toggleManualSelection(map, [], 1);
-		sels = toggleManualSelection(map, sels, 2);
-		sels = toggleManualSelection(map, sels, 1);
+		let sels = toggleManualSelection([], 1);
+		sels = toggleManualSelection(sels, 2);
+		sels = toggleManualSelection(sels, 1);
 		const ids = (sels[0].props as { type: "Manual"; locations: number[] }).locations;
 		expect(ids).toEqual([2]);
 	});
 
 	it("removes manual selection entirely when last location toggled off", () => {
-		let sels = toggleManualSelection(map, [], 1);
-		sels = toggleManualSelection(map, sels, 1);
+		let sels = toggleManualSelection([], 1);
+		sels = toggleManualSelection(sels, 1);
 		expect(sels).toHaveLength(0);
 	});
 });
 
 describe("reorderSelections", () => {
-	const map = makeMap();
-
 	it("moves selection before target", () => {
-		const s1 = buildSelection(map, { type: "PanoIds" });
-		const s2 = buildSelection(map, { type: "Untagged" });
-		const s3 = buildSelection(map, { type: "Unpanned" });
+		const s1 = buildSelection({ type: "PanoIds" });
+		const s2 = buildSelection({ type: "Untagged" });
+		const s3 = buildSelection({ type: "Unpanned" });
 		const result = reorderSelections([s1, s2, s3], s3.key, s1.key, "before");
 		expect(result.map((s) => s.key)).toEqual([s3.key, s1.key, s2.key]);
 	});
 
 	it("moves selection after target", () => {
-		const s1 = buildSelection(map, { type: "PanoIds" });
-		const s2 = buildSelection(map, { type: "Untagged" });
-		const s3 = buildSelection(map, { type: "Unpanned" });
+		const s1 = buildSelection({ type: "PanoIds" });
+		const s2 = buildSelection({ type: "Untagged" });
+		const s3 = buildSelection({ type: "Unpanned" });
 		const result = reorderSelections([s1, s2, s3], s1.key, s3.key, "after");
 		expect(result.map((s) => s.key)).toEqual([s2.key, s3.key, s1.key]);
 	});
@@ -299,25 +285,25 @@ describe("selectionDisplayName", () => {
 
 	it("returns type name for simple types", () => {
 		const map = makeMap();
-		const sel = buildSelection(map, { type: "Everything" });
+		const sel = buildSelection({ type: "Everything" });
 		expect(selectionDisplayName(map, sel)).toBe("Everything");
 	});
 
 	it("returns tag name for Tag selection", () => {
 		const map = makeMap({ 42: { id: 42, name: "My Tag", color: "#f00", visible: true } });
-		const sel = buildSelection(map, { type: "Tag", tagId: 42 });
+		const sel = buildSelection({ type: "Tag", tagId: 42 });
 		expect(selectionDisplayName(map, sel)).toBe("Tag: My Tag");
 	});
 
 	it("falls back to tag ID if tag not found", () => {
 		const map = makeMap();
-		const sel = buildSelection(map, { type: "Tag", tagId: 999 });
+		const sel = buildSelection({ type: "Tag", tagId: 999 });
 		expect(selectionDisplayName(map, sel)).toBe("Tag: 999");
 	});
 
 	it("display name for Filter eq", () => {
 		const map = makeMap();
-		const sel = buildSelection(map, {
+		const sel = buildSelection({
 			type: "Filter",
 			field: "label",
 			op: "eq",
@@ -328,7 +314,7 @@ describe("selectionDisplayName", () => {
 
 	it("display name for Filter between", () => {
 		const map = makeMap();
-		const sel = buildSelection(map, {
+		const sel = buildSelection({
 			type: "Filter",
 			field: "height",
 			op: "between",
@@ -340,7 +326,7 @@ describe("selectionDisplayName", () => {
 
 	it("display name for Filter neq", () => {
 		const map = makeMap();
-		const sel = buildSelection(map, {
+		const sel = buildSelection({
 			type: "Filter",
 			field: "label",
 			op: "neq",
@@ -351,7 +337,7 @@ describe("selectionDisplayName", () => {
 
 	it("display name for Filter gt", () => {
 		const map = makeMap();
-		const sel = buildSelection(map, {
+		const sel = buildSelection({
 			type: "Filter",
 			field: "height",
 			op: "gt",
@@ -362,7 +348,7 @@ describe("selectionDisplayName", () => {
 
 	it("display name for Filter lt", () => {
 		const map = makeMap();
-		const sel = buildSelection(map, {
+		const sel = buildSelection({
 			type: "Filter",
 			field: "height",
 			op: "lt",
@@ -373,7 +359,7 @@ describe("selectionDisplayName", () => {
 
 	it("display name for Filter gte", () => {
 		const map = makeMap();
-		const sel = buildSelection(map, {
+		const sel = buildSelection({
 			type: "Filter",
 			field: "height",
 			op: "gte",
@@ -384,7 +370,7 @@ describe("selectionDisplayName", () => {
 
 	it("display name for Filter lte", () => {
 		const map = makeMap();
-		const sel = buildSelection(map, {
+		const sel = buildSelection({
 			type: "Filter",
 			field: "height",
 			op: "lte",
@@ -395,7 +381,7 @@ describe("selectionDisplayName", () => {
 
 	it("display name for Filter has", () => {
 		const map = makeMap();
-		const sel = buildSelection(map, {
+		const sel = buildSelection({
 			type: "Filter",
 			field: "height",
 			op: "has",
@@ -406,7 +392,7 @@ describe("selectionDisplayName", () => {
 
 	it("display name for Filter nothas", () => {
 		const map = makeMap();
-		const sel = buildSelection(map, {
+		const sel = buildSelection({
 			type: "Filter",
 			field: "height",
 			op: "nothas",
@@ -417,7 +403,7 @@ describe("selectionDisplayName", () => {
 
 	it("display name for Filter between_anyyear formats MM-DD as month day", () => {
 		const map = makeMap();
-		const sel = buildSelection(map, {
+		const sel = buildSelection({
 			type: "Filter",
 			field: "month",
 			op: "between_anyyear",
@@ -429,7 +415,7 @@ describe("selectionDisplayName", () => {
 
 	it("display name for Filter between_anytime uses raw values", () => {
 		const map = makeMap();
-		const sel = buildSelection(map, {
+		const sel = buildSelection({
 			type: "Filter",
 			field: "month",
 			op: "between_anytime",
@@ -441,7 +427,7 @@ describe("selectionDisplayName", () => {
 
 	it("display name for Filter enum field shows label not raw value", () => {
 		const map = makeMap();
-		const sel = buildSelection(map, {
+		const sel = buildSelection({
 			type: "Filter",
 			field: "cam",
 			op: "eq",
@@ -452,7 +438,7 @@ describe("selectionDisplayName", () => {
 
 	it("display name for Filter date field formats unix timestamp", () => {
 		const map = makeMap();
-		const sel = buildSelection(map, {
+		const sel = buildSelection({
 			type: "Filter",
 			field: "exact",
 			op: "gt",
@@ -464,7 +450,7 @@ describe("selectionDisplayName", () => {
 
 	it("display name for Filter uses raw field name when no fieldDef exists", () => {
 		const map = makeMap();
-		const sel = buildSelection(map, {
+		const sel = buildSelection({
 			type: "Filter",
 			field: "unknownField",
 			op: "eq",
@@ -483,7 +469,7 @@ describe("selectionDisplayName", () => {
 			},
 		});
 		const map = makeMap();
-		const sel = buildSelection(map, {
+		const sel = buildSelection({
 			type: "Filter",
 			field: "myCustomField",
 			op: "eq",
@@ -494,19 +480,19 @@ describe("selectionDisplayName", () => {
 
 	it("display name for Locations with name", () => {
 		const map = makeMap();
-		const sel = buildSelection(map, { type: "Locations", locations: [1, 2], name: "My Set" });
+		const sel = buildSelection({ type: "Locations", locations: [1, 2], name: "My Set" });
 		expect(selectionDisplayName(map, sel)).toBe("My Set");
 	});
 
 	it("display name for Locations without name", () => {
 		const map = makeMap();
-		const sel = buildSelection(map, { type: "Locations", locations: [1], name: null });
+		const sel = buildSelection({ type: "Locations", locations: [1], name: null });
 		expect(selectionDisplayName(map, sel)).toBe("Selection");
 	});
 
 	it("display name for Polygon without name", () => {
 		const map = makeMap();
-		const sel = buildSelection(map, {
+		const sel = buildSelection({
 			type: "Polygon",
 			polygon: { coordinates: [[[0, 0], [1, 0], [1, 1], [0, 0]]] },
 			includeInformational: false,
@@ -516,7 +502,7 @@ describe("selectionDisplayName", () => {
 
 	it("display name for Polygon with name", () => {
 		const map = makeMap();
-		const sel = buildSelection(map, {
+		const sel = buildSelection({
 			type: "Polygon",
 			polygon: { coordinates: [[[0, 0], [1, 0], [1, 1], [0, 0]]], properties: { name: "Europe" } },
 			includeInformational: false,
@@ -526,19 +512,19 @@ describe("selectionDisplayName", () => {
 
 	it("display name for Duplicates", () => {
 		const map = makeMap();
-		const sel = buildSelection(map, { type: "Duplicates", distance: 100 });
+		const sel = buildSelection({ type: "Duplicates", distance: 100 });
 		expect(selectionDisplayName(map, sel)).toBe("Duplicates (100m)");
 	});
 
 	it("display name for Manual", () => {
 		const map = makeMap();
-		const sel = buildSelection(map, { type: "Manual", locations: [1, 2, 3] });
+		const sel = buildSelection({ type: "Manual", locations: [1, 2, 3] });
 		expect(selectionDisplayName(map, sel)).toBe("Manual selection");
 	});
 
 	it("display name for ValidationState", () => {
 		const map = makeMap();
-		const sel = buildSelection(map, {
+		const sel = buildSelection({
 			type: "ValidationState",
 			locations: [1],
 			state: ValidationState.NotFound,
@@ -548,7 +534,7 @@ describe("selectionDisplayName", () => {
 
 	it("display name for ValidationState PanoIdBroke", () => {
 		const map = makeMap();
-		const sel = buildSelection(map, {
+		const sel = buildSelection({
 			type: "ValidationState",
 			locations: [2],
 			state: ValidationState.PanoIdBroke,
@@ -558,48 +544,46 @@ describe("selectionDisplayName", () => {
 
 	it("display name for Intersection", () => {
 		const map = makeMap();
-		const s1 = buildSelection(map, { type: "PanoIds" });
-		const s2 = buildSelection(map, { type: "Untagged" });
-		const inter = intersectSelections(map, [s1, s2], null);
+		const s1 = buildSelection({ type: "PanoIds" });
+		const s2 = buildSelection({ type: "Untagged" });
+		const inter = intersectSelections([s1, s2], null);
 		expect(selectionDisplayName(map, inter[0])).toBe("Intersection");
 	});
 
 	it("display name for Union", () => {
 		const map = makeMap();
-		const s1 = buildSelection(map, { type: "PanoIds" });
-		const s2 = buildSelection(map, { type: "Untagged" });
-		const union = unionSelections(map, [s1, s2], null);
+		const s1 = buildSelection({ type: "PanoIds" });
+		const s2 = buildSelection({ type: "Untagged" });
+		const union = unionSelections([s1, s2], null);
 		expect(selectionDisplayName(map, union[0])).toBe("Union");
 	});
 
 	it("display name for Invert includes child name", () => {
 		const map = makeMap();
-		const s1 = buildSelection(map, { type: "PanoIds" });
-		const inverted = invertSelections(map, [s1], null);
+		const s1 = buildSelection({ type: "PanoIds" });
+		const inverted = invertSelections([s1], null);
 		expect(selectionDisplayName(map, inverted[0])).toBe("Invert: Pano ID locations");
 	});
 });
 
 describe("resolveLocations", () => {
-	const map = makeMap();
-
 	it("Manual returns copy of locations", () => {
 		const locs = [10, 20, 30];
-		const result = resolveLocations(map, { type: "Manual", locations: locs });
+		const result = resolveLocations({ type: "Manual", locations: locs });
 		expect(result).toEqual([10, 20, 30]);
 		expect(result).not.toBe(locs);
 	});
 
 	it("Locations returns copy of locations", () => {
 		const locs = [5, 15];
-		const result = resolveLocations(map, { type: "Locations", locations: locs, name: null });
+		const result = resolveLocations({ type: "Locations", locations: locs, name: null });
 		expect(result).toEqual([5, 15]);
 		expect(result).not.toBe(locs);
 	});
 
 	it("ValidationState returns copy of locations", () => {
 		const locs = [7, 8, 9];
-		const result = resolveLocations(map, {
+		const result = resolveLocations({
 			type: "ValidationState",
 			locations: locs,
 			state: ValidationState.Ok,
@@ -609,65 +593,60 @@ describe("resolveLocations", () => {
 	});
 
 	it("Everything returns empty array", () => {
-		expect(resolveLocations(map, { type: "Everything" })).toEqual([]);
+		expect(resolveLocations({ type: "Everything" })).toEqual([]);
 	});
 
 	it("Tag returns empty array", () => {
-		expect(resolveLocations(map, { type: "Tag", tagId: 1 })).toEqual([]);
+		expect(resolveLocations({ type: "Tag", tagId: 1 })).toEqual([]);
 	});
 });
 
 describe("reorderSelections edge cases", () => {
-	const map = makeMap();
-
 	it("returns unchanged when from key not found", () => {
-		const s1 = buildSelection(map, { type: "PanoIds" });
-		const s2 = buildSelection(map, { type: "Untagged" });
+		const s1 = buildSelection({ type: "PanoIds" });
+		const s2 = buildSelection({ type: "Untagged" });
 		const result = reorderSelections([s1, s2], "nonexistent", s2.key, "before");
 		expect(result.map((s) => s.key)).toEqual([s1.key, s2.key]);
 	});
 
 	it("returns unchanged when to key not found", () => {
-		const s1 = buildSelection(map, { type: "PanoIds" });
-		const s2 = buildSelection(map, { type: "Untagged" });
+		const s1 = buildSelection({ type: "PanoIds" });
+		const s2 = buildSelection({ type: "Untagged" });
 		const result = reorderSelections([s1, s2], s1.key, "nonexistent", "before");
 		expect(result.map((s) => s.key)).toEqual([s1.key, s2.key]);
 	});
 
 	it("returns unchanged when from and to are the same", () => {
-		const s1 = buildSelection(map, { type: "PanoIds" });
-		const s2 = buildSelection(map, { type: "Untagged" });
+		const s1 = buildSelection({ type: "PanoIds" });
+		const s2 = buildSelection({ type: "Untagged" });
 		const result = reorderSelections([s1, s2], s1.key, s1.key, "before");
 		expect(result.map((s) => s.key)).toEqual([s1.key, s2.key]);
 	});
 });
 
 describe("composeSelections", () => {
-	const map = makeMap();
-
 	it("drag onto drop creates intersection", () => {
-		const s1 = buildSelection(map, { type: "PanoIds" });
-		const s2 = buildSelection(map, { type: "Untagged" });
-		const result = composeSelections(map, [s1, s2], s2.key, s1.key, "Intersection");
+		const s1 = buildSelection({ type: "PanoIds" });
+		const s2 = buildSelection({ type: "Untagged" });
+		const result = composeSelections([s1, s2], s2.key, s1.key, "Intersection");
 		expect(result).toHaveLength(1);
 		expect(result[0].props.type).toBe("Intersection");
 	});
 
 	it("drag onto drop creates union", () => {
-		const s1 = buildSelection(map, { type: "PanoIds" });
-		const s2 = buildSelection(map, { type: "Untagged" });
-		const result = composeSelections(map, [s1, s2], s2.key, s1.key, "Union");
+		const s1 = buildSelection({ type: "PanoIds" });
+		const s2 = buildSelection({ type: "Untagged" });
+		const result = composeSelections([s1, s2], s2.key, s1.key, "Union");
 		expect(result).toHaveLength(1);
 		expect(result[0].props.type).toBe("Union");
 	});
 
 	it("drag onto existing composite adds as child", () => {
-		const s1 = buildSelection(map, { type: "PanoIds" });
-		const s2 = buildSelection(map, { type: "Untagged" });
-		const composed = composeSelections(map, [s1, s2], s2.key, s1.key, "Intersection");
-		const s3 = buildSelection(map, { type: "Unpanned" });
+		const s1 = buildSelection({ type: "PanoIds" });
+		const s2 = buildSelection({ type: "Untagged" });
+		const composed = composeSelections([s1, s2], s2.key, s1.key, "Intersection");
+		const s3 = buildSelection({ type: "Unpanned" });
 		const result = composeSelections(
-			map,
 			[...composed, s3],
 			s3.key,
 			composed[0].key,
@@ -679,50 +658,45 @@ describe("composeSelections", () => {
 	});
 
 	it("returns unchanged if drag equals drop", () => {
-		const s1 = buildSelection(map, { type: "PanoIds" });
-		const result = composeSelections(map, [s1], s1.key, s1.key, "Intersection");
+		const s1 = buildSelection({ type: "PanoIds" });
+		const result = composeSelections([s1], s1.key, s1.key, "Intersection");
 		expect(result).toEqual([s1]);
 	});
 
 	it("returns unchanged if key not found", () => {
-		const s1 = buildSelection(map, { type: "PanoIds" });
-		const result = composeSelections(map, [s1], "nonexistent", s1.key, "Intersection");
+		const s1 = buildSelection({ type: "PanoIds" });
+		const result = composeSelections([s1], "nonexistent", s1.key, "Intersection");
 		expect(result).toEqual([s1]);
 	});
 });
 
 describe("decomposeChild", () => {
-	const map = makeMap();
-
 	it("extracts a child from a composite", () => {
-		const s1 = buildSelection(map, { type: "PanoIds" });
-		const s2 = buildSelection(map, { type: "Untagged" });
-		const s3 = buildSelection(map, { type: "Unpanned" });
+		const s1 = buildSelection({ type: "PanoIds" });
+		const s2 = buildSelection({ type: "Untagged" });
+		const s3 = buildSelection({ type: "Unpanned" });
 		const composed = composeSelections(
-			map,
-			composeSelections(map, [s1, s2], s2.key, s1.key, "Intersection").concat(s3),
+			composeSelections([s1, s2], s2.key, s1.key, "Intersection").concat(s3),
 			s3.key,
-			composeSelections(map, [s1, s2], s2.key, s1.key, "Intersection")[0].key,
+			composeSelections([s1, s2], s2.key, s1.key, "Intersection")[0].key,
 			"Intersection",
 		);
 		const parentKey = composed[0].key;
-		const result = decomposeChild(map, composed, parentKey, s2.key);
+		const result = decomposeChild(composed, parentKey, s2.key);
 		expect(result.length).toBeGreaterThan(composed.length);
 	});
 });
 
 describe("removeFromComposite", () => {
-	const map = makeMap();
-
 	it("removes a child and reduces composite", () => {
-		const s1 = buildSelection(map, { type: "PanoIds" });
-		const s2 = buildSelection(map, { type: "Untagged" });
-		const s3 = buildSelection(map, { type: "Unpanned" });
+		const s1 = buildSelection({ type: "PanoIds" });
+		const s2 = buildSelection({ type: "Untagged" });
+		const s3 = buildSelection({ type: "Unpanned" });
 		let sels = [s1, s2, s3];
-		sels = composeSelections(map, sels, s2.key, s1.key, "Intersection");
-		sels = composeSelections(map, [...sels, s3], s3.key, sels[0].key, "Intersection");
+		sels = composeSelections(sels, s2.key, s1.key, "Intersection");
+		sels = composeSelections([...sels, s3], s3.key, sels[0].key, "Intersection");
 		const parentKey = sels[0].key;
-		const result = removeFromComposite(map, sels, parentKey, s2.key);
+		const result = removeFromComposite(sels, parentKey, s2.key);
 		expect(result).toHaveLength(sels.length);
 		const children = (result[0].props as { selections: any[] }).selections;
 		expect(children.every((c: any) => c.key !== s2.key)).toBe(true);
@@ -730,39 +704,38 @@ describe("removeFromComposite", () => {
 });
 
 describe("replaceSelection", () => {
-	const map = makeMap();
 	const filterA = { type: "Filter" as const, field: "year", op: "between", value: 2010, value2: 2015 };
 	const filterAEdited = { ...filterA, value: 2012, value2: 2020 };
 
 	it("replaces a top-level selection and updates its key", () => {
-		const sel = buildSelection(map, filterA);
-		const result = replaceSelection(map, [sel], sel.key, filterAEdited);
+		const sel = buildSelection(filterA);
+		const result = replaceSelection([sel], sel.key, filterAEdited);
 		expect(result).toHaveLength(1);
-		expect(result[0].key).toBe(buildSelection(map, filterAEdited).key);
+		expect(result[0].key).toBe(buildSelection(filterAEdited).key);
 		expect(result[0].key).not.toBe(sel.key);
 		expect((result[0].props as typeof filterAEdited).value).toBe(2012);
 	});
 
 	it("replaces a child inside a composite and rebuilds the parent key", () => {
-		const a = buildSelection(map, filterA);
-		const b = buildSelection(map, { type: "Untagged" });
-		const composed = intersectSelections(map, [a, b], null); // [Intersection(a,b)]
+		const a = buildSelection(filterA);
+		const b = buildSelection({ type: "Untagged" });
+		const composed = intersectSelections([a, b], null); // [Intersection(a,b)]
 		const parent = composed[0];
-		const result = replaceSelection(map, composed, a.key, filterAEdited);
+		const result = replaceSelection(composed, a.key, filterAEdited);
 
 		expect(result).toHaveLength(1);
 		expect(result[0].key).not.toBe(parent.key); // parent key rebuilt
 		const children = (result[0].props as { selections: any[] }).selections;
 		expect(children).toHaveLength(2);
-		expect(children.some((c: any) => c.key === buildSelection(map, filterAEdited).key)).toBe(true);
+		expect(children.some((c: any) => c.key === buildSelection(filterAEdited).key)).toBe(true);
 		expect(children.some((c: any) => c.key === b.key)).toBe(true); // sibling preserved
 		expect(children.some((c: any) => c.key === a.key)).toBe(false); // old child gone
 	});
 
 	it("is a no-op when the key is not found", () => {
-		const sel = buildSelection(map, filterA);
+		const sel = buildSelection(filterA);
 		const input = [sel];
-		const result = replaceSelection(map, input, "nonexistent", filterAEdited);
+		const result = replaceSelection(input, "nonexistent", filterAEdited);
 		expect(result).toBe(input); // unchanged reference
 		expect(result[0].key).toBe(sel.key);
 	});

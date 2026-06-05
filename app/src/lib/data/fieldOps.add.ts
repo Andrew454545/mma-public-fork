@@ -4,17 +4,32 @@
  * orchestrates IPC, definitions, and persistence. Kept side-effect-free for testability.
  */
 
-import type { Location } from "@/types";
+import type { Location, ExtraFieldDef } from "@/types";
 import type { Selection, SelectionProps } from "@/store/selections";
 import { buildSelection } from "@/store/selections";
 
 /** When a move target already holds a value, which field's value survives. */
 export type MergeWinner = "from" | "to";
 
-/** A planned change to one location's `extra` (the full replacement blob). */
-export interface ExtraUpdate {
+/** A planned partial patch to one location (top-level field or `extra`). */
+export interface LocationUpdate {
 	id: number;
-	extra: Record<string, unknown>;
+	patch: Partial<Location>;
+}
+
+/** Built-in top-level Location fields offered in the bulk "Set field" picker, with display metadata. */
+export const TOP_LEVEL_SET_FIELDS: Record<string, ExtraFieldDef> = {
+	heading: { type: "number", label: "Heading" },
+	pitch: { type: "number", label: "Pitch" },
+	zoom: { type: "number", label: "Zoom" },
+};
+
+/** Shape a single field assignment into a patch: built-in keys patch the top-level
+ *  field, every other key nests under `extra`. The one place that knows the difference. */
+export function fieldPatch(key: string, value: unknown): Partial<Location> {
+	return (
+		key in TOP_LEVEL_SET_FIELDS ? { [key]: value } : { extra: { [key]: value } }
+	) as Partial<Location>;
 }
 
 /**
@@ -28,9 +43,9 @@ export function planFieldMove(
 	from: string,
 	to: string,
 	winner: MergeWinner,
-): ExtraUpdate[] {
+): LocationUpdate[] {
 	if (from === to || !to) return [];
-	const updates: ExtraUpdate[] = [];
+	const updates: LocationUpdate[] = [];
 	for (const loc of locations) {
 		const extra = loc.extra;
 		if (!extra || !(from in extra)) continue;
@@ -40,31 +55,54 @@ export function planFieldMove(
 		delete next[from];
 		if (!hasTo || winner === "from") next[to] = fromVal;
 		// winner === "to" with existing target: keep `next[to]` untouched
-		updates.push({ id: loc.id, extra: next });
+		updates.push({ id: loc.id, patch: { extra: next } });
 	}
 	return updates;
 }
 
 /** Remove field `key` from every location that has it. */
-export function planFieldDelete(locations: Location[], key: string): ExtraUpdate[] {
-	const updates: ExtraUpdate[] = [];
+export function planFieldDelete(locations: Location[], key: string): LocationUpdate[] {
+	const updates: LocationUpdate[] = [];
 	for (const loc of locations) {
 		if (!loc.extra || !(key in loc.extra)) continue;
 		const next = { ...loc.extra };
 		delete next[key];
-		updates.push({ id: loc.id, extra: next });
+		updates.push({ id: loc.id, patch: { extra: next } });
 	}
 	return updates;
 }
 
-/** Set field `key` to `value` on the given locations, skipping those already equal. */
-export function planFieldSet(locations: Location[], key: string, value: unknown): ExtraUpdate[] {
-	const updates: ExtraUpdate[] = [];
+/**
+ * Apply `patch` to every location, skipping those it wouldn't change. `extra` is
+ * merged into each location's existing extra; all other keys overwrite directly.
+ * The caller asserts intent by how it shapes `patch` (e.g. `{ heading }` vs
+ * `{ extra: { foo } }`); this function holds no notion of which fields are which.
+ */
+export function planFieldSet(locations: Location[], patch: Partial<Location>): LocationUpdate[] {
+	const updates: LocationUpdate[] = [];
 	for (const loc of locations) {
-		if (loc.extra && loc.extra[key] === value) continue;
-		updates.push({ id: loc.id, extra: { ...(loc.extra ?? {}), [key]: value } });
+		if (!changesLocation(loc, patch)) continue;
+		const next = patch.extra
+			? { ...patch, extra: { ...(loc.extra ?? {}), ...patch.extra } }
+			: patch;
+		updates.push({ id: loc.id, patch: next });
 	}
 	return updates;
+}
+
+/** True if applying `patch` would alter `loc`. Compares requested `extra` keys
+ *  against the existing extra; all other keys against the top-level field. */
+function changesLocation(loc: Location, patch: Partial<Location>): boolean {
+	for (const [k, v] of Object.entries(patch)) {
+		if (k === "extra") {
+			for (const [ek, ev] of Object.entries(v as Record<string, unknown>)) {
+				if ((loc.extra ?? {})[ek] !== ev) return true;
+			}
+		} else if ((loc as Record<string, unknown>)[k] !== v) {
+			return true;
+		}
+	}
+	return false;
 }
 
 /**

@@ -3,6 +3,7 @@ import {
 	planFieldMove,
 	planFieldDelete,
 	planFieldSet,
+	fieldPatch,
 	rewriteSelectionFields,
 } from "@/lib/data/fieldOps.add";
 import { buildSelection } from "@/store/selections";
@@ -30,17 +31,17 @@ const map = { meta: { tags: {} } } as unknown as MapData;
 describe("planFieldMove", () => {
 	it("renames a key (target absent)", () => {
 		const out = planFieldMove([makeLoc(1, { a: 5 })], "a", "b", "from");
-		expect(out).toEqual([{ id: 1, extra: { b: 5 } }]);
+		expect(out).toEqual([{ id: 1, patch: { extra: { b: 5 } } }]);
 	});
 
 	it("merge: winner 'from' takes the moved value", () => {
 		const out = planFieldMove([makeLoc(1, { a: 5, b: 9 })], "a", "b", "from");
-		expect(out).toEqual([{ id: 1, extra: { b: 5 } }]);
+		expect(out).toEqual([{ id: 1, patch: { extra: { b: 5 } } }]);
 	});
 
 	it("merge: winner 'to' keeps the existing target value", () => {
 		const out = planFieldMove([makeLoc(1, { a: 5, b: 9 })], "a", "b", "to");
-		expect(out).toEqual([{ id: 1, extra: { b: 9 } }]);
+		expect(out).toEqual([{ id: 1, patch: { extra: { b: 9 } } }]);
 	});
 
 	it("skips locations without the source key", () => {
@@ -49,7 +50,7 @@ describe("planFieldMove", () => {
 
 	it("preserves unrelated keys", () => {
 		const out = planFieldMove([makeLoc(1, { a: 5, keep: 1 })], "a", "b", "from");
-		expect(out[0].extra).toEqual({ b: 5, keep: 1 });
+		expect(out[0].patch.extra).toEqual({ b: 5, keep: 1 });
 	});
 
 	it("is a no-op when from === to or to is empty", () => {
@@ -61,21 +62,50 @@ describe("planFieldMove", () => {
 describe("planFieldDelete", () => {
 	it("removes the key from locations that have it", () => {
 		const out = planFieldDelete([makeLoc(1, { a: 5, b: 9 }), makeLoc(2, { b: 1 })], "a");
-		expect(out).toEqual([{ id: 1, extra: { b: 9 } }]);
+		expect(out).toEqual([{ id: 1, patch: { extra: { b: 9 } } }]);
 	});
 });
 
 describe("planFieldSet", () => {
-	it("sets the value, creating extra when absent", () => {
-		const out = planFieldSet([makeLoc(1), makeLoc(2, { k: "old" })], "k", "new");
+	it("sets an extra value, creating extra when absent", () => {
+		const out = planFieldSet([makeLoc(1), makeLoc(2, { k: "old" })], { extra: { k: "new" } });
 		expect(out).toEqual([
-			{ id: 1, extra: { k: "new" } },
-			{ id: 2, extra: { k: "new" } },
+			{ id: 1, patch: { extra: { k: "new" } } },
+			{ id: 2, patch: { extra: { k: "new" } } },
 		]);
 	});
 
-	it("skips locations already equal", () => {
-		expect(planFieldSet([makeLoc(1, { k: "v" })], "k", "v")).toEqual([]);
+	it("merges into existing extra, preserving other keys", () => {
+		const out = planFieldSet([makeLoc(1, { keep: 1 })], { extra: { k: "new" } });
+		expect(out).toEqual([{ id: 1, patch: { extra: { keep: 1, k: "new" } } }]);
+	});
+
+	it("skips locations whose extra value already matches", () => {
+		expect(planFieldSet([makeLoc(1, { k: "v" })], { extra: { k: "v" } })).toEqual([]);
+	});
+
+	it("patches a top-level field directly", () => {
+		const out = planFieldSet([makeLoc(1), makeLoc(2)], { heading: 90 });
+		expect(out).toEqual([
+			{ id: 1, patch: { heading: 90 } },
+			{ id: 2, patch: { heading: 90 } },
+		]);
+	});
+
+	it("skips top-level fields already equal", () => {
+		const loc = makeLoc(1);
+		(loc as Record<string, unknown>).pitch = 10;
+		expect(planFieldSet([loc], { pitch: 10 })).toEqual([]);
+	});
+});
+
+describe("fieldPatch", () => {
+	it("nests unknown keys under extra", () => {
+		expect(fieldPatch("foo", 5)).toEqual({ extra: { foo: 5 } });
+	});
+
+	it("places built-in keys at the top level", () => {
+		expect(fieldPatch("heading", 90)).toEqual({ heading: 90 });
 	});
 });
 

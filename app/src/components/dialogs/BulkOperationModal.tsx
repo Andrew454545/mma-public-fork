@@ -11,7 +11,7 @@ import {
 import type { Location } from "@/types";
 import { isPinnedToPano } from "@/types";
 import { getFieldDef, getAllFieldDefs } from "@/lib/data/fieldDefRegistry";
-import { planFieldSet } from "@/lib/data/fieldOps.add";
+import { planFieldSet, fieldPatch, TOP_LEVEL_SET_FIELDS } from "@/lib/data/fieldOps.add";
 import { ValidationState } from "@/store/selections";
 import { validateLocations } from "@/lib/sv/validate";
 import { enrichAll, needsEnrichment, type EnrichResult } from "@/lib/sv/enrich.add";
@@ -32,11 +32,6 @@ const TITLES: Record<BulkOperation, string> = {
 	clearFields: "Clear metadata fields",
 	setField: "Set metadata field",
 };
-
-interface SetFieldOpt {
-	key: string;
-	value: unknown;
-}
 
 type Scope = "all" | "selection";
 
@@ -89,7 +84,7 @@ function BulkSetup({
 		force: boolean;
 		scope: Scope;
 		clearKeys?: string[];
-		setField?: SetFieldOpt;
+		setField?: Partial<Location>;
 	}) => void;
 }) {
 	const [force, setForce] = useState(false);
@@ -196,7 +191,7 @@ function BulkSetup({
 				onScopeChange={setScope}
 				allCount={total}
 				selectionCount={selectionCount}
-				onStart={(setField) => onStart({ force: false, scope, setField })}
+				onStart={(patch) => onStart({ force: false, scope, setField: patch })}
 			/>
 		);
 	}
@@ -316,9 +311,12 @@ function SetFieldSetup({
 	onScopeChange: (s: Scope) => void;
 	allCount: number;
 	selectionCount: number;
-	onStart: (opt: SetFieldOpt) => void;
+	onStart: (patch: Partial<Location>) => void;
 }) {
-	const knownKeys = new Set<string>(Object.keys(getAllFieldDefs()));
+	const knownKeys = new Set<string>([
+		...Object.keys(TOP_LEVEL_SET_FIELDS),
+		...Object.keys(getAllFieldDefs()),
+	]);
 	for (const loc of locs) {
 		if (loc.extra) for (const k of Object.keys(loc.extra)) knownKeys.add(k);
 	}
@@ -330,7 +328,7 @@ function SetFieldSetup({
 	const [raw, setRaw] = useState("");
 
 	const effectiveKey = (creatingNew ? newKey : key).trim();
-	const def = effectiveKey ? getFieldDef(effectiveKey) : undefined;
+	const def = effectiveKey ? (getFieldDef(effectiveKey) ?? TOP_LEVEL_SET_FIELDS[effectiveKey]) : undefined;
 	const isNumber = def?.type === "number";
 	const isEnum = def?.type === "enum" && def.values;
 	const value: unknown = isNumber ? Number(raw) : raw;
@@ -363,7 +361,7 @@ function SetFieldSetup({
 					</option>
 					{sortedKeys.map((k) => (
 						<option key={k} value={k}>
-							{getFieldDef(k)?.label ?? k}
+							{getFieldDef(k)?.label ?? TOP_LEVEL_SET_FIELDS[k]?.label ?? k}
 						</option>
 					))}
 					<option value="__new__">New field...</option>
@@ -406,7 +404,7 @@ function SetFieldSetup({
 					className="button button--primary"
 					type="button"
 					disabled={invalid}
-					onClick={() => onStart({ key: effectiveKey, value })}
+					onClick={() => onStart(fieldPatch(effectiveKey, value))}
 				>
 					Set field
 				</button>
@@ -478,7 +476,7 @@ function BulkProgress({
 	scope: Scope;
 	selectedIds: Set<number>;
 	clearKeys?: string[];
-	setField?: SetFieldOpt;
+	setField?: Partial<Location>;
 	onClose: () => void;
 }) {
 	const [progress, setProgress] = useState(0);
@@ -567,10 +565,7 @@ function BulkProgress({
 				setDone(updates.length);
 				setClearCount(updates.length);
 			} else if (operation === "setField" && setField) {
-				const updates = planFieldSet(locations, setField.key, setField.value).map((u) => ({
-					id: u.id,
-					patch: { extra: u.extra },
-				}));
+				const updates = planFieldSet(locations, setField);
 				setTotal(updates.length);
 				if (updates.length > 0) {
 					await batchUpdateLocations(updates);
@@ -645,7 +640,7 @@ export function BulkOperationModal({ operation, onClose }: Props) {
 	const [force, setForce] = useState(false);
 	const [scope, setScope] = useState<Scope>("all");
 	const [clearKeys, setClearKeys] = useState<string[]>([]);
-	const [setField, setSetField] = useState<SetFieldOpt | undefined>(undefined);
+	const [setField, setSetField] = useState<Partial<Location> | undefined>(undefined);
 	const selectedIds = useSelectedLocationIds();
 
 	return (

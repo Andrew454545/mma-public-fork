@@ -698,7 +698,7 @@ export async function renameField(from: string, to: string, winner: MergeWinner 
 	if (!currentMap || from === to || !to) return;
 	const updates = planFieldMove(await fetchAllLocations(), from, to, winner);
 	if (updates.length) {
-		await batchUpdateLocationsNoUndo(updates.map((u) => ({ id: u.id, patch: { extra: u.extra } })));
+		await batchUpdateLocationsNoUndo(updates);
 		knownFieldKeys.add(to);
 	}
 	knownFieldKeys.delete(from);
@@ -710,7 +710,7 @@ export async function deleteField(key: string) {
 	if (!currentMap) return;
 	const updates = planFieldDelete(await fetchAllLocations(), key);
 	if (updates.length) {
-		await batchUpdateLocationsNoUndo(updates.map((u) => ({ id: u.id, patch: { extra: u.extra } })));
+		await batchUpdateLocationsNoUndo(updates);
 	}
 	knownFieldKeys.delete(key);
 	await migrateFieldReferences(key, null);

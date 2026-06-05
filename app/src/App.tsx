@@ -1,7 +1,8 @@
 import { useState, useEffect } from "react";
-import type { ComponentType } from "react";
+import type { ComponentType, CSSProperties } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
+import { invoke } from "@tauri-apps/api/core";
 import { useCurrentMap } from "@/store/useMapStore";
 import { useTargetMapId, useManualChapter, closeManual, gotoManualChapter } from "@/store/router";
 import { MapList, BulkActions } from "@/components/map-list/MapList";
@@ -24,61 +25,64 @@ import "@/plugins";
 // We preload the chunk in the background and render it as a plain component in the urgent lane.
 const mapEditorModule = import("@/components/editor/MapEditor");
 
+// A real Tauri sub-window for a single map (label "map-<id>"). Always false on web, where
+// every tab reports label "main" — there the URL (targetMapId) alone picks editor vs list.
 const isEditorWindow = getCurrentWindow().label.startsWith("map-");
 
+// tauri-plugin-window-state StateFlags::all() — size|position|maximized|visible|decorations|fullscreen
+const WINDOW_STATE_ALL = 0b111111;
+
+const BLANK_STYLE: CSSProperties = { position: "fixed", inset: 0, background: "#252521" };
+const Blank = () => <div style={BLANK_STYLE} />;
+
+// The URL is the role authority — `targetMapId` picks editor vs list on BOTH Tauri and web.
+// The window label only adds Tauri's "close my window when I back out" behavior.
 export default function App() {
+	const targetMapId = useTargetMapId();
+	// A Tauri map window whose map was backed out of: focus the list window, persist this
+	// window's geometry, then destroy it. Never true on web (no sub-window to close).
+	const closing = isEditorWindow && !targetMapId;
+
+	useSelfDestruct(closing);
+	useCustomCss();
+
+	return (
+		<>
+			{closing ? <Blank /> : targetMapId ? <EditorRoot /> : <MapList />}
+			{!closing && <AppChrome />}
+			<ToastContainer />
+		</>
+	);
+}
+
+/** Editor window content: the map data + the lazily-loaded editor chunk, with a blank
+ *  placeholder while either is still resolving. */
+function EditorRoot() {
 	const map = useCurrentMap();
 	const [MapEditor, setMapEditor] = useState<ComponentType | null>(null);
 	useEffect(() => {
 		mapEditorModule.then((m) => setMapEditor(() => m.MapEditor));
 	}, []);
+	if (!map || !MapEditor) return <Blank />;
+	return <MapEditor />;
+}
+
+/** Floating UI shared by both window roles: settings/plugins gears, update pill, and the
+ *  app-level dialogs. Hidden by App while a window is self-destructing. */
+function AppChrome() {
+	const map = useCurrentMap();
+	const manualChapter = useManualChapter();
+	const update = useUpdateState();
 	const [showStats, setShowStats] = useState(false);
 	const [showSettings, setShowSettings] = useState(false);
 	const [showPlugins, setShowPlugins] = useState(false);
 	const [manualSearchOpen, setManualSearchOpen] = useState(false);
-	const targetMapId = useTargetMapId();
-	const manualChapter = useManualChapter();
-	const customCss = useSetting("customCss");
-	const update = useUpdateState();
 
 	useHotkey(useBinding("toggleStats"), () => setShowStats((s) => !s));
 	useHotkey(useBinding("openManualSearch"), () => setManualSearchOpen((v) => !v));
 
-	useEffect(() => {
-		// Only self-destruct when no map is *targeted* by the URL (the user closed
-		// it) — not while a map is still loading on boot (URL has a map, data null).
-		if (isEditorWindow && !targetMapId) {
-			WebviewWindow.getByLabel("main").then(async (main) => {
-				await main?.unminimize();
-				await main?.setFocus();
-			}).finally(() => {
-				getCurrentWindow().destroy();
-			});
-			return;
-		}
-	}, [targetMapId]);
-
-
-	useEffect(() => {
-		let el = document.getElementById("mma-custom-css") as HTMLStyleElement | null;
-		if (!el) {
-			el = document.createElement("style");
-			el.id = "mma-custom-css";
-			document.head.appendChild(el);
-		}
-		el.textContent = customCss;
-		return () => {
-			el!.textContent = "";
-		};
-	}, [customCss]);
-
 	return (
 		<>
-			{targetMapId ? (
-				map && MapEditor ? <MapEditor /> : <div style={{ position: "fixed", inset: 0, background: "#252521" }} />
-			) : (
-				<MapList />
-			)}
 			{!showSettings && !showPlugins && (
 				<div
 					className="bottom-bar"
@@ -130,13 +134,42 @@ export default function App() {
 			<PluginMarketplace open={showPlugins} onOpenChange={setShowPlugins} />
 			<ManualSearch open={manualSearchOpen} onOpenChange={setManualSearchOpen} />
 			{manualChapter !== null && (
-				<Manual
-					chapterId={manualChapter}
-					onNavigate={gotoManualChapter}
-					onClose={closeManual}
-				/>
+				<Manual chapterId={manualChapter} onNavigate={gotoManualChapter} onClose={closeManual} />
 			)}
-			<ToastContainer />
 		</>
 	);
+}
+
+/** Tauri-only: a map sub-window persists its geometry and destroys itself once its map is
+ *  backed out of. destroy() never fires CloseRequested, so the window-state plugin wouldn't
+ *  save geometry — we save it explicitly first. */
+function useSelfDestruct(closing: boolean) {
+	useEffect(() => {
+		if (!closing) return;
+		WebviewWindow.getByLabel("main")
+			.then(async (main) => {
+				await main?.unminimize();
+				await main?.setFocus();
+			})
+			.finally(async () => {
+				await invoke("plugin:window-state|save_window_state", { flags: WINDOW_STATE_ALL }).catch(() => {});
+				getCurrentWindow().destroy();
+			});
+	}, [closing]);
+}
+
+function useCustomCss() {
+	const customCss = useSetting("customCss");
+	useEffect(() => {
+		let el = document.getElementById("mma-custom-css") as HTMLStyleElement | null;
+		if (!el) {
+			el = document.createElement("style");
+			el.id = "mma-custom-css";
+			document.head.appendChild(el);
+		}
+		el.textContent = customCss;
+		return () => {
+			el!.textContent = "";
+		};
+	}, [customCss]);
 }

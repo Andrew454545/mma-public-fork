@@ -4,6 +4,7 @@ import {
 	planFieldDelete,
 	planFieldSet,
 	fieldPatch,
+	groupByField,
 	rewriteSelectionFields,
 } from "@/lib/data/fieldOps.add";
 import { buildSelection } from "@/store/selections";
@@ -106,6 +107,43 @@ describe("fieldPatch", () => {
 
 	it("places built-in keys at the top level", () => {
 		expect(fieldPatch("heading", 90)).toEqual({ heading: 90 });
+	});
+});
+
+describe("groupByField", () => {
+	it("groups locations by their extra field value", () => {
+		const locs = [
+			makeLoc(1, { country: "FR" }),
+			makeLoc(2, { country: "DE" }),
+			makeLoc(3, { country: "FR" }),
+		];
+		const groups = groupByField(locs, "country");
+		expect(groups.get("FR")).toEqual([1, 3]);
+		expect(groups.get("DE")).toEqual([2]);
+		expect(groups.size).toBe(2);
+	});
+
+	it("skips locations with null, undefined, or empty string values", () => {
+		const locs = [
+			makeLoc(1, { x: null }),
+			makeLoc(2, { x: undefined }),
+			makeLoc(3, { x: "" }),
+			makeLoc(4, { x: "val" }),
+			makeLoc(5), // no extra at all
+		];
+		const groups = groupByField(locs, "x");
+		expect(groups.size).toBe(1);
+		expect(groups.get("val")).toEqual([4]);
+	});
+
+	it("coerces non-string values to strings", () => {
+		const locs = [makeLoc(1, { n: 42 }), makeLoc(2, { n: 42 })];
+		const groups = groupByField(locs, "n");
+		expect(groups.get("42")).toEqual([1, 2]);
+	});
+
+	it("returns an empty map when no locations have the field", () => {
+		expect(groupByField([makeLoc(1, { other: "x" })], "missing").size).toBe(0);
 	});
 });
 

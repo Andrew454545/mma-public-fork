@@ -131,6 +131,21 @@ function rewriteSelection(
 	return sel;
 }
 
+/** Group locations by the string value of `field` in their `extra`. Skips null/empty.
+ *  Returns a map from field-value to the location ids that carry it. */
+export function groupByField(locations: Location[], field: string): Map<string, number[]> {
+	const groups = new Map<string, number[]>();
+	for (const loc of locations) {
+		const v = loc.extra?.[field];
+		if (v == null || v === "") continue;
+		const key = String(v);
+		const arr = groups.get(key);
+		if (arr) arr.push(loc.id);
+		else groups.set(key, [loc.id]);
+	}
+	return groups;
+}
+
 export function rewriteSelectionFields(
 	selections: Selection[],
 	from: string,

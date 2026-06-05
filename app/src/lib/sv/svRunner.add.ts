@@ -72,7 +72,7 @@ export function getSvResolvers(): SvResolver[] {
 
 /** Merge resolver patches for one location: `extra` deep-merges into the location's
  *  existing extra; every other key overwrites. Same rule as `fieldOps.planFieldSet`. */
-function mergePatches(loc: Location, patches: Partial<Location>[]): Partial<Location> | null {
+export function mergePatches(loc: Location, patches: Partial<Location>[]): Partial<Location> | null {
 	const out: Record<string, unknown> = {};
 	let extra: Record<string, unknown> | undefined;
 	for (const p of patches) {

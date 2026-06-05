@@ -32,6 +32,7 @@ import {
 	updateFilterSelection,
 } from "@/store/useMapStore";
 import { getFieldDef } from "@/lib/data/fieldDefRegistry";
+import { groupByField } from "@/lib/data/fieldOps.add";
 import { cmd } from "@/lib/commands";
 
 import { RgbColorPicker } from "react-colorful";
@@ -122,15 +123,7 @@ function ApplyFieldAsTagsDialog({
 		const ids = await cmd.storeResolveSelection({ type: "Everything" });
 		if (ids.length === 0) return;
 		const locs = await fetchLocationsByIds(ids);
-		const groups = new Map<string, number[]>();
-		for (const loc of locs) {
-			const v = loc.extra?.[field];
-			if (v == null || v === "") continue;
-			const key = String(v);
-			const arr = groups.get(key);
-			if (arr) arr.push(loc.id);
-			else groups.set(key, [loc.id]);
-		}
+		const groups = groupByField(locs, field);
 		if (groups.size === 0) return;
 		const names = [...groups.keys()];
 		const created = await createTags(names);

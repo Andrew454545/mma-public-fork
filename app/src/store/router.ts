@@ -18,7 +18,7 @@ interface Route {
 	manual: string | null; // null = closed, "" = default chapter, "<id>" = chapter
 }
 
-function parse(hash: string): Route {
+export function parse(hash: string): Route {
 	const parts = hash.replace(/^#/, "").split("/").filter(Boolean);
 	let mapId: string | null = null;
 	let i = 0;
@@ -30,7 +30,7 @@ function parse(hash: string): Route {
 	return { mapId, manual };
 }
 
-function build(r: Route): string {
+export function build(r: Route): string {
 	let h = r.mapId ? `#map/${r.mapId}` : "#";
 	if (r.manual !== null) {
 		h += r.mapId ? "/manual" : "manual";

@@ -19,6 +19,22 @@ export const DEFAULT_SETTINGS: HeatmapSettings = {
 	gradientIndex: 0,
 };
 
+const STORAGE_KEY = "mma_heatmap_settings";
+
+function loadSettings(): HeatmapSettings {
+	try {
+		const saved = localStorage.getItem(STORAGE_KEY);
+		if (saved) return { ...DEFAULT_SETTINGS, ...JSON.parse(saved) };
+	} catch {
+		// ignored
+	}
+	return { ...DEFAULT_SETTINGS };
+}
+
+function saveSettings(s: HeatmapSettings) {
+	localStorage.setItem(STORAGE_KEY, JSON.stringify(s));
+}
+
 type RGB = [number, number, number];
 
 export interface HeatmapGradient {
@@ -63,7 +79,7 @@ interface LocPoint {
 
 let overlay: GoogleMapsOverlay | null = null;
 let locStore: { locations: Map<number, unknown>; onChange(cb: () => void): () => void; destroy(): void } | null = null;
-let settings: HeatmapSettings = { ...DEFAULT_SETTINGS };
+let settings: HeatmapSettings = loadSettings();
 let onSettingsChange: (() => void) | null = null;
 
 export function getSettings(): HeatmapSettings {
@@ -91,6 +107,7 @@ export function setOnSettingsChange(cb: (() => void) | null) {
 
 export function updateSettings(patch: Partial<HeatmapSettings>) {
 	settings = { ...settings, ...patch };
+	saveSettings(settings);
 	rebuild();
 	onSettingsChange?.();
 }
@@ -148,7 +165,7 @@ export async function init(): Promise<() => void> {
 			overlay.finalize();
 			overlay = null;
 		}
-		settings = { ...DEFAULT_SETTINGS };
+		settings = loadSettings();
 		onSettingsChange = null;
 	};
 }

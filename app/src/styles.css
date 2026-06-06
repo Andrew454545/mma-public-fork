@@ -820,6 +820,7 @@ summary {
 	border-radius: 0.5rem;
 	padding: 0 0.75rem;
 	font-family: inherit;
+	height: 2rem;
 	line-height: 2rem;
 	text-decoration: none;
 	display: inline-block;
@@ -3752,11 +3753,17 @@ summary.button {
 }
 .map-meta {
 	justify-content: flex-start;
+	align-items: center;
 	gap: 1rem;
+	height: 2rem;
+	overflow: hidden;
 	display: flex;
 }
 .map-meta__total {
-	line-height: 2rem;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	min-width: 0;
 }
 .map-meta__count--added {
 	color: var(--constructive);
@@ -3775,12 +3782,14 @@ summary.button {
 }
 .map-meta__actions {
 	gap: 1rem;
-	line-height: 2rem;
 	display: flex;
+	align-items: center;
+	flex-shrink: 0;
 }
 .map-meta__import {
 	gap: 1rem;
 	display: flex;
+	flex-shrink: 0;
 }
 .map-overview {
 	grid-gap: 1rem;

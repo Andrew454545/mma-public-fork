@@ -16,7 +16,7 @@ fn make_view<'a>(
     patches: &'a HashMap<u32, Location>,
     adds: &'a [Location],
 ) -> LocView<'a> {
-    LocView::new(batch, dead, patches, adds)
+    LocView::new(batch, dead, patches, adds, None)
 }
 
 // for_each must visit every alive location exactly once, overlay applied: dead rows
@@ -37,11 +37,7 @@ fn for_each_visits_alive_overlay_applied() {
 
     let mut seen: Vec<(u32, f64, f64)> = Vec::new();
     view.for_each(|row| {
-        let (id, lat, lng) = match row {
-            Row::Base(i) => (view.id_at(i), view.lat_raw(i), view.lng_raw(i)),
-            Row::Loc(l) => (l.id, l.lat, l.lng),
-        };
-        seen.push((id, lat, lng));
+        seen.push((row.id(), row.lat(), row.lng()));
     });
 
     // id 1 from base, id 2 skipped (dead), id 3 with patched coords, id 4 the add.
@@ -410,8 +406,8 @@ fn tag_index_matches_scan_path() {
     let patches = HashMap::new();
     let adds: Vec<Location> = vec![];
 
-    let scan = LocView::new(Some(&batch), &dead, &patches, &adds);
-    let idx = LocView::with_tag_index(Some(&batch), &dead, &patches, &adds, Some(&sets));
+    let scan = LocView::new(Some(&batch), &dead, &patches, &adds, None);
+    let idx = LocView::new(Some(&batch), &dead, &patches, &adds, Some(&sets));
 
     for tag_id in [10u32, 20, 99] {
         let s = resolve(&scan, &SelectionProps::Tag { tag_id });
@@ -433,7 +429,7 @@ fn tag_index_excludes_dead_includes_adds() {
     let mut add = loc(3, 0.0, 0.0); add.tags = vec![10]; // overlay add carries the tag
     let adds = vec![add];
 
-    let idx = LocView::with_tag_index(Some(&batch), &dead, &patches, &adds, Some(&sets));
+    let idx = LocView::new(Some(&batch), &dead, &patches, &adds, Some(&sets));
     // 2 is dead -> excluded; 3 is an overlay add -> included; 1 stays.
     assert_eq!(resolve(&idx, &SelectionProps::Tag { tag_id: 10 }), vec![1, 3]);
 }
@@ -453,7 +449,7 @@ fn tag_index_honors_patches() {
     patches.insert(2u32, p2);
     let adds: Vec<Location> = vec![];
 
-    let idx = LocView::with_tag_index(Some(&batch), &dead, &patches, &adds, Some(&sets));
+    let idx = LocView::new(Some(&batch), &dead, &patches, &adds, Some(&sets));
     // Patches must override the stale index: 1 dropped, 2 added.
     assert_eq!(resolve(&idx, &SelectionProps::Tag { tag_id: 10 }), vec![2]);
 }
@@ -467,7 +463,7 @@ fn tag_index_in_composite() {
     let dead = HashSet::new();
     let patches = HashMap::new();
     let adds: Vec<Location> = vec![];
-    let idx = LocView::with_tag_index(Some(&batch), &dead, &patches, &adds, Some(&sets));
+    let idx = LocView::new(Some(&batch), &dead, &patches, &adds, Some(&sets));
 
     let t10 = Selection { key: "t10".into(), color: [0,0,0], props: SelectionProps::Tag { tag_id: 10 }, count: None };
     let t20 = Selection { key: "t20".into(), color: [0,0,0], props: SelectionProps::Tag { tag_id: 20 }, count: None };

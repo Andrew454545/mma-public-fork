@@ -11,13 +11,13 @@ use std::sync::{Arc, Mutex};
 
 use roaring::RoaringBitmap;
 
-use arrow::array::{Array, RecordBatch, UInt32Array};
+use arrow::array::RecordBatch;
 use arrow::datatypes::SchemaRef;
 use rayon::prelude::*;
 use tauri::Manager;
 
 use crate::arrow_bridge;
-use crate::arrow_bridge::{col_id, col_lat, col_lng, col_heading, col_tags, col_extra};
+use crate::arrow_bridge::{col_id, col_lat, col_lng, col_heading};
 use crate::fast_io;
 use crate::map_meta;
 use crate::types::{Location, Tag, LocationFlags};
@@ -81,9 +81,6 @@ fn serialize_cell_bitmask(ci: usize, cr: &CellRender, loc_sets: &[RoaringBitmap]
     }
     seg
 }
-
-
-fn num_rows(store: &Store) -> usize { store.batch.as_ref().map_or(0, |b| b.num_rows()) }
 
 /// Binary search for a location ID in a sorted batch. O(log n).
 fn batch_row_for_id(batch: &RecordBatch, id: u32) -> Option<usize> {
@@ -464,7 +461,7 @@ impl Store {
         let sel_props: Vec<SelectionProps> = self.selections.all.iter().map(|s| s.props.clone()).collect();
         for (si, props) in sel_props.iter().enumerate() {
             for loc in &test_locs {
-                if selections::test_add_row(loc, props) {
+                if selections::RowRef::from_loc(loc).matches(&props) {
                     self.selections.loc_sets[si].insert(loc.id);
                     self.selections.ids.insert(loc.id);
                 }
@@ -546,12 +543,6 @@ impl Store {
         self.selections.version += 1;
     }
 
-    /// Full selection re-resolve + bitmask build (used by callers outside finish_mutation).
-    pub(crate) fn refresh_and_sync_selections(&mut self) -> SelectionSync {
-        self.resolve_selection_membership();
-        self.rebuild_selection_bitmask()
-    }
-
     /// Build the bitmask file from current render_cells + selection_loc_sets (all cells).
     fn rebuild_selection_bitmask(&self) -> SelectionSync {
         let t0 = std::time::Instant::now();
@@ -621,26 +612,12 @@ impl Store {
     /// (alive base rows + overlay adds, with patches applied). O(N * tags/loc). Called
     /// on map open; incremental edits maintain it via `update_tag_counts`.
     pub(crate) fn rebuild_tag_sets(&mut self) {
+        let view = self.loc_view();
         let mut sets: HashMap<u32, RoaringBitmap> = HashMap::new();
-        if let Some(ref b) = self.batch {
-            let id_col = col_id(b);
-            let tags_col = col_tags(b);
-            for i in 0..b.num_rows() {
-                let id = id_col.value(i);
-                if self.overlay.dead.contains(&id) { continue; }
-                // Patched rows: use the patch's tags, not the stale base row.
-                if let Some(p) = self.overlay.patches.get(&id) {
-                    for &t in &p.tags { sets.entry(t).or_default().insert(id); }
-                } else {
-                    let list = tags_col.value(i);
-                    let ids = list.as_any().downcast_ref::<UInt32Array>().unwrap();
-                    for j in 0..ids.len() { sets.entry(ids.value(j)).or_default().insert(id); }
-                }
-            }
-        }
-        for loc in &self.overlay.adds {
-            for &t in &loc.tags { sets.entry(t).or_default().insert(loc.id); }
-        }
+        view.for_each(|row| {
+            let id = row.id();
+            row.for_each_tag(|tid| { sets.entry(tid).or_default().insert(id); });
+        });
         self.tags.sets = sets;
     }
 
@@ -720,11 +697,6 @@ impl Store {
         }
     }
 
-    /// Unwrap the batch ref; panics if no map is open.
-    fn batch_ref(&self) -> &RecordBatch {
-        self.batch.as_ref().expect("no map open")
-    }
-
     /// Look up a location by ID across patches, overlay_adds (binary search), and batch.
     fn get_loc_by_id(&self, id: u32) -> Option<Location> {
         if self.overlay.dead.contains(&id) { return None; }
@@ -739,25 +711,40 @@ impl Store {
         }
         None
     }
-
-    /// Read a location from the batch by row index, applying any overlay patch.
-    fn get_loc(&self, idx: usize) -> Location {
-        let loc = arrow_bridge::row_to_location(self.batch_ref(), idx);
-        if let Some(patched) = self.overlay.patches.get(&loc.id) {
-            return patched.clone();
-        }
-        loc
-    }
     
     /// Collect all alive locations (batch + overlay) into a Vec. O(N) time and space.
     pub(crate) fn collect_all_locations(&self) -> Vec<Location> {
         let view = self.loc_view();
         let mut locs = Vec::with_capacity(self.alive_count);
-        view.for_each(|row| locs.push(match row {
-            selections::Row::Base(i) => view.loc_at(i),
-            selections::Row::Loc(l) => l.clone(),
-        }));
+        view.for_each(|row| locs.push(row.to_location()));
         locs
+    }
+
+    fn compute_bounds(&self, scope: Option<&RoaringBitmap>) -> Option<[f64; 4]> {
+        let view = self.loc_view();
+        let (mut w, mut s, mut e, mut n) = (f64::MAX, f64::MAX, f64::MIN, f64::MIN);
+        let mut count = 0usize;
+        view.for_each(|row| {
+            if let Some(ids) = scope { if !ids.contains(row.id()) { return; } }
+            let (lat, lng) = (row.lat(), row.lng());
+            if lng < w { w = lng; }
+            if lat < s { s = lat; }
+            if lng > e { e = lng; }
+            if lat > n { n = lat; }
+            count += 1;
+        });
+        if count == 0 { None } else { Some([w, s, e, n]) }
+    }
+
+    fn count_tags(&self) -> (usize, HashMap<u32, usize>) {
+        let view = self.loc_view();
+        let mut counts: HashMap<u32, usize> = HashMap::new();
+        let mut alive = 0usize;
+        view.for_each(|row| {
+            alive += 1;
+            row.for_each_tag(|tid| { *counts.entry(tid).or_default() += 1; });
+        });
+        (alive, counts)
     }
 
     /// Read a single location from the committed base batch by id (ignores the
@@ -804,7 +791,7 @@ impl Store {
 
     /// Construct a read-only view over all alive locations for selection resolution.
     fn loc_view(&self) -> selections::LocView<'_> {
-        selections::LocView::with_tag_index(
+        selections::LocView::new(
             self.batch.as_ref(),
             &self.overlay.dead,
             &self.overlay.patches,
@@ -1272,51 +1259,28 @@ pub async fn store_open_map(
         store.next_id = store.next_id.max(max_add + 1);
     }
 
-    // Alive count + tag counts come from the full state (base + overlay). With no
-    // uncommitted edits that's just the base batch, so we avoid cloning it.
-    let overlay_locs = if store.overlay.dirty { Some(store.collect_all_locations()) } else { None };
-    let count = match &overlay_locs {
-        Some(all) => all.len(),
-        None => store.batch.as_ref().map_or(0, |b| b.num_rows()),
-    };
-    store.alive_count = count;
+    let (alive, tag_counts) = store.count_tags();
+    store.alive_count = alive;
     {
         let conn = fast_io::open_db(&app)?;
         conn.execute("UPDATE maps SET location_count = ?1 WHERE id = ?2",
-            rusqlite::params![count, map_id])?;
+            rusqlite::params![alive, map_id])?;
         let mut tags = read_tags_json(&conn, &map_id);
         for tag in tags.values_mut() { tag.count = 0; }
         let mut max_tag_id: u32 = tags.keys().max().copied().unwrap_or(0);
-        let process_tags = |slice: &[u32], tags: &mut HashMap<u32, Tag>, max_tag_id: &mut u32| {
-            for &tid in slice {
-                if tid > *max_tag_id { *max_tag_id = tid; }
-                match tags.get_mut(&tid) {
-                    Some(tag) => tag.count += 1,
-                    None => {
-                        tags.insert(tid, Tag {
-                            id: tid,
-                            name: format!("Tag {}", tid),
-                            color: util::color_for_name(&format!("Tag {}", tid)),
-                            visible: true,
-                            order: None,
-                            count: 1,
-                        });
-                    }
-                }
-            }
-        };
-        match &overlay_locs {
-            Some(all) => {
-                for loc in all { process_tags(&loc.tags, &mut tags, &mut max_tag_id); }
-            }
-            None => {
-                let b = store.batch.as_ref().unwrap();
-                let tags_col = col_tags(b);
-                for i in 0..b.num_rows() {
-                    let list = tags_col.value(i);
-                    let ids = list.as_any().downcast_ref::<UInt32Array>().unwrap();
-                    let slice: Vec<u32> = (0..ids.len()).map(|j| ids.value(j)).collect();
-                    process_tags(&slice, &mut tags, &mut max_tag_id);
+        for (&tid, &count) in &tag_counts {
+            if tid > max_tag_id { max_tag_id = tid; }
+            match tags.get_mut(&tid) {
+                Some(tag) => tag.count = count,
+                None => {
+                    tags.insert(tid, Tag {
+                        id: tid,
+                        name: format!("Tag {}", tid),
+                        color: util::color_for_name(&format!("Tag {}", tid)),
+                        visible: true,
+                        order: None,
+                        count,
+                    });
                 }
             }
         }
@@ -1740,13 +1704,7 @@ pub fn store_country_distribution(
     let coords: Vec<(f64, f64)> = with_store!(webview, state, |store| {
         let view = store.loc_view();
         let mut v = Vec::with_capacity(store.alive_count);
-        view.for_each(|row| {
-            let (lat, lng) = match row {
-                selections::Row::Base(i) => (view.lat_raw(i), view.lng_raw(i)),
-                selections::Row::Loc(l) => (l.lat, l.lng),
-            };
-            v.push((lat, lng));
-        });
+        view.for_each(|row| v.push((row.lat(), row.lng())));
         v
     });
     crate::borders::tally_countries(&app, &level, &coords)
@@ -2414,61 +2372,14 @@ pub fn store_reorder_tags(
     })
 }
 
-/// Compute the bounding box [west, south, east, north] of all alive locations. O(N).
+/// Compute the bounding box [west, south, east, north]. O(N).
+/// When `selected_only` is true, restricts to the current selection.
 #[tauri::command]
 #[specta::specta]
-pub fn store_bounds(webview: tauri::Webview, state: tauri::State<'_, StoreState>) -> AppResult<Option<[f64; 4]>> {
-    let _t = std::time::Instant::now();
+pub fn store_bounds(webview: tauri::Webview, state: tauri::State<'_, StoreState>, selected_only: bool) -> AppResult<Option<[f64; 4]>> {
     with_store!(webview, state, |store| {
-        if store.batch.is_none() && store.overlay.adds.is_empty() { return Ok(None); }
-
-        let view = store.loc_view();
-        let (mut w, mut s, mut e, mut n) = (f64::MAX, f64::MAX, f64::MIN, f64::MIN);
-        let mut count = 0usize;
-
-        view.for_each(|row| {
-            let (lat, lng) = match row {
-                selections::Row::Base(i) => (view.lat_raw(i), view.lng_raw(i)),
-                selections::Row::Loc(l) => (l.lat, l.lng),
-            };
-            if lng < w { w = lng; }
-            if lat < s { s = lat; }
-            if lng > e { e = lng; }
-            if lat > n { n = lat; }
-            count += 1;
-        });
-
-        log::debug!("[cmd] store_bounds total={}ms count={}", _t.elapsed().as_millis(), count);
-        if count == 0 { Ok(None) } else { Ok(Some([w, s, e, n])) }
-    })
-}
-
-/// Compute the bounding box of currently selected locations only. O(N).
-#[tauri::command]
-#[specta::specta]
-pub fn store_selection_bounds(webview: tauri::Webview, state: tauri::State<'_, StoreState>) -> AppResult<Option<[f64; 4]>> {
-    with_store!(webview, state, |store| {
-        if store.selections.ids.is_empty() { return Ok(None); }
-
-        let view = store.loc_view();
-        let (mut w, mut s, mut e, mut n) = (f64::MAX, f64::MAX, f64::MIN, f64::MIN);
-        let mut count = 0usize;
-
-        view.for_each(|row| {
-            let (id, lat, lng) = match row {
-                selections::Row::Base(i) => (view.id_at(i), view.lat_raw(i), view.lng_raw(i)),
-                selections::Row::Loc(l) => (l.id, l.lat, l.lng),
-            };
-            if !store.selections.ids.contains(id) { return; }
-            if lng < w { w = lng; }
-            if lat < s { s = lat; }
-            if lng > e { e = lng; }
-            if lat > n { n = lat; }
-            count += 1;
-        });
-
-        log::debug!("[cmd] store_selection_bounds total count={}", count);
-        if count == 0 { Ok(None) } else { Ok(Some([w, s, e, n])) }
+        let scope = if selected_only { Some(&store.selections.ids) } else { None };
+        Ok(store.compute_bounds(scope))
     })
 }
 
@@ -2489,58 +2400,19 @@ pub fn store_location_count(webview: tauri::Webview, state: tauri::State<'_, Sto
 pub fn store_extra_field_values(webview: tauri::Webview, state: tauri::State<'_, StoreState>, field: String) -> AppResult<Vec<String>> {
     let _t = std::time::Instant::now();
     with_store!(webview, state, |store| {
+    let view = store.loc_view();
     let mut seen = std::collections::BTreeSet::new();
-
-    let mut scan_extra_json = |json_str: &str| {
-        if let Ok(map) = serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(json_str) {
-            if let Some(v) = map.get(&field) {
-                let s = match v {
-                    serde_json::Value::String(s) => s.clone(),
-                    other => other.to_string(),
-                };
-                seen.insert(s);
-            }
+    view.for_each(|row| {
+        if let Some(v) = row.resolve_field(&field) {
+            let s = match v {
+                serde_json::Value::String(s) => s,
+                other => other.to_string(),
+            };
+            seen.insert(s);
         }
-    };
-
-    if let Some(ref b) = store.batch {
-        let ids = col_id(b);
-        let extras = col_extra(b);
-        for i in 0..b.num_rows() {
-            let id = ids.value(i);
-            if store.overlay.dead.contains(&id) { continue; }
-            if store.overlay.patches.contains_key(&id) { continue; }
-            if !extras.is_null(i) {
-                scan_extra_json(extras.value(i));
-            }
-        }
-    }
-    for loc in store.overlay.patches.values() {
-        if let Some(ref extra) = loc.extra {
-            if let Some(v) = extra.get(&field) {
-                let s = match v {
-                    serde_json::Value::String(s) => s.clone(),
-                    other => other.to_string(),
-                };
-                seen.insert(s);
-            }
-        }
-    }
-    for loc in &store.overlay.adds {
-        if let Some(ref extra) = loc.extra {
-            if let Some(v) = extra.get(&field) {
-                let s = match v {
-                    serde_json::Value::String(s) => s.clone(),
-                    other => other.to_string(),
-                };
-                seen.insert(s);
-            }
-        }
-    }
-
+    });
     log::debug!("[cmd] store_extra_field_values field={} total={}ms", field, _t.elapsed().as_millis());
     Ok(seen.into_iter().collect())
-
     })
 }
 
@@ -2748,26 +2620,15 @@ pub fn store_find_nearby(
             && selections::haversine_m(lat, lng, la, ln) <= radius_m
     };
 
-    view.for_each(|row| match row {
-        selections::Row::Base(i) => {
-            if within(view.lat_raw(i), view.lng_raw(i)) {
-                result.push(view.loc_at(i));
-            }
-        }
-        selections::Row::Loc(l) => {
-            if within(l.lat, l.lng) {
-                result.push(l.clone());
-            }
+    view.for_each(|row| {
+        if within(row.lat(), row.lng()) {
+            result.push(row.to_location());
         }
     });
 
     Ok(result)
     })
 }
-
-// ---------------------------------------------------------------------------
-// Selection commands
-// ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
 // Tests

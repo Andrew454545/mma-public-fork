@@ -241,7 +241,7 @@ export function useScoreMaxError(): number {
 	const [autoBbox, setAutoBbox] = useState<[number, number, number, number] | null>(null);
 
 	const refresh = useCallback(async () => {
-		const res = await cmd.storeBounds();
+		const res = await cmd.storeBounds(false);
 		setAutoBbox(res ?? null);
 	}, []);
 

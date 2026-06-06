@@ -158,10 +158,11 @@ export const commands = {
 	storeCountryDistribution: (level: string) => typedError<([string, number])[], string>(__TAURI_INVOKE("store_country_distribution", { level })),
 	/**  Return the number of alive locations (batch + adds - dead). */
 	storeLocationCount: () => typedError<number, string>(__TAURI_INVOKE("store_location_count")),
-	/**  Compute the bounding box [west, south, east, north] of all alive locations. O(N). */
-	storeBounds: () => typedError<[number, number, number, number] | null, string>(__TAURI_INVOKE("store_bounds")).then((v) => ((v.status === "ok" ? { ...v, data: v.data==null?v.data:v.data.map(i=>i) } : v) as typeof v)),
-	/**  Compute the bounding box of currently selected locations only. O(N). */
-	storeSelectionBounds: () => typedError<[number, number, number, number] | null, string>(__TAURI_INVOKE("store_selection_bounds")).then((v) => ((v.status === "ok" ? { ...v, data: v.data==null?v.data:v.data.map(i=>i) } : v) as typeof v)),
+	/**
+	 *  Compute the bounding box [west, south, east, north]. O(N).
+	 *  When `selected_only` is true, restricts to the current selection.
+	 */
+	storeBounds: (selectedOnly: boolean) => typedError<[number, number, number, number] | null, string>(__TAURI_INVOKE("store_bounds", { selectedOnly })).then((v) => ((v.status === "ok" ? { ...v, data: v.data==null?v.data:v.data.map(i=>i) } : v) as typeof v)),
 	/**
 	 *  Find all locations within `radius_m` metres of (`lat`, `lng`).
 	 * 

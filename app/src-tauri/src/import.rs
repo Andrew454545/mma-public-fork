@@ -280,87 +280,6 @@ fn find_object_boundaries(bytes: &[u8]) -> Vec<(usize, usize)> {
     ranges
 }
 
-/// Find the byte range of a JSON key's array value in raw bytes.
-/// Returns `(array_content_start, array_content_end)` -- inside the `[ ]`.
-fn find_key_array_range(bytes: &[u8], key: &str) -> Option<(usize, usize)> {
-    let needle = format!("\"{}\"", key);
-    let needle_bytes = needle.as_bytes();
-    let mut i = 0;
-    let mut in_string = false;
-    let mut escape = false;
-
-    while i < bytes.len() {
-        if escape { escape = false; i += 1; continue; }
-        if bytes[i] == b'\\' && in_string { escape = true; i += 1; continue; }
-        if bytes[i] == b'"' { in_string = !in_string; i += 1; continue; }
-        if in_string { i += 1; continue; }
-        if i + needle_bytes.len() <= bytes.len() && &bytes[i..i + needle_bytes.len()] == needle_bytes {
-            // Found key — skip past the colon and whitespace to find [
-            let mut j = i + needle_bytes.len();
-            while j < bytes.len() && (bytes[j] == b' ' || bytes[j] == b':' || bytes[j] == b'\n' || bytes[j] == b'\r' || bytes[j] == b'\t') { j += 1; }
-            if j < bytes.len() && bytes[j] == b'[' {
-                let arr_start = j + 1;
-                // Find matching ]
-                let mut depth = 1i32;
-                let mut k = arr_start;
-                let mut s = false;
-                let mut esc = false;
-                while k < bytes.len() && depth > 0 {
-                    if esc { esc = false; k += 1; continue; }
-                    if bytes[k] == b'\\' && s { esc = true; k += 1; continue; }
-                    if bytes[k] == b'"' { s = !s; k += 1; continue; }
-                    if s { k += 1; continue; }
-                    if bytes[k] == b'[' { depth += 1; }
-                    if bytes[k] == b']' { depth -= 1; }
-                    k += 1;
-                }
-                return Some((arr_start, k - 1));
-            }
-        }
-        i += 1;
-    }
-    None
-}
-
-/// Extract a top-level string field from raw JSON bytes without full parse.
-/// Only matches keys at depth 1 to avoid false positives inside nested objects.
-fn extract_string_field(bytes: &[u8], key: &str) -> Option<String> {
-    let needle = format!("\"{}\"", key);
-    let needle_bytes = needle.as_bytes();
-    let mut i = 0;
-    let mut in_string = false;
-    let mut escape = false;
-    let mut depth = 0i32;
-
-    while i < bytes.len() {
-        if escape { escape = false; i += 1; continue; }
-        if bytes[i] == b'\\' && in_string { escape = true; i += 1; continue; }
-        if bytes[i] == b'"' { in_string = !in_string; i += 1; continue; }
-        if in_string { i += 1; continue; }
-        if bytes[i] == b'{' || bytes[i] == b'[' { depth += 1; }
-        if bytes[i] == b'}' || bytes[i] == b']' { depth -= 1; }
-        // Only match at top level
-        if depth == 1 && i + needle_bytes.len() <= bytes.len() && &bytes[i..i + needle_bytes.len()] == needle_bytes {
-            let mut j = i + needle_bytes.len();
-            while j < bytes.len() && (bytes[j] == b' ' || bytes[j] == b':' || bytes[j] == b'\n' || bytes[j] == b'\r' || bytes[j] == b'\t') { j += 1; }
-            if j < bytes.len() && bytes[j] == b'"' {
-                j += 1;
-                let start = j;
-                let mut esc2 = false;
-                while j < bytes.len() {
-                    if esc2 { esc2 = false; j += 1; continue; }
-                    if bytes[j] == b'\\' { esc2 = true; j += 1; continue; }
-                    if bytes[j] == b'"' { break; }
-                    j += 1;
-                }
-                return Some(String::from_utf8_lossy(&bytes[start..j]).to_string());
-            }
-        }
-        i += 1;
-    }
-    None
-}
-
 /// Core JSON parser. Three-phase pipeline:
 /// 1. **Scan** -- find metadata keys (`name`, `folder`) in the first 4-8KB,
 ///    then locate the coordinate array (`customCoordinates` or `locations`).
@@ -628,7 +547,6 @@ fn write_map_to_db(conn: &Connection, app: &tauri::AppHandle, mut map: ParsedMap
         loc.id = (i as u32) + 1;
     }
 
-    // Write Arrow IPC file
     let batch = arrow_bridge::locations_to_batch(&map.locations);
     let arrow_path = fast_io::arrow_path(app, &map_id)?;
     fast_io::write_arrow_ipc(&arrow_path, &batch)?;
@@ -644,7 +562,6 @@ fn write_map_to_db(conn: &Connection, app: &tauri::AppHandle, mut map: ParsedMap
         serde_json::Value::Object(tag_map).to_string()
     };
 
-    // Insert map with location_count + tags
     tx.execute(
         "INSERT INTO maps (id, name, description, folder, settings, score_bounds, extra, tags, location_count, created_at, updated_at) VALUES (?1, ?2, '', ?3, ?4, '\"auto\"', ?5, ?6, ?7, ?8, ?9)",
         rusqlite::params![map_id, map.name, map.folder, crate::map_meta::default_settings_json(), extra_json, tags_json, loc_count, now, now],
@@ -834,7 +751,7 @@ fn build_preview(parsed: ParsedMap) -> AppResult<EditorImportPreview> {
         fields,
         warnings: parsed.warnings.clone(),
         preview_positions_path,
-        bounds: compute_bounds(&parsed.locations),
+        bounds: crate::util::compute_bounds(parsed.locations.iter().map(|l| (l.lat, l.lng))),
     };
 
     *EDITOR_IMPORT_CACHE.lock().unwrap() = Some(parsed);
@@ -882,20 +799,6 @@ pub struct EditorImportResult {
     pub warnings: Vec<String>,
 }
 
-fn compute_bounds(locs: &[Location]) -> Option<[f64; 4]> {
-    if locs.is_empty() { return None; }
-    let mut w = f64::MAX;
-    let mut s = f64::MAX;
-    let mut e = f64::MIN;
-    let mut n = f64::MIN;
-    for l in locs {
-        w = w.min(l.lng);
-        s = s.min(l.lat);
-        e = e.max(l.lng);
-        n = n.max(l.lat);
-    }
-    Some([w, s, e, n])
-}
 
 /// Merge imported tags with existing map tags by case-insensitive name matching.
 /// Tags that already exist get remapped to the existing ID; new tags get fresh

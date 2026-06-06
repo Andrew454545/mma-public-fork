@@ -366,7 +366,6 @@ pub fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             location_store::store_country_distribution,
             location_store::store_location_count,
             location_store::store_bounds,
-            location_store::store_selection_bounds,
             location_store::store_find_nearby,
             location_store::store_extra_field_values,
             // --- Tag CRUD ---

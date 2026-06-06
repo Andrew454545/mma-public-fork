@@ -258,25 +258,6 @@ pub fn auto_register_field_defs(
     if new_defs.is_empty() { None } else { Some(new_defs) }
 }
 
-/// Upsert field defs — overwrites existing entries. Used for explicit user edits.
-fn upsert_field_defs(
-    conn: &rusqlite::Connection,
-    map_id: &str,
-    new_defs: &HashMap<String, ExtraFieldDef>,
-) -> AppResult<()> {
-    let extra_str: String = conn.query_row(
-        "SELECT extra FROM maps WHERE id = ?1", params![map_id], |row| row.get(0),
-    )?;
-    let mut extra: MapExtra = serde_json::from_str(&extra_str).unwrap_or_default();
-    let fields = extra.fields.get_or_insert_with(HashMap::new);
-    for (k, v) in new_defs {
-        fields.insert(k.clone(), v.clone());
-    }
-    let json = serde_json::to_string(&extra).unwrap_or_default();
-    conn.execute("UPDATE maps SET extra = ?1 WHERE id = ?2", params![json, map_id])?;
-    Ok(())
-}
-
 /// Persist new field defs — skips keys that already exist. Used for auto-registration.
 pub fn persist_field_defs(
     conn: &rusqlite::Connection,

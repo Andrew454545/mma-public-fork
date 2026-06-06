@@ -99,26 +99,101 @@ pub struct LocView<'a> {
     tag_sets: Option<&'a HashMap<u32, RoaringBitmap>>,
 }
 
-/// One alive location yielded by [`LocView::for_each`]: either a base-batch row
-/// (read its columns via `lat_raw`/`lng_raw`/`loc_at` at the index) or an effective
-/// `Location` -- an overlay patch or add.
-pub enum Row<'a> {
-    Base(usize),
+/// One alive location yielded by [`LocView::for_each`]. Provides uniform field
+/// access regardless of whether the data lives in an Arrow batch column or a
+/// materialized `Location` struct (patch or overlay add).
+pub struct RowRef<'a, 'v> {
+    inner: RowInner<'a, 'v>,
+}
+
+// SAFETY: RowRef only holds shared references to immutable Arrow arrays and
+// Location structs. Nothing is mutated through these references during parallel
+// iteration. The borrow checker can't prove this statically because LocView
+// holds non-Send references, but all accessed data is effectively read-only.
+unsafe impl Send for RowRef<'_, '_> {}
+unsafe impl Sync for RowRef<'_, '_> {}
+
+enum RowInner<'a, 'v> {
+    Base(&'v LocView<'a>, usize),
     Loc(&'a Location),
+}
+
+impl<'a> RowRef<'a, '_> {
+    pub fn from_loc(loc: &'a Location) -> Self {
+        RowRef { inner: RowInner::Loc(loc) }
+    }
+}
+
+impl<'a, 'v> RowRef<'a, 'v> {
+    #[inline] pub fn id(&self) -> u32 {
+        match &self.inner { RowInner::Base(v, i) => v.batch_id(*i), RowInner::Loc(l) => l.id }
+    }
+    #[inline] pub fn lat(&self) -> f64 {
+        match &self.inner { RowInner::Base(v, i) => v.lats.unwrap().value(*i), RowInner::Loc(l) => l.lat }
+    }
+    #[inline] pub fn lng(&self) -> f64 {
+        match &self.inner { RowInner::Base(v, i) => v.lngs.unwrap().value(*i), RowInner::Loc(l) => l.lng }
+    }
+    #[inline] pub fn heading(&self) -> f64 {
+        match &self.inner { RowInner::Base(v, i) => v.headings.unwrap().value(*i), RowInner::Loc(l) => l.heading }
+    }
+    #[inline] pub fn pitch(&self) -> f64 {
+        match &self.inner { RowInner::Base(v, i) => v.pitches.unwrap().value(*i), RowInner::Loc(l) => l.pitch }
+    }
+    #[inline] pub fn zoom(&self) -> f64 {
+        match &self.inner { RowInner::Base(v, i) => v.zooms.unwrap().value(*i), RowInner::Loc(l) => l.zoom }
+    }
+    #[inline] pub fn flags(&self) -> LocationFlags {
+        match &self.inner {
+            RowInner::Base(v, i) => LocationFlags::from_bits_retain(v.flags.unwrap().value(*i)),
+            RowInner::Loc(l) => l.flags,
+        }
+    }
+    pub fn has_tag(&self, tag_id: u32) -> bool {
+        match &self.inner {
+            RowInner::Base(v, i) => {
+                let list = v.tags.unwrap().value(*i);
+                let ids = list.as_any().downcast_ref::<UInt32Array>().unwrap();
+                (0..ids.len()).any(|k| ids.value(k) == tag_id)
+            }
+            RowInner::Loc(l) => l.tags.contains(&tag_id),
+        }
+    }
+    pub fn tags_empty(&self) -> bool {
+        match &self.inner {
+            RowInner::Base(v, i) => v.tags.unwrap().value(*i).is_empty(),
+            RowInner::Loc(l) => l.tags.is_empty(),
+        }
+    }
+    pub fn for_each_tag(&self, mut f: impl FnMut(u32)) {
+        match &self.inner {
+            RowInner::Base(v, i) => {
+                let list = v.tags.unwrap().value(*i);
+                let ids = list.as_any().downcast_ref::<UInt32Array>().unwrap();
+                for j in 0..ids.len() { f(ids.value(j)); }
+            }
+            RowInner::Loc(l) => { for &t in &l.tags { f(t); } }
+        }
+    }
+    pub fn resolve_field(&self, field: &str) -> Option<serde_json::Value> {
+        match &self.inner {
+            RowInner::Base(v, i) => resolve_field_arrow(v, *i, field),
+            RowInner::Loc(l) => resolve_field_loc(l, field),
+        }
+    }
+    pub fn to_location(&self) -> Location {
+        match &self.inner {
+            RowInner::Base(v, i) => v.loc_at(*i),
+            RowInner::Loc(l) => (*l).clone(),
+        }
+    }
+    pub fn matches(&self, props: &SelectionProps) -> bool {
+        test_row(self, props)
+    }
 }
 
 impl<'a> LocView<'a> {
     pub fn new(
-        batch: Option<&'a RecordBatch>,
-        dead: &'a HashSet<u32>,
-        patches: &'a HashMap<u32, Location>,
-        adds: &'a [Location],
-    ) -> Self {
-        Self::with_tag_index(batch, dead, patches, adds, None)
-    }
-
-    /// Like `new` but with a tag membership index for index-speed `Tag` leaves.
-    pub fn with_tag_index(
         batch: Option<&'a RecordBatch>,
         dead: &'a HashSet<u32>,
         patches: &'a HashMap<u32, Location>,
@@ -176,62 +251,50 @@ impl<'a> LocView<'a> {
     #[inline] pub fn lat_raw(&self, i: usize) -> f64 { self.lats.unwrap().value(i) }
     #[inline] pub fn lng_raw(&self, i: usize) -> f64 { self.lngs.unwrap().value(i) }
 
-    /// Materialize batch row `i` into a full `Location`. Callers reach this only via
-    /// `Row::Base`, which already excludes dead and patched rows.
+    /// Materialize batch row `i` into a full `Location`.
     pub fn loc_at(&self, i: usize) -> Location {
         crate::arrow_bridge::row_to_location(self.batch.unwrap(), i)
     }
 
     /// Visit every alive location once, overlay applied: dead rows skipped, patched
-    /// rows surfaced as `Row::Loc`, then the overlay adds. The patch is resolved a
+    /// rows surfaced as `RowRef::Loc`, then the overlay adds. The patch is resolved a
     /// single time per row. Serial; `f` may accumulate.
     #[inline]
-    pub fn for_each(&self, mut f: impl FnMut(Row)) {
+    pub fn for_each(&self, mut f: impl FnMut(RowRef)) {
         for i in 0..self.batch_rows {
             if !self.is_alive(i) { continue; }
             match self.patch_at(i) {
-                Some(p) => f(Row::Loc(p)),
-                None => f(Row::Base(i)),
+                Some(p) => f(RowRef { inner: RowInner::Loc(p) }),
+                None => f(RowRef { inner: RowInner::Base(self, i) }),
             }
         }
         for loc in self.adds {
-            f(Row::Loc(loc));
+            f(RowRef { inner: RowInner::Loc(loc) });
         }
     }
 
-    /// Build a bool mask over all locations (batch + adds) using per-row predicates.
+    /// Build a bool mask over all locations (batch + adds) using a per-row predicate.
     /// Batch rows are scanned in parallel with rayon. O(N) with parallel speedup.
     pub fn resolve_mask(
         &self,
-        batch_test: impl Fn(usize) -> bool + Sync + Send,
-        add_test: impl Fn(usize, &Location) -> bool,
+        test: impl Fn(&RowRef) -> bool + Sync + Send,
     ) -> Vec<bool> {
         let mut mask: Vec<bool> = (0..self.batch_rows)
             .into_par_iter()
             .with_min_len(CHUNK_SIZE)
-            .map(|i| self.is_alive(i) && batch_test(i))
+            .map(|i| {
+                if !self.is_alive(i) { return false; }
+                let row = match self.patch_at(i) {
+                    Some(p) => RowRef { inner: RowInner::Loc(p) },
+                    None => RowRef { inner: RowInner::Base(self, i) },
+                };
+                test(&row)
+            })
             .collect();
-        mask.extend(self.adds.iter().enumerate().map(|(j, loc)| add_test(j, loc)));
+        mask.extend(self.adds.iter().map(|loc| {
+            test(&RowRef::from_loc(loc))
+        }));
         mask
-    }
-
-    /// Map each LocView index to its render index (or -1 if not rendered). O(N).
-    pub fn build_render_lookup(&self, render_id_to_index: &HashMap<u32, usize>) -> Vec<i32> {
-        let n = self.batch_rows + self.adds.len();
-        let mut lookup = vec![-1i32; n];
-        for i in 0..self.batch_rows {
-            if !self.is_alive(i) { continue; }
-            let id = self.id_at(i);
-            if let Some(&ri) = render_id_to_index.get(&id) {
-                lookup[i] = ri as i32;
-            }
-        }
-        for (j, loc) in self.adds.iter().enumerate() {
-            if let Some(&ri) = render_id_to_index.get(&loc.id) {
-                lookup[self.batch_rows + j] = ri as i32;
-            }
-        }
-        lookup
     }
 }
 
@@ -239,60 +302,7 @@ impl<'a> LocView<'a> {
 // Bitmask resolve
 // ---------------------------------------------------------------------------
 
-/// Read-only accessor over one location's fields, abstracting whether the data
-/// lives in an Arrow batch row (overlay-aware) or a `Location` struct. This lets
-/// the selection predicate in [`test_row`] be written once for both storage paths
-/// instead of being mirrored arm-for-arm.
-trait RowAccessor {
-    fn id(&self) -> u32;
-    fn lat(&self) -> f64;
-    fn lng(&self) -> f64;
-    fn heading(&self) -> f64;
-    fn flags(&self) -> LocationFlags;
-    fn has_tag(&self, tag_id: u32) -> bool;
-    fn tags_empty(&self) -> bool;
-    fn resolve_field(&self, field: &str) -> Option<serde_json::Value>;
-}
-
-/// A single base Arrow batch row -- reads columns directly, no overlay check.
-/// [`test_batch_row`] resolves the patch once and routes patched rows through the
-/// `Location` accessor instead, so this type is only ever used for unpatched rows.
-struct BatchRow<'a, 'v> {
-    view: &'a LocView<'v>,
-    i: usize,
-}
-
-impl RowAccessor for BatchRow<'_, '_> {
-    fn id(&self) -> u32 { self.view.batch_id(self.i) }
-    fn lat(&self) -> f64 { self.view.lats.unwrap().value(self.i) }
-    fn lng(&self) -> f64 { self.view.lngs.unwrap().value(self.i) }
-    fn heading(&self) -> f64 { self.view.headings.unwrap().value(self.i) }
-    fn flags(&self) -> LocationFlags { LocationFlags::from_bits_retain(self.view.flags.unwrap().value(self.i)) }
-    fn has_tag(&self, tag_id: u32) -> bool {
-        let list = self.view.tags.unwrap().value(self.i);
-        let ids = list.as_any().downcast_ref::<UInt32Array>().unwrap();
-        (0..ids.len()).any(|k| ids.value(k) == tag_id)
-    }
-    fn tags_empty(&self) -> bool { self.view.tags.unwrap().value(self.i).is_empty() }
-    fn resolve_field(&self, field: &str) -> Option<serde_json::Value> {
-        resolve_field_arrow(self.view, self.i, field)
-    }
-}
-
-impl RowAccessor for Location {
-    fn id(&self) -> u32 { self.id }
-    fn lat(&self) -> f64 { self.lat }
-    fn lng(&self) -> f64 { self.lng }
-    fn heading(&self) -> f64 { self.heading }
-    fn flags(&self) -> LocationFlags { self.flags }
-    fn has_tag(&self, tag_id: u32) -> bool { self.tags.contains(&tag_id) }
-    fn tags_empty(&self) -> bool { self.tags.is_empty() }
-    fn resolve_field(&self, field: &str) -> Option<serde_json::Value> { resolve_field_loc(self, field) }
-}
-
-/// The selection predicate, written once over any [`RowAccessor`]. Returns true if
-/// the row matches `props`. Composites are resolved separately and fall to false.
-fn test_row<R: RowAccessor>(r: &R, props: &SelectionProps) -> bool {
+fn test_row(r: &RowRef, props: &SelectionProps) -> bool {
     match props {
         SelectionProps::Everything => true,
         SelectionProps::Locations { locations, .. }
@@ -312,21 +322,8 @@ fn test_row<R: RowAccessor>(r: &R, props: &SelectionProps) -> bool {
             Some(ref v) => compare_filter(v, op, value, value2.as_ref()),
             None => op.as_str() == "neq" || op.as_str() == "nothas",
         },
-        _ => false, // composites handled separately
+        _ => false,
     }
-}
-
-/// Per-row predicate for batch rows. Thread-safe (reads only shared Arrow columns and immutable overlay refs).
-fn test_batch_row(view: &LocView, i: usize, props: &SelectionProps) -> bool {
-    match view.patch_at(i) {
-        Some(p) => test_row(p, props),
-        None => test_row(&BatchRow { view, i }, props),
-    }
-}
-
-/// Per-row predicate for overlay add locations.
-pub(crate) fn test_add_row(loc: &Location, props: &SelectionProps) -> bool {
-    test_row(loc, props)
 }
 
 /// Minimum rayon chunk size for parallel batch iteration. Tuned to amortize
@@ -397,10 +394,7 @@ pub fn resolve_set(view: &LocView, props: &SelectionProps) -> RoaringBitmap {
 /// Set of all alive location ids (batch minus dead, plus overlay adds).
 fn alive_id_set(view: &LocView) -> RoaringBitmap {
     let mut set = RoaringBitmap::new();
-    for i in 0..view.batch_rows {
-        if view.is_alive(i) { set.insert(view.id_at(i)); }
-    }
-    for loc in view.adds.iter() { set.insert(loc.id); }
+    view.for_each(|row| { set.insert(row.id()); });
     set
 }
 
@@ -427,7 +421,7 @@ fn resolve_leaf_mask(view: &LocView, props: &SelectionProps) -> Vec<bool> {
         | SelectionProps::ValidationState { locations, .. }
         | SelectionProps::Reviewed { locations, .. } => {
             let set: HashSet<u32> = locations.iter().copied().collect();
-            view.resolve_mask(|i| set.contains(&view.id_at(i)), |_, loc| set.contains(&loc.id))
+            view.resolve_mask(|r| set.contains(&r.id()))
         }
         SelectionProps::Duplicates { distance } => {
             let mut mask = vec![false; n];
@@ -435,32 +429,16 @@ fn resolve_leaf_mask(view: &LocView, props: &SelectionProps) -> Vec<bool> {
             mask
         }
         SelectionProps::Polygon { polygon, include_informational } => {
-            // Broad-phase: a point outside the geometry's bbox can't be inside any ring,
-            // so reject it with 4 compares before the full crossing-number test. Bbox is
-            // computed once here, not per point.
             let inc = *include_informational;
             match geometry_bbox(polygon) {
                 None => vec![false; n],
-                Some(bb) => view.resolve_mask(
-                    |i| {
-                        if let Some(p) = view.patch_at(i) {
-                            if !inc && p.flags.contains(LocationFlags::INFORMATIONAL) { return false; }
-                            in_bbox(p.lng, p.lat, &bb) && point_in_geometry(p.lng, p.lat, polygon)
-                        } else {
-                            if !inc && (view.flags.unwrap().value(i) & LocationFlags::INFORMATIONAL.bits() != 0) { return false; }
-                            let lng = view.lngs.unwrap().value(i);
-                            let lat = view.lats.unwrap().value(i);
-                            in_bbox(lng, lat, &bb) && point_in_geometry(lng, lat, polygon)
-                        }
-                    },
-                    |_, loc| {
-                        if !inc && loc.flags.contains(LocationFlags::INFORMATIONAL) { return false; }
-                        in_bbox(loc.lng, loc.lat, &bb) && point_in_geometry(loc.lng, loc.lat, polygon)
-                    },
-                ),
+                Some(bb) => view.resolve_mask(|r| {
+                    if !inc && r.flags().contains(LocationFlags::INFORMATIONAL) { return false; }
+                    in_bbox(r.lng(), r.lat(), &bb) && point_in_geometry(r.lng(), r.lat(), polygon)
+                }),
             }
         }
-        _ => view.resolve_mask(|i| test_batch_row(view, i, props), |_, loc| test_add_row(loc, props)),
+        _ => view.resolve_mask(|r| test_row(r, props)),
     }
 }
 
@@ -667,17 +645,7 @@ pub fn find_duplicate_groups(view: &LocView, distance_m: f64) -> Vec<Vec<u32>> {
 
     struct Pt { lat: f64, lng: f64, id: u32 }
     let mut points: Vec<Pt> = Vec::new();
-    for i in 0..view.batch_rows {
-        if !view.is_alive(i) { continue; }
-        if let Some(p) = view.patch_at(i) {
-            points.push(Pt { lat: p.lat, lng: p.lng, id: p.id });
-        } else {
-            points.push(Pt { lat: view.lats.unwrap().value(i), lng: view.lngs.unwrap().value(i), id: view.id_at(i) });
-        }
-    }
-    for loc in view.adds.iter() {
-        points.push(Pt { lat: loc.lat, lng: loc.lng, id: loc.id });
-    }
+    view.for_each(|row| points.push(Pt { lat: row.lat(), lng: row.lng(), id: row.id() }));
 
     let n = points.len();
     if n < 2 { return Vec::new(); }

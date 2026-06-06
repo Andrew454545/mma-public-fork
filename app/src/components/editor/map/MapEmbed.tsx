@@ -1162,7 +1162,7 @@ export function MapEmbed() {
 				});
 
 				if (map.meta.locationCount > 0) {
-					cmd.storeBounds().then((bounds) => {
+					cmd.storeBounds(false).then((bounds) => {
 						if (cancelled || !gMapRef.current || !bounds) return;
 						const [west, south, east, north] = bounds as [number, number, number, number];
 						const gm = gMapRef.current!;
@@ -1482,7 +1482,7 @@ export function MapEmbed() {
 	});
 
 	useHotkey(useBinding("mapZoomBounds"), () => {
-		cmd.storeBounds().then((bounds) => {
+		cmd.storeBounds(false).then((bounds) => {
 			const gm = gMapRef.current;
 			if (!gm || !bounds || !google?.maps) return;
 			const [west, south, east, north] = bounds as [number, number, number, number];
@@ -1494,7 +1494,7 @@ export function MapEmbed() {
 	});
 
 	useHotkey(useBinding("mapZoomSelection"), () => {
-		cmd.storeSelectionBounds().then((bounds) => {
+		cmd.storeBounds(true).then((bounds) => {
 			const gm = gMapRef.current;
 			if (!gm || !bounds || !google?.maps) return;
 			const [west, south, east, north] = bounds as [number, number, number, number];

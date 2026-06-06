@@ -146,6 +146,102 @@ fn polygon_resolve_matches_full_test_with_bbox_reject() {
 }
 
 // -----------------------------------------------------------------------
+// Antimeridian
+// -----------------------------------------------------------------------
+
+#[test]
+fn point_in_ring_across_antimeridian() {
+    // Polygon spanning the antimeridian: 170E to 170W (i.e., 170 to -170)
+    let ring = vec![
+        [170.0, -10.0], [-170.0, -10.0], [-170.0, 10.0], [170.0, 10.0], [170.0, -10.0],
+    ];
+    assert!(point_in_ring(175.0, 0.0, &ring));   // inside, east side
+    assert!(point_in_ring(-175.0, 0.0, &ring));  // inside, west side
+    assert!(point_in_ring(180.0, 0.0, &ring));   // on the dateline
+    assert!(!point_in_ring(160.0, 0.0, &ring));  // outside, well west
+    assert!(!point_in_ring(-160.0, 0.0, &ring)); // outside, well east
+    assert!(!point_in_ring(0.0, 0.0, &ring));    // outside, other side of world
+}
+
+#[test]
+fn geometry_bbox_antimeridian() {
+    let ring = vec![
+        [170.0, -10.0], [-170.0, -10.0], [-170.0, 10.0], [170.0, 10.0], [170.0, -10.0],
+    ];
+    let geom = PolygonGeometry { coordinates: vec![ring], extra_polygons: None, properties: None };
+    let bb = geometry_bbox(&geom).unwrap();
+    // After normalization: 170 and 190 (= -170 + 360)
+    assert_eq!(bb[0], 170.0); // min_lng
+    assert_eq!(bb[2], 190.0); // max_lng
+
+    // in_bbox handles the normalized space transparently
+    assert!(in_bbox(175.0, 0.0, &bb));
+    assert!(in_bbox(-175.0, 0.0, &bb)); // negative lng auto-shifted
+    assert!(!in_bbox(0.0, 0.0, &bb));
+}
+
+#[test]
+fn polygon_resolve_across_antimeridian() {
+    let ring = vec![
+        [170.0, -10.0], [-170.0, -10.0], [-170.0, 10.0], [170.0, 10.0], [170.0, -10.0],
+    ];
+    let geom = PolygonGeometry { coordinates: vec![ring], extra_polygons: None, properties: None };
+    let dead = HashSet::new();
+    let patches = HashMap::new();
+    let adds = vec![
+        loc(1, 5.0, 175.0),   // inside (east of dateline)
+        loc(2, 5.0, -175.0),  // inside (west of dateline)
+        loc(3, 5.0, 0.0),     // outside (other side of world)
+        loc(4, 5.0, 160.0),   // outside (west of polygon)
+    ];
+    let view = make_view(None, &dead, &patches, &adds);
+    let ids = resolve(&view, &SelectionProps::Polygon {
+        polygon: geom,
+        include_informational: true,
+    });
+    assert!(ids.contains(&1));
+    assert!(ids.contains(&2));
+    assert!(!ids.contains(&3));
+    assert!(!ids.contains(&4));
+}
+
+#[test]
+fn point_in_ring_unwrapped_antimeridian() {
+    // Rectangle-style unwrapped: east > 180 instead of negative
+    let ring = vec![
+        [170.0, -10.0], [190.0, -10.0], [190.0, 10.0], [170.0, 10.0], [170.0, -10.0],
+    ];
+    assert!(point_in_ring(175.0, 0.0, &ring));
+    assert!(point_in_ring(-175.0, 0.0, &ring)); // = 185 after normalization
+    assert!(!point_in_ring(0.0, 0.0, &ring));
+    assert!(!point_in_ring(160.0, 0.0, &ring));
+}
+
+#[test]
+fn polygon_resolve_unwrapped_antimeridian() {
+    // Rectangle-mode coordinates: east=190 instead of -170
+    let ring = vec![
+        [170.0, -10.0], [190.0, -10.0], [190.0, 10.0], [170.0, 10.0], [170.0, -10.0],
+    ];
+    let geom = PolygonGeometry { coordinates: vec![ring], extra_polygons: None, properties: None };
+    let dead = HashSet::new();
+    let patches = HashMap::new();
+    let adds = vec![
+        loc(1, 5.0, 175.0),   // inside
+        loc(2, 5.0, -175.0),  // inside (other side of IDL)
+        loc(3, 5.0, 0.0),     // outside
+    ];
+    let view = make_view(None, &dead, &patches, &adds);
+    let ids = resolve(&view, &SelectionProps::Polygon {
+        polygon: geom,
+        include_informational: true,
+    });
+    assert!(ids.contains(&1));
+    assert!(ids.contains(&2));
+    assert!(!ids.contains(&3));
+}
+
+// -----------------------------------------------------------------------
 // Haversine
 // -----------------------------------------------------------------------
 

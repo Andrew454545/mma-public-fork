@@ -449,15 +449,39 @@ pub fn resolve(view: &LocView, props: &SelectionProps) -> Vec<u32> {
 
 // --- Geometry (ray-casting point-in-polygon) ---
 
+/// Returns true if the ring involves the antimeridian — either wrapped coordinates
+/// (edge lng jump > 180) or unwrapped (any vertex lng outside [-180, 180]).
+fn ring_crosses_antimeridian(ring: &[[f64; 2]]) -> bool {
+    let n = ring.len();
+    if n < 2 { return false; }
+    let mut j = n - 1;
+    for i in 0..n {
+        if ring[i][0] > 180.0 || ring[i][0] < -180.0 { return true; }
+        if (ring[i][0] - ring[j][0]).abs() > 180.0 { return true; }
+        j = i;
+    }
+    false
+}
+
+#[inline]
+fn normalize_lng(lng: f64) -> f64 {
+    if lng < 0.0 { lng + 360.0 } else { lng }
+}
+
 /// Ray-casting algorithm: cast a horizontal ray eastward from (lng, lat) and count
 /// edge crossings. Odd count = inside. O(V) where V = vertices.
+/// Handles antimeridian-crossing rings by shifting to [0, 360).
 pub(crate) fn point_in_ring(lng: f64, lat: f64, ring: &[[f64; 2]]) -> bool {
+    let crosses = ring_crosses_antimeridian(ring);
+    let lng = if crosses { normalize_lng(lng) } else { lng };
     let mut inside = false;
     let n = ring.len();
     let mut j = n.wrapping_sub(1);
     for i in 0..n {
-        let (xi, yi) = (ring[i][0], ring[i][1]);
-        let (xj, yj) = (ring[j][0], ring[j][1]);
+        let xi = if crosses { normalize_lng(ring[i][0]) } else { ring[i][0] };
+        let yi = ring[i][1];
+        let xj = if crosses { normalize_lng(ring[j][0]) } else { ring[j][0] };
+        let yj = ring[j][1];
         if ((yi > lat) != (yj > lat)) && (lng < (xj - xi) * (lat - yi) / (yj - yi) + xi) {
             inside = !inside;
         }
@@ -491,12 +515,18 @@ pub(crate) fn point_in_geometry(lng: f64, lat: f64, geom: &PolygonGeometry) -> b
 /// Axis-aligned bounding box `[min_lng, min_lat, max_lng, max_lat]` over every ring of
 /// a geometry (outer + holes + extra polygons). Used as a cheap broad-phase reject
 /// before the full crossing-number test in polygon selections. `None` if no coords.
+/// When the geometry crosses the antimeridian, longitudes are normalized to [0, 360)
+/// so `max_lng` may exceed 180 — `in_bbox` handles this transparently.
 pub(crate) fn geometry_bbox(geom: &PolygonGeometry) -> Option<[f64; 4]> {
+    let crosses = geom.coordinates.iter()
+        .chain(geom.extra_polygons.iter().flat_map(|polys| polys.iter().flatten()))
+        .any(|ring| ring_crosses_antimeridian(ring));
     let mut bb = [f64::MAX, f64::MAX, f64::MIN, f64::MIN];
     let mut any = false;
     let mut fold = |rings: &[Vec<[f64; 2]>]| {
         for ring in rings {
             for &[lng, lat] in ring {
+                let lng = if crosses { normalize_lng(lng) } else { lng };
                 if lng < bb[0] { bb[0] = lng; }
                 if lat < bb[1] { bb[1] = lat; }
                 if lng > bb[2] { bb[2] = lng; }
@@ -513,8 +543,11 @@ pub(crate) fn geometry_bbox(geom: &PolygonGeometry) -> Option<[f64; 4]> {
 }
 
 /// `bb` is `[min_lng, min_lat, max_lng, max_lat]`.
+/// When `max_lng > 180` the bbox is in normalized [0,360) space (antimeridian crossing);
+/// negative test longitudes are shifted by +360 automatically.
 #[inline]
-fn in_bbox(lng: f64, lat: f64, bb: &[f64; 4]) -> bool {
+pub(crate) fn in_bbox(lng: f64, lat: f64, bb: &[f64; 4]) -> bool {
+    let lng = if bb[2] > 180.0 && lng < 0.0 { lng + 360.0 } else { lng };
     lng >= bb[0] && lng <= bb[2] && lat >= bb[1] && lat <= bb[3]
 }
 

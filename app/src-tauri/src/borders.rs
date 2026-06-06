@@ -495,7 +495,7 @@ pub fn tally_countries(
         .par_iter()
         .filter_map(|&(lat, lng)| {
             for (bb, f) in &feats {
-                if lng < bb[0] || lng > bb[2] || lat < bb[1] || lat > bb[3] {
+                if !selections::in_bbox(lng, lat, bb) {
                     continue;
                 }
                 if selections::point_in_geometry(lng, lat, &f.geometry) {

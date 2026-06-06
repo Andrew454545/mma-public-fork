@@ -6,6 +6,21 @@ import type { PickingInfo, Layer, Position } from "@deck.gl/core";
 type OverlayEvent = { srcEvent?: { domEvent?: Event } };
 import { ScatterplotLayer, PolygonLayer, PathLayer, LineLayer } from "@deck.gl/layers";
 import SDFMarkerLayer from "@/lib/render/sdf-marker-layer/SDFMarkerLayer";
+
+function normalizeRing<T extends number[]>(ring: T[]): T[] {
+	const crosses = ring.some((p) => p[0] > 180 || p[0] < -180) ||
+		ring.some((_, i, a) => i > 0 && Math.abs(a[i][0] - a[i - 1][0]) > 180);
+	if (!crosses) return ring;
+	return ring.map((p) => {
+		const out = [...p] as unknown as T;
+		if (out[0] < 0) out[0] += 360;
+		return out;
+	});
+}
+
+function normalizePolygonCoords<T extends number[]>(coords: T[][]): T[][] {
+	return coords.map(normalizeRing);
+}
 import { lookupStreetView, svThumbnailUrl, showToast, svSearchRadius } from "@/lib/sv/lookup.add";
 import { cmd } from "@/lib/commands";
 import { mmaBufUrl } from "@/lib/util/util";
@@ -448,7 +463,7 @@ export function MapEmbed() {
 		for (const sel of polygonSels) {
 			if (sel.props.type !== "Polygon") continue;
 			const poly = sel.props.polygon;
-			const allPolygons = [poly.coordinates, ...(poly.extraPolygons ?? [])];
+			const allPolygons = [poly.coordinates, ...(poly.extraPolygons ?? [])].map(normalizePolygonCoords);
 			const fillColor: [number, number, number, number] = [...sel.color, 26];
 			const strokeColor: [number, number, number, number] = [...sel.color, 153];
 			layers.push(
@@ -756,7 +771,7 @@ export function MapEmbed() {
 			layers.push(
 				new PathLayer({
 					id: "freehand-drawing",
-					data: [freehand],
+					data: [normalizeRing(freehand)],
 					getPath: (d) => d,
 					getColor: [255, 255, 255, 200],
 					getWidth: 3,

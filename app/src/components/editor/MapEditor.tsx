@@ -6,6 +6,8 @@ import {
 	addLocations,
 	setActiveLocation,
 	getActiveLocation,
+	getSelectedLocationIds,
+	removeLocations,
 	createTags,
 	beginImportPaste,
 	beginImportFromPath,
@@ -202,6 +204,10 @@ export function MapEditor() {
 	useHotkey(useBinding("toggleFullscreenMap"), () => {
 		setSetting("fullscreenMap", !getSettings().fullscreenMap);
 	});
+	useHotkey(useBinding("locationDelete"), () => {
+		const ids = getSelectedLocationIds();
+		if (ids.size > 0) removeLocations(ids);
+	}, { bubble: true });
 	useHotkey(useBinding("panToLocation"), () => {
 		const loc = getActiveLocation();
 		const map = getGoogleMapInstance();

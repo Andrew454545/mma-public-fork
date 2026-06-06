@@ -91,7 +91,7 @@ export function isEditableElement(el: EventTarget | null): boolean {
 export function useHotkey(
 	hotkey: string,
 	callback: (e: KeyboardEvent) => void,
-	options: { enableInInputs?: boolean } = {},
+	options: { enableInInputs?: boolean; bubble?: boolean } = {},
 ) {
 	const cbRef = useRef(callback);
 	cbRef.current = callback;
@@ -114,10 +114,12 @@ export function useHotkey(
 				}
 			}
 		}
-		// Capture phase: global hotkeys must fire before focused widgets (e.g. the SV pano
-		// viewer) that stopPropagation arrow/wasd keys in their own capture handler.
-		document.addEventListener("keydown", handler, true);
-		return () => document.removeEventListener("keydown", handler, true);
+		// Default: capture phase so global hotkeys fire before focused widgets (e.g. the SV
+		// pano viewer) that stopPropagation arrow/wasd keys in their own capture handler.
+		// Bubble phase is for lower-priority handlers that yield to capture-phase ones.
+		const useCapture = !options.bubble;
+		document.addEventListener("keydown", handler, useCapture);
+		return () => document.removeEventListener("keydown", handler, useCapture);
 	}, [options.enableInInputs]);
 }
 

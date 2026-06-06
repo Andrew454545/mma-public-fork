@@ -4077,6 +4077,7 @@ body {
 }
 .map-embed {
 	position: relative;
+	min-width: 0;
 }
 .map-embed .loading {
 	color: #000;

@@ -148,11 +148,17 @@ function SplitHandle({ onSplitChange }: { onSplitChange: (v: number) => void }) 
 				const gap = parseFloat(getComputedStyle(grid).columnGap) || 0;
 				const available = rect.width - gap;
 				const pct = ((ev.clientX - rect.left - gap / 2) / available) * 100;
-				onSplitChange(Math.min(70, Math.max(30, pct)));
+				const clamped = Math.min(70, Math.max(30, pct));
+				grid.style.gridTemplateColumns = `minmax(0, ${clamped}fr) minmax(0, ${100 - clamped}fr)`;
 			};
-			const onUp = () => {
+			const onUp = (ev: PointerEvent) => {
 				el.removeEventListener("pointermove", onMove);
 				el.removeEventListener("pointerup", onUp);
+				const rect = grid.getBoundingClientRect();
+				const gap = parseFloat(getComputedStyle(grid).columnGap) || 0;
+				const available = rect.width - gap;
+				const pct = ((ev.clientX - rect.left - gap / 2) / available) * 100;
+				onSplitChange(Math.min(70, Math.max(30, pct)));
 			};
 			el.addEventListener("pointermove", onMove);
 			el.addEventListener("pointerup", onUp);
@@ -259,7 +265,7 @@ export function MapEditor() {
 		<div
 			className={editorClasses}
 			style={{
-				gridTemplateColumns: appSettings.fullscreenMap ? undefined : `${split}fr ${100 - split}fr`,
+				gridTemplateColumns: appSettings.fullscreenMap ? undefined : `minmax(0, ${split}fr) minmax(0, ${100 - split}fr)`,
 			}}
 		>
 			<SplitHandle onSplitChange={setSplit} />

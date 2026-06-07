@@ -101,7 +101,7 @@ function selectAll(
 		const byteLen = Math.ceil(n / 8);
 		const mask = new Uint8Array(byteLen);
 		for (let i = 0; i < n; i++) mask[i >> 3] |= 1 << (i & 7);
-		cellEntries.push({ cellChar, locCount: n, masks: [mask] });
+		cellEntries.push({ cellChar, locCount: n, sels: [{ kind: "mask" as const, mask }] });
 	}
 	return mgr.applySelectionBitmasks([color], cellEntries);
 }
@@ -119,7 +119,7 @@ function selectIds(
 		for (let i = 0; i < n; i++) {
 			if (ids.has(cb.ids[i])) mask[i >> 3] |= 1 << (i & 7);
 		}
-		cellEntries.push({ cellChar, locCount: n, masks: [mask] });
+		cellEntries.push({ cellChar, locCount: n, sels: [{ kind: "mask" as const, mask }] });
 	}
 	return mgr.applySelectionBitmasks([color], cellEntries);
 }
@@ -840,7 +840,7 @@ describe("Multiple overlapping selections", () => {
 		}
 		mgr.applySelectionBitmasks(
 			[[255, 0, 0], [0, 0, 255]],
-			[{ cellChar: "s", locCount: n, masks: [maskR, maskB] }],
+			[{ cellChar: "s", locCount: n, sels: [{ kind: "mask" as const, mask: maskR }, { kind: "mask" as const, mask: maskB }] }],
 		);
 
 		// ID=3 appears twice in overlay — last (blue) is drawn on top
@@ -867,7 +867,7 @@ describe("Multiple overlapping selections", () => {
 		}
 		mgr.applySelectionBitmasks(
 			[[255, 0, 0], [0, 255, 0]],
-			[{ cellChar: "s", locCount: n, masks: [mask1, mask2] }],
+			[{ cellChar: "s", locCount: n, sels: [{ kind: "mask" as const, mask: mask1 }, { kind: "mask" as const, mask: mask2 }] }],
 		);
 		for (let i = 0; i < cb.count; i++) {
 			expect(cb.colors[i * 4 + 3]).toBe(0);

@@ -4,11 +4,15 @@ import {
 	CellManager,
 	type CellRenderEntry,
 	type CellDelta,
+	type SelEntry,
 } from "@/lib/render/CellManager";
 
 function entry(cell: string, id: number, lng: number, lat: number, heading = 0): CellRenderEntry {
 	return { cell, id, lng, lat, heading, r: 42, g: 42, b: 42, a: 255 };
 }
+
+/** A dense-bitmask SelEntry, the shape applySelectionBitmasks consumes. */
+const maskSel = (mask: Uint8Array): SelEntry => ({ kind: "mask", mask });
 
 describe("CellBuffer", () => {
 	let buf: CellBuffer;
@@ -414,12 +418,36 @@ describe("applySelectionBitmasks", () => {
 		const mask = new Uint8Array([0b010]); // bit 1 set
 		const selectedIds = mgr.applySelectionBitmasks(
 			[[255, 0, 0]],
-			[{ cellChar: "s", locCount: 3, masks: [mask] }],
+			[{ cellChar: "s", locCount: 3, sels: [maskSel(mask)] }],
 		);
 		expect(selectedIds.size).toBe(1);
 		expect(selectedIds.has(20)).toBe(true);
 		expect(selectedIds.has(10)).toBe(false);
 		expect(selectedIds.has(30)).toBe(false);
+	});
+
+	it("idx-format selection matches the equivalent mask", () => {
+		mgr.applyDelta({
+			added: [entry("s", 10, 1, 1), entry("s", 20, 2, 2), entry("s", 30, 3, 3)],
+			updated: [],
+			removed: [],
+			colorPatches: [],
+		});
+
+		// Sparse index-list: select local indices 0 and 2 (ids 10, 30).
+		const idxIds = mgr.applySelectionBitmasks(
+			[[0, 255, 0]],
+			[{ cellChar: "s", locCount: 3, sels: [{ kind: "idx", indices: new Uint32Array([0, 2]) }] }],
+		);
+		expect(idxIds).toEqual(new Set([10, 30]));
+		expect(mgr.selOverlayCount).toBe(2);
+
+		// The equivalent dense mask (bits 0 and 2) must yield the same selected set.
+		const maskIds = mgr.applySelectionBitmasks(
+			[[0, 255, 0]],
+			[{ cellChar: "s", locCount: 3, sels: [maskSel(new Uint8Array([0b101]))] }],
+		);
+		expect(maskIds).toEqual(idxIds);
 	});
 
 	it("bitmask after swap-remove still maps to correct IDs", () => {
@@ -447,7 +475,7 @@ describe("applySelectionBitmasks", () => {
 		const mask = new Uint8Array([0b01]);
 		const selectedIds = mgr.applySelectionBitmasks(
 			[[255, 0, 0]],
-			[{ cellChar: "s", locCount: 2, masks: [mask] }],
+			[{ cellChar: "s", locCount: 2, sels: [maskSel(mask)] }],
 		);
 		expect(selectedIds.has(30)).toBe(true);
 		expect(selectedIds.has(10)).toBe(false);
@@ -495,7 +523,7 @@ describe("applySelectionBitmasks", () => {
 		const mask = new Uint8Array([0b001]);
 		const selectedIds = mgr.applySelectionBitmasks(
 			[[255, 0, 0]],
-			[{ cellChar: "s", locCount: 3, masks: [mask] }],
+			[{ cellChar: "s", locCount: 3, sels: [maskSel(mask)] }],
 		);
 		expect(selectedIds.has(20)).toBe(true);
 		expect(selectedIds.has(40)).toBe(false);
@@ -520,7 +548,7 @@ describe("applySelectionBitmasks", () => {
 				[255, 0, 0],
 				[0, 0, 255],
 			],
-			[{ cellChar: "s", locCount: 3, masks: [mask0, mask1] }],
+			[{ cellChar: "s", locCount: 3, sels: [maskSel(mask0), maskSel(mask1)] }],
 		);
 		expect(selectedIds.size).toBe(3);
 		expect(selectedIds.has(10)).toBe(true);
@@ -549,7 +577,7 @@ describe("applySelectionBitmasks", () => {
 		});
 
 		const mask = new Uint8Array([0b01]); // select index 0 only
-		mgr.applySelectionBitmasks([[255, 0, 0]], [{ cellChar: "s", locCount: 2, masks: [mask] }]);
+		mgr.applySelectionBitmasks([[255, 0, 0]], [{ cellChar: "s", locCount: 2, sels: [maskSel(mask)] }]);
 
 		const cb = mgr.cells.get("s")!;
 		// Index 0 (selected) should be hidden: alpha=0
@@ -569,7 +597,7 @@ describe("applySelectionBitmasks", () => {
 		// First, select both
 		mgr.applySelectionBitmasks(
 			[[255, 0, 0]],
-			[{ cellChar: "s", locCount: 2, masks: [new Uint8Array([0b11])] }],
+			[{ cellChar: "s", locCount: 2, sels: [maskSel(new Uint8Array([0b11]))] }],
 		);
 		// Both hidden
 		const cb = mgr.cells.get("s")!;
@@ -577,7 +605,7 @@ describe("applySelectionBitmasks", () => {
 		expect(cb.colors[1 * 4 + 3]).toBe(0);
 
 		// Now apply empty selection — should restore default colors
-		mgr.applySelectionBitmasks([], [{ cellChar: "s", locCount: 2, masks: [] }]);
+		mgr.applySelectionBitmasks([], [{ cellChar: "s", locCount: 2, sels: [] }]);
 		expect(cb.colors[0 * 4]).toBe(42);
 		expect(cb.colors[0 * 4 + 3]).toBe(255);
 		expect(cb.colors[1 * 4]).toBe(42);
@@ -620,7 +648,7 @@ describe("applySelectionBitmasks", () => {
 		const mask = new Uint8Array([0b100]);
 		const selectedIds = mgr.applySelectionBitmasks(
 			[[255, 0, 0]],
-			[{ cellChar: "s", locCount: 3, masks: [mask] }],
+			[{ cellChar: "s", locCount: 3, sels: [maskSel(mask)] }],
 		);
 		expect(selectedIds.has(20)).toBe(true);
 		expect(selectedIds.has(10)).toBe(false);
@@ -689,8 +717,8 @@ describe("applySelectionBitmasks", () => {
 		const selectedIds = mgr.applySelectionBitmasks(
 			[[255, 0, 0]],
 			[
-				{ cellChar: "s", locCount: 2, masks: [maskS] },
-				{ cellChar: "t", locCount: 2, masks: [maskT] },
+				{ cellChar: "s", locCount: 2, sels: [maskSel(maskS)] },
+				{ cellChar: "t", locCount: 2, sels: [maskSel(maskT)] },
 			],
 		);
 		expect(selectedIds.size).toBe(2);
@@ -717,8 +745,8 @@ describe("applySelectionBitmasks", () => {
 		mgr.applySelectionBitmasks(
 			[[255, 0, 0]],
 			[
-				{ cellChar: "s", locCount: 2, masks: [new Uint8Array([0b10])] },
-				{ cellChar: "t", locCount: 2, masks: [new Uint8Array([0b01])] },
+				{ cellChar: "s", locCount: 2, sels: [maskSel(new Uint8Array([0b10]))] },
+				{ cellChar: "t", locCount: 2, sels: [maskSel(new Uint8Array([0b01]))] },
 			],
 		);
 		expect(mgr.selOverlayCount).toBe(2);
@@ -726,7 +754,7 @@ describe("applySelectionBitmasks", () => {
 		// Partial bitmask: only update cell "s", now select id=10 instead of id=20
 		const ids = mgr.applySelectionBitmasks(
 			[[255, 0, 0]],
-			[{ cellChar: "s", locCount: 2, masks: [new Uint8Array([0b01])] }],
+			[{ cellChar: "s", locCount: 2, sels: [maskSel(new Uint8Array([0b01]))] }],
 		);
 
 		// Cell "s" updated: id=10 selected. Cell "t" untouched: id=30 still selected.
@@ -748,8 +776,8 @@ describe("applySelectionBitmasks", () => {
 		mgr.applySelectionBitmasks(
 			[[255, 0, 0]],
 			[
-				{ cellChar: "s", locCount: 1, masks: [new Uint8Array([0b1])] },
-				{ cellChar: "t", locCount: 1, masks: [new Uint8Array([0b1])] },
+				{ cellChar: "s", locCount: 1, sels: [maskSel(new Uint8Array([0b1]))] },
+				{ cellChar: "t", locCount: 1, sels: [maskSel(new Uint8Array([0b1]))] },
 			],
 		);
 		expect(mgr.selOverlayCount).toBe(2);
@@ -757,7 +785,7 @@ describe("applySelectionBitmasks", () => {
 		// Deselect cell "s" only
 		const ids = mgr.applySelectionBitmasks(
 			[[255, 0, 0]],
-			[{ cellChar: "s", locCount: 1, masks: [new Uint8Array([0b0])] }],
+			[{ cellChar: "s", locCount: 1, sels: [maskSel(new Uint8Array([0b0]))] }],
 		);
 
 		expect(ids.has(10)).toBe(false);
@@ -776,7 +804,7 @@ describe("applySelectionBitmasks", () => {
 		// Select both
 		mgr.applySelectionBitmasks(
 			[[255, 0, 0]],
-			[{ cellChar: "s", locCount: 2, masks: [new Uint8Array([0b11])] }],
+			[{ cellChar: "s", locCount: 2, sels: [maskSel(new Uint8Array([0b11]))] }],
 		);
 		expect(mgr.selOverlayCount).toBe(2);
 
@@ -791,7 +819,7 @@ describe("applySelectionBitmasks", () => {
 		// Partial bitmask for cell "s" — only 1 entry now (id=20), selected
 		const ids = mgr.applySelectionBitmasks(
 			[[255, 0, 0]],
-			[{ cellChar: "s", locCount: 1, masks: [new Uint8Array([0b1])] }],
+			[{ cellChar: "s", locCount: 1, sels: [maskSel(new Uint8Array([0b1]))] }],
 		);
 
 		expect(ids.has(20)).toBe(true);
@@ -810,7 +838,7 @@ describe("applySelectionBitmasks", () => {
 		// Select all three
 		mgr.applySelectionBitmasks(
 			[[255, 0, 0]],
-			[{ cellChar: "s", locCount: 3, masks: [new Uint8Array([0b111])] }],
+			[{ cellChar: "s", locCount: 3, sels: [maskSel(new Uint8Array([0b111]))] }],
 		);
 
 		// Mutation 1: delete id=10
@@ -822,7 +850,7 @@ describe("applySelectionBitmasks", () => {
 		});
 		mgr.applySelectionBitmasks(
 			[[255, 0, 0]],
-			[{ cellChar: "s", locCount: 2, masks: [new Uint8Array([0b11])] }],
+			[{ cellChar: "s", locCount: 2, sels: [maskSel(new Uint8Array([0b11]))] }],
 		);
 
 		// Mutation 2: no removals, just a bitmask refresh.
@@ -830,7 +858,7 @@ describe("applySelectionBitmasks", () => {
 		mgr.applyDelta({ added: [], updated: [], removed: [], colorPatches: [] });
 		const ids = mgr.applySelectionBitmasks(
 			[[255, 0, 0]],
-			[{ cellChar: "s", locCount: 2, masks: [new Uint8Array([0b11])] }],
+			[{ cellChar: "s", locCount: 2, sels: [maskSel(new Uint8Array([0b11]))] }],
 		);
 
 		expect(ids.size).toBe(2);

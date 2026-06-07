@@ -67,17 +67,28 @@ fn cell_idx_from_key(key: &str) -> Option<u8> {
 fn serialize_cell_bitmask(ci: usize, cr: &CellRender, loc_sets: &[RoaringBitmap]) -> Vec<u8> {
     let n = cr.id_order.len();
     let mask_bytes = n.div_ceil(8);
-    let mut seg = Vec::with_capacity(1 + 4 + mask_bytes * loc_sets.len());
+    let mut seg = Vec::new();
     seg.push(BASE32[ci]);
     seg.extend_from_slice(&(n as u32).to_le_bytes());
+    // Per selection, emit one of two self-describing formats (format byte first):
+    //   1 = index-list: u32 count + count*u32 selected local indices (sparse → O(selected))
+    //   0 = bitmask:    mask_bytes raw bits (dense → smaller than an index list)
+    // The index-list lets JS rebuild the overlay in O(selected) instead of scanning N bits.
     for set in loc_sets {
-        let mut bitmask = vec![0u8; mask_bytes];
+        let mut indices: Vec<u32> = Vec::new();
         for (li, &id) in cr.id_order.iter().enumerate() {
-            if set.contains(id) {
-                bitmask[li / 8] |= 1 << (li % 8);
-            }
+            if set.contains(id) { indices.push(li as u32); }
         }
-        seg.extend_from_slice(&bitmask);
+        if indices.len() * 4 + 4 < mask_bytes {
+            seg.push(1u8);
+            seg.extend_from_slice(&(indices.len() as u32).to_le_bytes());
+            for idx in &indices { seg.extend_from_slice(&idx.to_le_bytes()); }
+        } else {
+            seg.push(0u8);
+            let mut bitmask = vec![0u8; mask_bytes];
+            for &li in &indices { bitmask[li as usize / 8] |= 1 << (li % 8); }
+            seg.extend_from_slice(&bitmask);
+        }
     }
     seg
 }

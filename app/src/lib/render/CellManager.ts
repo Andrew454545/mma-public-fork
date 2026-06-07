@@ -7,6 +7,16 @@ import type {
 
 export type RenderDelta = RenderDelta_Serialize;
 
+/** Per-cell, per-selection membership: a dense bitmask or a sparse selected-index list. */
+export type SelEntry =
+	| { kind: "mask"; mask: Uint8Array }
+	| { kind: "idx"; indices: Uint32Array };
+export interface SelCellEntry {
+	cellChar: string;
+	locCount: number;
+	sels: SelEntry[];
+}
+
 const MIN_CAPACITY = 256;
 
 /**
@@ -331,47 +341,58 @@ export class CellManager {
 	 */
 	applySelectionBitmasks(
 		selColors: [number, number, number][],
-		cellEntries: { cellChar: string; locCount: number; masks: Uint8Array[] }[],
+		cellEntries: SelCellEntry[],
 	): Set<number> {
 		const numSels = selColors.length;
 
-		// Set of IDs in incoming cells — only these get rebuilt from bitmask.
-		const incomingIds = new Set<number>();
-		for (const entry of cellEntries) {
-			const cb = this.cells.get(entry.cellChar);
-			if (!cb) continue;
-			for (const id of cb.idToIndex.keys()) incomingIds.add(id);
-		}
+		// Full sync (every cell present) rebuilds the whole overlay, so nothing is kept —
+		// skip the O(N) incomingIds Set + kept scan entirely. Only a partial (per-cell,
+		// post-mutation) update needs to preserve overlay entries from untouched cells.
+		const isFull = cellEntries.length === this.cells.size;
 
-		// Collect existing overlay entries NOT in incoming cells and not recently removed.
 		const kept: { pos0: number; pos1: number; r: number; g: number; b: number; a: number; angle: number; id: number }[] = [];
 		const selectedIds = new Set<number>();
-		for (let i = 0; i < this.selOverlayCount; i++) {
-			const id = this.selOverlayIds[i];
-			if (incomingIds.has(id) || this._removedIds.has(id)) continue;
-			kept.push({
-				pos0: this.selOverlayPositions[i * 2],
-				pos1: this.selOverlayPositions[i * 2 + 1],
-				r: this.selOverlayColors[i * 4],
-				g: this.selOverlayColors[i * 4 + 1],
-				b: this.selOverlayColors[i * 4 + 2],
-				a: this.selOverlayColors[i * 4 + 3],
-				angle: this.selOverlayAngles[i],
-				id,
-			});
-			if (this.selOverlayColors[i * 4 + 3] > 0) selectedIds.add(id);
+		if (!isFull) {
+			// Set of IDs in incoming cells — only these get rebuilt from bitmask.
+			const incomingIds = new Set<number>();
+			for (const entry of cellEntries) {
+				const cb = this.cells.get(entry.cellChar);
+				if (!cb) continue;
+				for (const id of cb.idToIndex.keys()) incomingIds.add(id);
+			}
+			// Collect existing overlay entries NOT in incoming cells and not recently removed.
+			for (let i = 0; i < this.selOverlayCount; i++) {
+				const id = this.selOverlayIds[i];
+				if (incomingIds.has(id) || this._removedIds.has(id)) continue;
+				kept.push({
+					pos0: this.selOverlayPositions[i * 2],
+					pos1: this.selOverlayPositions[i * 2 + 1],
+					r: this.selOverlayColors[i * 4],
+					g: this.selOverlayColors[i * 4 + 1],
+					b: this.selOverlayColors[i * 4 + 2],
+					a: this.selOverlayColors[i * 4 + 3],
+					angle: this.selOverlayAngles[i],
+					id,
+				});
+				if (this.selOverlayColors[i * 4 + 3] > 0) selectedIds.add(id);
+			}
 		}
 
-		// Count new overlay entries from incoming cells
+		// Count new overlay entries from incoming cells. Index-list selections contribute
+		// in O(selected); only dense bitmask selections need a per-row scan.
 		let newEntries = 0;
 		for (const entry of cellEntries) {
 			const cb = this.cells.get(entry.cellChar);
 			const n = cb ? Math.min(entry.locCount, cb.count) : 0;
-			for (let li = 0; li < n; li++) {
-				for (let si = 0; si < numSels; si++) {
-					if (entry.masks[si][li >> 3] & (1 << (li & 7))) {
-						newEntries++;
-					}
+			if (n === 0) continue;
+			for (let si = 0; si < numSels; si++) {
+				const sel = entry.sels[si];
+				if (sel.kind === "idx") {
+					const idx = sel.indices;
+					for (let k = 0; k < idx.length; k++) if (idx[k] < n) newEntries++;
+				} else {
+					const m = sel.mask;
+					for (let li = 0; li < n; li++) if (m[li >> 3] & (1 << (li & 7))) newEntries++;
 				}
 			}
 		}
@@ -396,17 +417,25 @@ export class CellManager {
 			oi++;
 		}
 
-		// Reset base colors for incoming cells, then write new overlay entries
+		// Reset base colors for incoming cells to gray, then write new overlay entries.
+		// Fill the 4-byte gray pattern via exponential copyWithin (memcpy) rather than a
+		// per-row write loop — same result, far fewer JS-level stores.
 		for (const entry of cellEntries) {
 			const cb = this.cells.get(entry.cellChar);
 			if (!cb) continue;
 			const n = Math.min(entry.locCount, cb.count);
-			for (let li = 0; li < n; li++) {
-				const c4 = li * 4;
-				cb.colors[c4] = 42;
-				cb.colors[c4 + 1] = 42;
-				cb.colors[c4 + 2] = 42;
-				cb.colors[c4 + 3] = 255;
+			if (n === 0) continue;
+			const colors = cb.colors;
+			const total = n * 4;
+			colors[0] = 42;
+			colors[1] = 42;
+			colors[2] = 42;
+			colors[3] = 255;
+			let filled = 4;
+			while (filled < total) {
+				const c = Math.min(filled, total - filled);
+				colors.copyWithin(filled, 0, c);
+				filled += c;
 			}
 		}
 
@@ -416,8 +445,10 @@ export class CellManager {
 				const cb = this.cells.get(entry.cellChar);
 				if (!cb) continue;
 				const n = Math.min(entry.locCount, cb.count);
-				for (let li = 0; li < n; li++) {
-					if (!(entry.masks[si][li >> 3] & (1 << (li & 7)))) continue;
+				const sel = entry.sels[si];
+				// One marker write. Sets the base color transparent (the overlay draws it
+				// in the selection color) and appends an overlay entry.
+				const writeLi = (li: number) => {
 					const locId = cb.ids[li];
 					if (locId != null) selectedIds.add(locId);
 					const c4 = li * 4;
@@ -434,6 +465,18 @@ export class CellManager {
 					this.selOverlayAngles[oi] = cb.angles[li];
 					this.selOverlayIds[oi] = locId!;
 					oi++;
+				};
+				if (sel.kind === "idx") {
+					const idx = sel.indices;
+					for (let k = 0; k < idx.length; k++) {
+						const li = idx[k];
+						if (li < n) writeLi(li);
+					}
+				} else {
+					const m = sel.mask;
+					for (let li = 0; li < n; li++) {
+						if (m[li >> 3] & (1 << (li & 7))) writeLi(li);
+					}
 				}
 			}
 		}

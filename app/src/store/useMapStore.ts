@@ -26,7 +26,7 @@ import {
 	type MergeWinner,
 } from "@/lib/data/fieldOps.add";
 import { getSavedSelections, rewriteSavedSelectionFields } from "./savedSelections.add";
-import type { RenderDelta } from "@/lib/render/CellManager";
+import type { RenderDelta, SelEntry, SelCellEntry } from "@/lib/render/CellManager";
 
 /** Minimal pub/sub bus. `.on()` returns an unsubscribe function. */
 function createBus<T extends (...args: never[]) => void>() {
@@ -49,7 +49,7 @@ export const renderDeltaBus = createBus<(delta: RenderDelta) => void>();
 
 type SelectionBitmaskHandler = (
 	selColors: [number, number, number][],
-	cellEntries: { cellChar: string; locCount: number; masks: Uint8Array[] }[],
+	cellEntries: SelCellEntry[],
 	setIds: (ids: Set<number>) => void,
 ) => void;
 /** Fires when selection bitmasks are resolved. Subscribers apply per-cell masks to the render overlay. */
@@ -561,19 +561,32 @@ function emitBitmask(bytes: number[]) {
 	}
 	const numCells = dv.getUint8(off);
 	off += 1;
-	const cellEntries: { cellChar: string; locCount: number; masks: Uint8Array[] }[] = [];
+	const cellEntries: { cellChar: string; locCount: number; sels: SelEntry[] }[] = [];
 	for (let ci = 0; ci < numCells; ci++) {
 		const cellChar = String.fromCharCode(dv.getUint8(off));
 		off += 1;
 		const locCount = dv.getUint32(off, true);
 		off += 4;
 		const maskBytes = Math.ceil(locCount / 8);
-		const masks: Uint8Array[] = [];
+		const sels: SelEntry[] = [];
 		for (let si = 0; si < numSels; si++) {
-			masks.push(new Uint8Array(buf, off, maskBytes));
-			off += maskBytes;
+			const fmt = dv.getUint8(off);
+			off += 1;
+			if (fmt === 1) {
+				const count = dv.getUint32(off, true);
+				off += 4;
+				const indices = new Uint32Array(count);
+				for (let k = 0; k < count; k++) {
+					indices[k] = dv.getUint32(off, true);
+					off += 4;
+				}
+				sels.push({ kind: "idx", indices });
+			} else {
+				sels.push({ kind: "mask", mask: new Uint8Array(buf, off, maskBytes) });
+				off += maskBytes;
+			}
 		}
-		cellEntries.push({ cellChar, locCount, masks });
+		cellEntries.push({ cellChar, locCount, sels });
 	}
 	selBitmaskBus.emit(selColors, cellEntries, (ids) => {
 		selectedLocationIds = ids;

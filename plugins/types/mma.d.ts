@@ -731,6 +731,19 @@ export type FilterOp = "eq" | "neq" | "gt" | "lt" | "gte" | "lte" | "between" | 
 /** When a move target already holds a value, which field's value survives. */
 export type MergeWinner = "from" | "to";
 export type RenderDelta = RenderDelta_Serialize;
+/** Per-cell, per-selection membership: a dense bitmask or a sparse selected-index list. */
+export type SelEntry = {
+	kind: "mask";
+	mask: Uint8Array;
+} | {
+	kind: "idx";
+	indices: Uint32Array;
+};
+export interface SelCellEntry {
+	cellChar: string;
+	locCount: number;
+	sels: SelEntry[];
+}
 /** Parsed-but-not-committed import shown while `workArea === "import"`. */
 export interface ImportStaging {
 	preview: ImportPreview;
@@ -1726,20 +1739,12 @@ declare const mma: {
 			number,
 			number,
 			number
-		][], cellEntries: {
-			cellChar: string;
-			locCount: number;
-			masks: Uint8Array[];
-		}[], setIds: (ids: Set<number>) => void) => void) => () => void;
+		][], cellEntries: SelCellEntry[], setIds: (ids: Set<number>) => void) => void) => () => void;
 		emit: (selColors: [
 			number,
 			number,
 			number
-		][], cellEntries: {
-			cellChar: string;
-			locCount: number;
-			masks: Uint8Array[];
-		}[], setIds: (ids: Set<number>) => void) => void;
+		][], cellEntries: SelCellEntry[], setIds: (ids: Set<number>) => void) => void;
 	};
 	useMapList: () => MapMeta[];
 	useTagCounts: () => Record<number, number>;

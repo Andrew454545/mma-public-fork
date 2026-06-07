@@ -1,5 +1,7 @@
 import type { Location_Serialize, Tag as _Tag, EditorImportResult_Serialize, EditorImportPreview } from "@/bindings.gen";
-import { nowUnix } from "@/lib/util/format";
+// Relative (not "@/") so the e2e runner's tsx loader can resolve this runtime value import
+// when it pulls in this module via test helpers; the `@/` alias isn't applied there.
+import { nowUnix } from "../lib/util/format";
 
 export type Location = Location_Serialize;
 export type Tag = _Tag;

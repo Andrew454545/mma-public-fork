@@ -8,6 +8,7 @@ use crate::types::{AppError, AppResult};
 use tauri::Manager;
 
 mod fast_io;
+mod iframe_theme;
 mod types;
 mod util;
 mod arrow_bridge;
@@ -540,6 +541,7 @@ pub fn run() {
                 .build(),
         )
         .plugin(tauri_plugin_window_state::Builder::default().build())
+        .plugin(iframe_theme::plugin())
         .setup(|app| {
             let t = std::time::Instant::now();
             fast_io::run_migrations(app.handle())?;

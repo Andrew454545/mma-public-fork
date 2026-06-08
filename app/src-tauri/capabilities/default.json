@@ -16,15 +16,28 @@
 		"window-state:default",
 		"log:default",
 		{
-			"identifier": "shell:allow-spawn",
+			"identifier": "shell:allow-execute",
 			"allow": [
-				{
-					"name": "vali",
-					"cmd": "vali",
-					"args": true
-				}
+				{ "name": "vali", "cmd": "vali", "args": true },
+				{ "name": "sh", "cmd": "sh", "args": true },
+				{ "name": "bash", "cmd": "bash", "args": true },
+				{ "name": "cmd", "cmd": "cmd", "args": true },
+				{ "name": "powershell", "cmd": "powershell", "args": true },
+				{ "name": "pwsh", "cmd": "pwsh", "args": true }
 			]
 		},
+		{
+			"identifier": "shell:allow-spawn",
+			"allow": [
+				{ "name": "vali", "cmd": "vali", "args": true },
+				{ "name": "sh", "cmd": "sh", "args": true },
+				{ "name": "bash", "cmd": "bash", "args": true },
+				{ "name": "cmd", "cmd": "cmd", "args": true },
+				{ "name": "powershell", "cmd": "powershell", "args": true },
+				{ "name": "pwsh", "cmd": "pwsh", "args": true }
+			]
+		},
+		"shell:allow-stdin-write",
 		"shell:allow-kill",
 		"shell:allow-open",
 		"dialog:default",

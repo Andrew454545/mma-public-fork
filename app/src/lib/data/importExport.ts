@@ -1,16 +1,12 @@
 import { imageKeyToPanoId } from "@/lib/sv/svMeta";
 import { fovToZoom, schemeBase } from "@/lib/util/util";
+import type { Location } from "@/types";
 
 /** A single location parsed out of a pasted Maps URL or a bare coordinate. */
-export interface ParsedLocation {
-	lat: number;
-	lng: number;
-	heading: number;
-	pitch: number;
-	zoom: number;
-	panoId: string | null;
+export type ParsedLocation = Pick<Location, "lat" | "lng" | "heading" | "pitch" | "zoom" | "panoId"> & {
+	/** Tag names */
 	tags: string[];
-}
+};
 
 async function resolveShortUrl(url: URL): Promise<URL> {
 	const id = url.pathname.split("/").at(-1);

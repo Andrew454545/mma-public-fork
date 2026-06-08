@@ -2,6 +2,7 @@ import { cmd } from "@/lib/commands";
 import { getSettings } from "@/store/settings";
 import { getCurrentMapId } from "@/store/useMapStore";
 import { log } from "@/lib/util/log";
+import type { LocationPOV } from "@/types";
 
 export type { SeenEntry } from "@/bindings.gen";
 import type { SeenEntry } from "@/bindings.gen";
@@ -48,7 +49,7 @@ export function seenPanoChanged(
 	locationId: number | null,
 	countryCode: string | null,
 	address: string | null,
-	getPov: () => { heading: number; pitch: number; zoom: number },
+	getPov: () => LocationPOV,
 ) {
 	const settings = getSettings();
 	if (!settings.enableSeen) return;
@@ -74,7 +75,7 @@ export function seenPanoChanged(
 	};
 }
 
-function flushStaged(getPov: () => { heading: number; pitch: number; zoom: number }) {
+function flushStaged(getPov: () => LocationPOV) {
 	if (!staged) return;
 	const entry = staged;
 	staged = null;
@@ -90,7 +91,7 @@ function flushStaged(getPov: () => { heading: number; pitch: number; zoom: numbe
 	writeEntry(entry, getPov(), thumbnail);
 }
 
-export function seenFlush(getPov: () => { heading: number; pitch: number; zoom: number }) {
+export function seenFlush(getPov: () => LocationPOV) {
 	flushStaged(getPov);
 }
 
@@ -116,7 +117,7 @@ function captureThumbnail(canvas: HTMLCanvasElement): string | null {
 
 async function writeEntry(
 	entry: PendingEntry,
-	pov: { heading: number; pitch: number; zoom: number },
+	pov: LocationPOV,
 	thumbnail: string | null,
 ) {
 	try {

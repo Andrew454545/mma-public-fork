@@ -8,6 +8,9 @@ export type Tag = _Tag;
 export type ImportResult = EditorImportResult_Serialize;
 export type ImportPreview = EditorImportPreview;
 
+/** Street View camera orientation (POV). */
+export type LocationPOV = Pick<Location, "heading" | "pitch" | "zoom">;
+
 export const enum LocationFlag {
 	None = 0,
 	LoadAsPanoId = 1,

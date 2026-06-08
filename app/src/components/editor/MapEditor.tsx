@@ -231,23 +231,11 @@ export function MapEditor() {
 			showMapCursorRef.current = false;
 			setShowMapCursor(false);
 			if (!wasShowing) return;
-			const mapEl = document.querySelector<HTMLElement>(".map-embed");
-			if (!mapEl) return;
-			const rect = mapEl.getBoundingClientRect();
-			const cx = rect.left + rect.width / 2;
-			const cy = rect.top + rect.height / 2;
-			const el = document.elementFromPoint(cx, cy) ?? mapEl;
-			const opts: MouseEventInit = {
-				clientX: cx,
-				clientY: cy,
-				bubbles: true,
-				cancelable: true,
-				view: window,
-				button: 0,
-			};
-			el.dispatchEvent(new PointerEvent("pointerdown", opts));
-			el.dispatchEvent(new PointerEvent("pointerup", opts));
-			el.dispatchEvent(new MouseEvent("click", opts));
+			const gmap = getGoogleMapInstance();
+			const center = gmap?.getCenter();
+			if (!gmap || !center) return;
+			// deck.gl/google-maps picks off the Maps 'click' event (latLng), not DOM events.
+			google.maps.event.trigger(gmap, "click", { latLng: center });
 		}
 		function onBlur() {
 			setShowMapCursor(false);

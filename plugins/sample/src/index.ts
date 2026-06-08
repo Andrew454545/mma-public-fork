@@ -16,13 +16,13 @@ MMA.registerPlugin({
     // Read/write location extra fields
     // const loc = MMA.getActiveLocation();
     // if (loc) {
-    //   MMA.updateLocation(loc.id, {
+    //   MMA.updateLocation(loc, {
     //     extra: { ...loc.extra, myField: "hello from plugin" },
     //   });
     // }
 
     // Spawn a subprocess
-    // const cmd = new MMA.shell.Command("python", ["./script.py"]);
+    // const cmd = MMA.shell.Command.create("python", ["./script.py"]);
     // cmd.stdout.on("data", (line) => console.log(line));
     // cmd.spawn();
 

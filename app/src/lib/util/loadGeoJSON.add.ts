@@ -15,19 +15,19 @@ export async function loadGeoJSON() {
 				const features = data.type === "FeatureCollection" ? data.features : [data];
 				for (const f of features) {
 					if (f.geometry?.type === "Polygon") {
-						const poly: PolygonGeometry = {
+						selectPolygon({
 							coordinates: f.geometry.coordinates,
 							properties: f.properties ?? undefined,
-						};
-						selectPolygon(poly);
+						});
 					} else if (f.geometry?.type === "MultiPolygon") {
-						for (const coords of f.geometry.coordinates) {
-							const poly: PolygonGeometry = {
-								coordinates: coords,
-								properties: f.properties ?? undefined,
-							};
-							selectPolygon(poly);
-						}
+						const [first, ...rest] = f.geometry.coordinates;
+						if (!first) continue;
+						const poly: PolygonGeometry = {
+							coordinates: first,
+							properties: f.properties ?? undefined,
+						};
+						if (rest.length) poly.extraPolygons = rest;
+						selectPolygon(poly);
 					}
 				}
 			} catch {

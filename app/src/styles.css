@@ -5016,6 +5016,11 @@ body {
 	-webkit-user-select: none;
 }
 
+/* opensv draws the pano focus ring as a dedicated full-size overlay child - disable it */
+.mapsImagerySceneScene__focusOutline {
+	display: none !important;
+}
+
 /* Hide Google logo in Street View panorama */
 .location-preview__embed a[href*="maps.google.com/maps"] {
 	display: none !important;

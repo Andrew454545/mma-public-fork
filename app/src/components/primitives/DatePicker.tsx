@@ -2,6 +2,8 @@ import { useState, useCallback } from "react";
 import { DayPicker } from "react-day-picker";
 import "react-day-picker/style.css";
 import * as Popover from "@radix-ui/react-popover";
+import { Icon } from "@/components/primitives/Icon";
+import { mdiClose } from "@mdi/js";
 
 interface DatePickerProps {
 	mode: "date" | "month";
@@ -321,6 +323,15 @@ export function DatePicker({
 											onChange={(e) => handleTimeChange(e.target.value)}
 										/>
 									</label>
+									<button
+										type="button"
+										className="date-picker__time-clear"
+										title="Clear time (whole day)"
+										disabled={!time || time === "00:00"}
+										onClick={() => handleTimeChange("")}
+									>
+										<Icon path={mdiClose} size={14} />
+									</button>
 								</div>
 							)}
 						</>

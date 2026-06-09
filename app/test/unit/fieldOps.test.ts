@@ -11,6 +11,7 @@ import {
 	groupByField,
 	rewriteSelectionFields,
 	pickPeriodEnd,
+	hasTimeOfDay,
 } from "@/lib/data/fieldOps";
 import { buildSelection } from "@/store/selections";
 import type { Location, MapData } from "@/types";
@@ -297,6 +298,31 @@ describe("pickPeriodEnd", () => {
 		const v = Math.floor(Date.UTC(2024, 5, 3, 0, 5) / 1000);
 		const end = pickPeriodEnd(v, "minute", false);
 		expect(end).toBe(v + 59);
+		expect(pickPeriodEnd(end, "minute", false)).toBe(end);
+	});
+});
+
+describe("hasTimeOfDay", () => {
+	const local = (h: number, m: number, s = 0) =>
+		Math.floor(new Date(2024, 5, 3, h, m, s).getTime() / 1000);
+
+	it("midnight is day-grain; any time-of-day is minute-grain", () => {
+		expect(hasTimeOfDay(local(0, 0), false)).toBe(false);
+		expect(hasTimeOfDay(local(0, 5), false)).toBe(true);
+		expect(hasTimeOfDay(local(23, 59, 59), false)).toBe(true);
+	});
+
+	it("wall-clock values use the UTC frame", () => {
+		const v = Math.floor(Date.UTC(2024, 5, 3) / 1000);
+		expect(hasTimeOfDay(v, true)).toBe(false);
+		expect(hasTimeOfDay(v + 300, true)).toBe(true);
+	});
+
+	it("a day-end bound re-expands to itself (untouched edit round-trip)", () => {
+		const midnight = local(0, 0);
+		const end = pickPeriodEnd(midnight, "day", false);
+		// not midnight -> minute grain on resubmit -> floor+59 -> unchanged
+		expect(hasTimeOfDay(end, false)).toBe(true);
 		expect(pickPeriodEnd(end, "minute", false)).toBe(end);
 	});
 });

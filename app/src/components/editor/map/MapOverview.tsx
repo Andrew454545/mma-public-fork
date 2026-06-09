@@ -34,7 +34,7 @@ import {
 } from "@/store/useMapStore";
 import { toast } from "@/lib/util/toast";
 import { getFieldDef } from "@/lib/data/fieldDefRegistry";
-import { groupByField, pickPeriodEnd } from "@/lib/data/fieldOps";
+import { groupByField, pickPeriodEnd, hasTimeOfDay } from "@/lib/data/fieldOps";
 import { useSetting } from "@/store/settings";
 import { cmd } from "@/lib/commands";
 
@@ -848,7 +848,6 @@ function FilterForm({
 	const isExactDate = fieldEntry?.fieldType === "date";
 	const availableOps = opsForType(fieldEntry?.fieldType);
 	const isBetween = op === "between" || op === "between_anyyear" || op === "between_anytime";
-	const exactDateFormat = useSetting("exactDateFormat");
 	// Persisted/legacy state can hold an op the field type no longer offers (e.g. eq on a date).
 	useEffect(() => {
 		if (fieldEntry && !availableOps.includes(op)) setOp(availableOps[0]);
@@ -1002,14 +1001,14 @@ function FilterForm({
 		) {
 			[parsed, parsed2] = [parsed2, parsed];
 		}
-		// A date pick denotes a period (day or minute), not an instant; bounds that mean
-		// "through the end of the pick" expand to the period end. See pickPeriodEnd.
+		// A date pick denotes a period: midnight = the day, an explicit time = the minute.
+		// Bounds that mean "through the end of the pick" expand to the period end.
 		if (isExactDate && !anyYear && !anyTime) {
-			const granularity = exactDateFormat === "datetime" ? "minute" : "day";
+			const grain = (v: number): "day" | "minute" => (hasTimeOfDay(v, tzLocal) ? "minute" : "day");
 			if (isBetween && typeof parsed2 === "number") {
-				parsed2 = pickPeriodEnd(parsed2, granularity, tzLocal);
+				parsed2 = pickPeriodEnd(parsed2, grain(parsed2), tzLocal);
 			} else if ((op === "gt" || op === "lte") && typeof parsed === "number") {
-				parsed = pickPeriodEnd(parsed, granularity, tzLocal);
+				parsed = pickPeriodEnd(parsed, grain(parsed), tzLocal);
 			}
 		}
 		onSubmit(field, finalOp, parsed, parsed2);

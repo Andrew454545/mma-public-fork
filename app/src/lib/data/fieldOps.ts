@@ -355,6 +355,17 @@ export function pickPeriodEnd(v: number, granularity: "day" | "minute", wallCloc
 	return Math.floor(nextDay / 1000) - 1;
 }
 
+/** True when the timestamp carries a time-of-day (is not exactly midnight). A midnight
+ *  bound is a day-grain pick — the UI has always displayed midnight as a bare date, and
+ *  the picker's cleared-time state encodes midnight — so period expansion treats
+ *  midnight as "the day" and anything else as "the minute". */
+export function hasTimeOfDay(v: number, wallClock: boolean): boolean {
+	const d = new Date(v * 1000);
+	return wallClock
+		? d.getUTCHours() !== 0 || d.getUTCMinutes() !== 0 || d.getUTCSeconds() !== 0
+		: d.getHours() !== 0 || d.getMinutes() !== 0 || d.getSeconds() !== 0;
+}
+
 /** Group locations by the string value of `field` in their `extra`. Skips null/empty.
  *  Returns a map from field-value to the location ids that carry it. */
 export function groupByField(locations: Location[], field: string): Map<string, number[]> {

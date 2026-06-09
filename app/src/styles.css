@@ -3202,6 +3202,27 @@ summary.button {
 	padding: 0.35rem 0.5rem;
 	border-top: 1px solid #eee;
 	margin-top: 0.25rem;
+	display: flex;
+	align-items: center;
+	gap: 0.35rem;
+}
+.date-picker__time-clear {
+	display: flex;
+	border: none;
+	background: none;
+	padding: 0;
+	cursor: pointer;
+	color: #868e96;
+}
+.date-picker__time-clear:hover:not(:disabled) {
+	color: #343a40;
+}
+.date-picker__time-clear:disabled {
+	opacity: 0.35;
+	cursor: default;
+}
+.date-picker__time-clear svg {
+	fill: currentColor;
 }
 .date-picker__time label {
 	display: flex;

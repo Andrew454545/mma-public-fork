@@ -3,6 +3,10 @@ import {
 	planFieldMove,
 	planFieldDelete,
 	planFieldSet,
+	planFieldExpr,
+	parseFieldExpr,
+	evalFieldExpr,
+	fieldValue,
 	fieldPatch,
 	groupByField,
 	rewriteSelectionFields,
@@ -181,5 +185,78 @@ describe("rewriteSelectionFields", () => {
 		const out = rewriteSelectionFields([union], "a", null);
 		expect(out).toHaveLength(1);
 		expect(out[0].props.type).toBe("Tag");
+	});
+});
+
+describe("field expressions", () => {
+	const evalOn = (src: string, loc: Location) => evalFieldExpr(parseFieldExpr(src), loc);
+
+	it("parses and evaluates constants and arithmetic with precedence", () => {
+		const loc = makeLoc(1);
+		expect(evalOn("45", loc)).toBe(45);
+		expect(evalOn("2 + 3 * 4", loc)).toBe(14);
+		expect(evalOn("(2 + 3) * 4", loc)).toBe(20);
+		expect(evalOn("-5 + 10", loc)).toBe(5);
+		expect(evalOn("7 % 4", loc)).toBe(3);
+	});
+
+	it("resolves field references from extra and top-level", () => {
+		const loc = { ...makeLoc(1, { sunAzimuth: 200 }), heading: 90, lat: 12.5 } as Location;
+		expect(evalOn("sunAzimuth + 180", loc)).toBe(380);
+		expect(evalOn("heading + 10", loc)).toBe(100);
+		expect(evalOn("lat * 2", loc)).toBe(25);
+	});
+
+	it("fieldValue mirrors fieldPatch's top-level vs extra split", () => {
+		const loc = { ...makeLoc(1, { foo: 7 }), heading: 33 } as Location;
+		expect(fieldValue(loc, "heading")).toBe(33);
+		expect(fieldValue(loc, "foo")).toBe(7);
+		expect(fieldValue(loc, "missing")).toBeUndefined();
+	});
+
+	it("supports functions: mod wraps negatives, clamp bounds", () => {
+		const loc = makeLoc(1, { sunAzimuth: 200 });
+		expect(evalOn("mod(sunAzimuth + 180, 360)", loc)).toBe(20);
+		expect(evalOn("mod(-90, 360)", loc)).toBe(270);
+		expect(evalOn("clamp(500, 0, 360)", loc)).toBe(360);
+		expect(evalOn("abs(-3)", loc)).toBe(3);
+		expect(evalOn("min(2, 9)", loc)).toBe(2);
+		expect(evalOn("max(2, 9)", loc)).toBe(9);
+		expect(evalOn("round(2.6)", loc)).toBe(3);
+		expect(evalOn("floor(2.6)", loc)).toBe(2);
+	});
+
+	it("returns null for missing or non-numeric fields and non-finite results", () => {
+		expect(evalOn("nope + 1", makeLoc(1))).toBeNull();
+		expect(evalOn("s + 1", makeLoc(1, { s: "hello" }))).toBeNull();
+		expect(evalOn("1 / 0", makeLoc(1))).toBeNull();
+	});
+
+	it("throws on syntax errors, unknown functions, and wrong arity", () => {
+		expect(() => parseFieldExpr("1 +")).toThrow();
+		expect(() => parseFieldExpr("(1 + 2")).toThrow();
+		expect(() => parseFieldExpr("1 2")).toThrow();
+		expect(() => parseFieldExpr("nope(1)")).toThrow(/Unknown function/);
+		expect(() => parseFieldExpr("mod(1)")).toThrow(/argument/);
+		expect(() => parseFieldExpr("heading @ 2")).toThrow(/Unexpected character/);
+	});
+
+	it("planFieldExpr patches per location, skips unevaluable, drops no-ops", () => {
+		const a = { ...makeLoc(1, { sunAzimuth: 200 }), heading: 0 } as Location;
+		const b = makeLoc(2); // no sunAzimuth -> skipped
+		const c = { ...makeLoc(3, { sunAzimuth: 160 }), heading: 340 } as Location; // already 340 -> no-op
+		const { updates, skipped } = planFieldExpr(
+			[a, b, c],
+			"heading",
+			parseFieldExpr("mod(sunAzimuth + 180, 360)"),
+		);
+		expect(skipped).toBe(1);
+		expect(updates).toEqual([{ id: 1, patch: { heading: 20 } }]);
+	});
+
+	it("planFieldExpr writes extra fields with merge semantics", () => {
+		const loc = makeLoc(1, { sunAzimuth: 90, keep: "x" });
+		const { updates } = planFieldExpr([loc], "sunHalf", parseFieldExpr("sunAzimuth / 2"));
+		expect(updates).toEqual([{ id: 1, patch: { extra: { sunAzimuth: 90, keep: "x", sunHalf: 45 } } }]);
 	});
 });

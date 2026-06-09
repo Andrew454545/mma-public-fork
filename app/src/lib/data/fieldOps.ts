@@ -105,6 +105,214 @@ function changesLocation(loc: Location, patch: Partial<Location>): boolean {
 	return false;
 }
 
+// --- Field expressions ("set X = f(Y)" bulk op) -------------------------------
+// A deliberately tiny numeric expression language: field references, arithmetic,
+// parens, and a few functions. Scope (WHERE) belongs to selections and multiple
+// assignments are repeat runs -- the language stays one expression wide.
+
+export type FieldExpr =
+	| { kind: "num"; value: number }
+	| { kind: "field"; name: string }
+	| { kind: "neg"; arg: FieldExpr }
+	| { kind: "bin"; op: "+" | "-" | "*" | "/" | "%"; left: FieldExpr; right: FieldExpr }
+	| { kind: "call"; fn: string; args: FieldExpr[] };
+
+export const EXPR_FNS: Record<string, { arity: number; apply: (args: number[]) => number }> = {
+	mod: { arity: 2, apply: ([x, n]) => ((x % n) + n) % n },
+	clamp: { arity: 3, apply: ([x, lo, hi]) => Math.min(hi, Math.max(lo, x)) },
+	abs: { arity: 1, apply: ([x]) => Math.abs(x) },
+	min: { arity: 2, apply: ([a, b]) => Math.min(a, b) },
+	max: { arity: 2, apply: ([a, b]) => Math.max(a, b) },
+	round: { arity: 1, apply: ([x]) => Math.round(x) },
+	floor: { arity: 1, apply: ([x]) => Math.floor(x) },
+};
+
+type Token =
+	| { t: "num"; v: number }
+	| { t: "ident"; v: string }
+	| { t: "op"; v: string };
+
+function tokenize(src: string): Token[] {
+	const tokens: Token[] = [];
+	let i = 0;
+	while (i < src.length) {
+		const c = src[i];
+		if (/\s/.test(c)) { i++; continue; }
+		if (/[0-9.]/.test(c)) {
+			const m = /^[0-9]*\.?[0-9]+/.exec(src.slice(i));
+			if (!m) throw new Error(`Invalid number at position ${i}`);
+			tokens.push({ t: "num", v: Number(m[0]) });
+			i += m[0].length;
+			continue;
+		}
+		if (/[A-Za-z_]/.test(c)) {
+			const m = /^[A-Za-z_][A-Za-z0-9_]*/.exec(src.slice(i))!;
+			tokens.push({ t: "ident", v: m[0] });
+			i += m[0].length;
+			continue;
+		}
+		if ("+-*/%(),".includes(c)) {
+			tokens.push({ t: "op", v: c });
+			i++;
+			continue;
+		}
+		throw new Error(`Unexpected character "${c}" at position ${i}`);
+	}
+	return tokens;
+}
+
+/** Parse a field expression, e.g. `mod(sunAzimuth + 180, 360)`. Throws on syntax errors. */
+export function parseFieldExpr(src: string): FieldExpr {
+	const tokens = tokenize(src);
+	let pos = 0;
+	const peek = () => tokens[pos];
+	const isOp = (v: string) => peek()?.t === "op" && (peek() as { v: string }).v === v;
+	const expectOp = (v: string) => {
+		if (!isOp(v)) throw new Error(`Expected "${v}"`);
+		pos++;
+	};
+
+	function parseAdditive(): FieldExpr {
+		let left = parseMultiplicative();
+		while (isOp("+") || isOp("-")) {
+			const op = (tokens[pos++] as { v: "+" | "-" }).v;
+			left = { kind: "bin", op, left, right: parseMultiplicative() };
+		}
+		return left;
+	}
+	function parseMultiplicative(): FieldExpr {
+		let left = parseUnary();
+		while (isOp("*") || isOp("/") || isOp("%")) {
+			const op = (tokens[pos++] as { v: "*" | "/" | "%" }).v;
+			left = { kind: "bin", op, left, right: parseUnary() };
+		}
+		return left;
+	}
+	function parseUnary(): FieldExpr {
+		if (isOp("-")) {
+			pos++;
+			return { kind: "neg", arg: parseUnary() };
+		}
+		return parsePrimary();
+	}
+	function parsePrimary(): FieldExpr {
+		const tok = peek();
+		if (!tok) throw new Error("Unexpected end of expression");
+		if (tok.t === "num") {
+			pos++;
+			return { kind: "num", value: tok.v };
+		}
+		if (tok.t === "ident") {
+			pos++;
+			if (isOp("(")) {
+				const fn = EXPR_FNS[tok.v];
+				if (!fn) throw new Error(`Unknown function "${tok.v}"`);
+				pos++;
+				const args: FieldExpr[] = [];
+				if (!isOp(")")) {
+					args.push(parseAdditive());
+					while (isOp(",")) {
+						pos++;
+						args.push(parseAdditive());
+					}
+				}
+				expectOp(")");
+				if (args.length !== fn.arity)
+					throw new Error(`${tok.v}() takes ${fn.arity} argument${fn.arity === 1 ? "" : "s"}`);
+				return { kind: "call", fn: tok.v, args };
+			}
+			return { kind: "field", name: tok.v };
+		}
+		if (isOp("(")) {
+			pos++;
+			const inner = parseAdditive();
+			expectOp(")");
+			return inner;
+		}
+		throw new Error(`Unexpected "${(tok as { v: string }).v}"`);
+	}
+
+	const expr = parseAdditive();
+	if (pos < tokens.length) {
+		const tok = tokens[pos] as { v?: string };
+		throw new Error(`Unexpected "${tok.v ?? "token"}" after expression`);
+	}
+	return expr;
+}
+
+/** Top-level Location fields readable in expressions (writable set + coordinates). */
+const TOP_LEVEL_READ_FIELDS = new Set(["lat", "lng", ...Object.keys(TOP_LEVEL_SET_FIELDS)]);
+
+/** Read field `key` from a location: built-in top-level keys or `extra`. The read-side
+ *  mirror of `fieldPatch`. */
+export function fieldValue(loc: Location, key: string): unknown {
+	return TOP_LEVEL_READ_FIELDS.has(key)
+		? (loc as unknown as Record<string, unknown>)[key]
+		: loc.extra?.[key];
+}
+
+/** Evaluate an expression against one location. Returns null when any referenced
+ *  field is missing/non-numeric or the result is not finite (skip that location). */
+export function evalFieldExpr(expr: FieldExpr, loc: Location): number | null {
+	const v = evalNode(expr, loc);
+	return v != null && Number.isFinite(v) ? v : null;
+}
+
+function evalNode(expr: FieldExpr, loc: Location): number | null {
+	switch (expr.kind) {
+		case "num":
+			return expr.value;
+		case "field": {
+			const v = fieldValue(loc, expr.name);
+			return typeof v === "number" ? v : null;
+		}
+		case "neg": {
+			const v = evalNode(expr.arg, loc);
+			return v == null ? null : -v;
+		}
+		case "bin": {
+			const l = evalNode(expr.left, loc);
+			const r = evalNode(expr.right, loc);
+			if (l == null || r == null) return null;
+			switch (expr.op) {
+				case "+": return l + r;
+				case "-": return l - r;
+				case "*": return l * r;
+				case "/": return l / r;
+				case "%": return l % r;
+			}
+			break;
+		}
+		case "call": {
+			const args = expr.args.map((a) => evalNode(a, loc));
+			if (args.some((a) => a == null)) return null;
+			return EXPR_FNS[expr.fn].apply(args as number[]);
+		}
+	}
+	return null;
+}
+
+/** Plan per-location assignments `key = expr(loc)`. Locations whose expression
+ *  can't evaluate are counted in `skipped`; unchanged locations are dropped. */
+export function planFieldExpr(
+	locations: Location[],
+	key: string,
+	expr: FieldExpr,
+): { updates: LocationUpdate[]; skipped: number } {
+	const updates: LocationUpdate[] = [];
+	let skipped = 0;
+	for (const loc of locations) {
+		const v = evalFieldExpr(expr, loc);
+		if (v == null) {
+			skipped++;
+			continue;
+		}
+		const planned = planFieldSet([loc], fieldPatch(key, v));
+		if (planned.length > 0) updates.push(planned[0]);
+	}
+	return { updates, skipped };
+}
+
 /**
  * Rewrite Filter `field` references in a selection tree: `from` → `to`, or drop the
  * Filter when `to` is null (field deleted). Composites collapse if emptied, or unwrap

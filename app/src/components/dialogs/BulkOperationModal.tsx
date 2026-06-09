@@ -11,7 +11,13 @@ import {
 import type { Location } from "@/types";
 import { isPinnedToPano } from "@/types";
 import { getFieldDef, getAllFieldDefs } from "@/lib/data/fieldDefRegistry";
-import { planFieldSet, fieldPatch, TOP_LEVEL_SET_FIELDS } from "@/lib/data/fieldOps";
+import {
+	planFieldSet,
+	planFieldExpr,
+	parseFieldExpr,
+	fieldPatch,
+	TOP_LEVEL_SET_FIELDS,
+} from "@/lib/data/fieldOps";
 import { ValidationState } from "@/store/selections";
 import { validateLocations } from "@/lib/sv/validate";
 import { enrichAll, needsEnrichment, type EnrichResult } from "@/lib/sv/enrich";
@@ -93,6 +99,7 @@ function BulkSetup({
 		scope: Scope;
 		clearKeys?: string[];
 		setField?: Partial<Location>;
+		setExpr?: { key: string; src: string };
 		headingDirection?: RoadDirection;
 	}) => void;
 }) {
@@ -199,7 +206,14 @@ function BulkSetup({
 				onScopeChange={setScope}
 				allCount={total}
 				selectionCount={selectionCount}
-				onStart={(patch) => onStart({ force: false, scope, setField: patch })}
+				onStart={(v) =>
+					onStart({
+						force: false,
+						scope,
+						setField: v.patch,
+						setExpr: v.exprKey != null ? { key: v.exprKey, src: v.exprSrc! } : undefined,
+					})
+				}
 			/>
 		);
 	}
@@ -331,7 +345,7 @@ function SetFieldSetup({
 	onScopeChange: (s: Scope) => void;
 	allCount: number;
 	selectionCount: number;
-	onStart: (patch: Partial<Location>) => void;
+	onStart: (v: { patch?: Partial<Location>; exprKey?: string; exprSrc?: string }) => void;
 }) {
 	const sortedKeys = useMemo(() => {
 		const known = new Set<string>([
@@ -353,8 +367,18 @@ function SetFieldSetup({
 	const def = effectiveKey ? (getFieldDef(effectiveKey) ?? TOP_LEVEL_SET_FIELDS[effectiveKey]) : undefined;
 	const isNumber = def?.type === "number";
 	const isEnum = def?.type === "enum" && def.values;
-	const value: unknown = isNumber ? Number(raw) : raw;
-	const invalid = !effectiveKey || (isNumber && (raw === "" || Number.isNaN(Number(raw))));
+	// Number targets take an expression (a constant is the degenerate case); other
+	// types keep the literal input.
+	const exprError = useMemo(() => {
+		if (!isNumber || raw.trim() === "") return null;
+		try {
+			parseFieldExpr(raw);
+			return null;
+		} catch (e) {
+			return e instanceof Error ? e.message : "Invalid expression";
+		}
+	}, [isNumber, raw]);
+	const invalid = !effectiveKey || (isNumber && (raw.trim() === "" || exprError != null));
 
 	return (
 		<div className="bulk-operation">
@@ -415,18 +439,30 @@ function SetFieldSetup({
 				) : (
 					<input
 						className="input"
-						type={isNumber ? "number" : "text"}
+						type="text"
 						value={raw}
 						onChange={(e) => setRaw(e.target.value)}
+						placeholder={isNumber ? "e.g. 45 or mod(sunAzimuth + 180, 360)" : undefined}
 					/>
 				)}
 			</label>
+			{isNumber && (
+				<div className="bulk-operation__status">
+					{exprError
+						? `Invalid expression: ${exprError}`
+						: "Constant or expression over fields (e.g. sunAzimuth, drivingDirection, lat)."}
+				</div>
+			)}
 			<div className="bulk-operation__actions">
 				<button
 					className="button button--primary"
 					type="button"
 					disabled={invalid}
-					onClick={() => onStart(fieldPatch(effectiveKey, value))}
+					onClick={() =>
+						isNumber
+							? onStart({ exprKey: effectiveKey, exprSrc: raw })
+							: onStart({ patch: fieldPatch(effectiveKey, raw) })
+					}
 				>
 					Set field
 				</button>
@@ -530,6 +566,7 @@ function BulkProgress({
 	selectedIds,
 	clearKeys,
 	setField,
+	setExpr,
 	headingDirection,
 	onClose,
 }: {
@@ -539,6 +576,7 @@ function BulkProgress({
 	selectedIds: Iterable<number>;
 	clearKeys?: string[];
 	setField?: Partial<Location>;
+	setExpr?: { key: string; src: string };
 	headingDirection?: RoadDirection;
 	onClose: () => void;
 }) {
@@ -550,6 +588,7 @@ function BulkProgress({
 	const [error, setError] = useState<string | null>(null);
 	const [enrichResult, setEnrichResult] = useState<EnrichResult | null>(null);
 	const [clearCount, setClearCount] = useState(0);
+	const [skippedCount, setSkippedCount] = useState(0);
 	const controllerRef = useRef<AbortController | null>(null);
 
 	// Stable ref -- scope and selectedIds are fixed at mount time
@@ -629,6 +668,19 @@ function BulkProgress({
 				}
 				setDone(updates.length);
 				setClearCount(updates.length);
+			} else if (operation === "setField" && setExpr) {
+				const { updates, skipped } = planFieldExpr(
+					locations,
+					setExpr.key,
+					parseFieldExpr(setExpr.src),
+				);
+				setTotal(updates.length);
+				if (updates.length > 0) {
+					await batchUpdateLocations(updates);
+				}
+				setDone(updates.length);
+				setClearCount(updates.length);
+				setSkippedCount(skipped);
 			} else if (operation === "setField" && setField) {
 				const updates = planFieldSet(locations, setField);
 				setTotal(updates.length);
@@ -654,7 +706,7 @@ function BulkProgress({
 				setStatus("error");
 			}
 		}
-	}, [operation, force, clearKeys, setField, headingDirection]);
+	}, [operation, force, clearKeys, setField, setExpr, headingDirection]);
 
 	useEffect(() => {
 		run();
@@ -680,7 +732,9 @@ function BulkProgress({
 				) : status === "done" && operation === "clearFields" ? (
 					`Cleared fields from ${fmt.format(clearCount)} locations.`
 				) : status === "done" && operation === "setField" ? (
-					`Set field on ${fmt.format(clearCount)} locations.`
+					`Set field on ${fmt.format(clearCount)} locations.${
+						skippedCount > 0 ? ` ${fmt.format(skippedCount)} skipped (missing source fields).` : ""
+					}`
 				) : status === "done" && operation === "headingRoad" ? (
 					`Panned ${fmt.format(clearCount)} headings.`
 				) : (
@@ -715,6 +769,7 @@ export function BulkOperationModal({ operation, onClose }: Props) {
 	const [scope, setScope] = useState<Scope>("all");
 	const [clearKeys, setClearKeys] = useState<string[]>([]);
 	const [setField, setSetField] = useState<Partial<Location> | undefined>(undefined);
+	const [setExpr, setSetExpr] = useState<{ key: string; src: string } | undefined>(undefined);
 	const [headingDirection, setHeadingDirection] = useState<RoadDirection | undefined>(undefined);
 	const selectedIds = useSelectedLocationIds();
 
@@ -734,6 +789,7 @@ export function BulkOperationModal({ operation, onClose }: Props) {
 							setScope(opts.scope);
 							if (opts.clearKeys) setClearKeys(opts.clearKeys);
 							if (opts.setField) setSetField(opts.setField);
+							if (opts.setExpr) setSetExpr(opts.setExpr);
 							if (opts.headingDirection) setHeadingDirection(opts.headingDirection);
 							setStarted(true);
 						}}
@@ -746,6 +802,7 @@ export function BulkOperationModal({ operation, onClose }: Props) {
 						selectedIds={selectedIds}
 						clearKeys={clearKeys}
 						setField={setField}
+						setExpr={setExpr}
 						headingDirection={headingDirection}
 						onClose={onClose}
 					/>

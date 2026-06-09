@@ -71,6 +71,14 @@ async function fitSelectionBounds(map: google.maps.Map, selection: Selection) {
 	map.fitBounds(bounds, 100);
 }
 
+function uniqueTagName(base: string, existing: Set<string>): string {
+	if (!existing.has(base)) return base;
+	for (let i = 1; ; i++) {
+		const candidate = `${base} (${i})`;
+		if (!existing.has(candidate)) return candidate;
+	}
+}
+
 // --- Mouse-based drag system (HTML5 DnD is broken in Tauri webview) ---
 interface DragState {
 	key: string;
@@ -436,7 +444,11 @@ function SelectionRow({
 										<DropdownMenu.Item
 											className="context-menu__item"
 											disabled={(selection.count ?? 0) === 0}
-											onSelect={() => setSavingTag(true)}
+											onSelect={() => {
+												const names = new Set(Object.values(map.meta.tags).map((t) => t.name));
+												setTagName(uniqueTagName(selectionDisplayName(map, selection), names));
+												setSavingTag(true);
+											}}
 										>
 											Save as tag
 										</DropdownMenu.Item>
@@ -518,6 +530,7 @@ function SelectionRow({
 							className="input"
 							value={tagName}
 							onChange={(e) => setTagName(e.target.value)}
+							onFocus={(e) => e.currentTarget.select()}
 							placeholder="Tag name..."
 							autoFocus
 						/>

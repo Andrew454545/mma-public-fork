@@ -186,6 +186,11 @@ export type FieldCount = {
 	key: string;
 	count: number;
 };
+/**
+ *  Filter comparison operator. Single source of truth: specta renders the literal
+ *  union, so the TS `FilterOp` type and `OP_LABELS` derive from this enum.
+ */
+export type FilterOp = "eq" | "neq" | "gt" | "lt" | "gte" | "lte" | "between" | "between_anyyear" | "between_anytime" | "has" | "nothas";
 /**  Reverse geocode result: nearest populated place to a coordinate. */
 export type GeoResult = {
 	city: string;
@@ -643,7 +648,7 @@ export type SelectionProps = {
 } | {
 	type: "Filter";
 	field: string;
-	op: string;
+	op: FilterOp;
 	value: any;
 	value2?: any | null;
 	tzLocal?: boolean;
@@ -715,29 +720,12 @@ export type Tag = {
 	count?: number;
 };
 type Location$1 = Location_Serialize;
-type Tag$1 = Tag;
 export type ImportPreview = EditorImportPreview;
 declare function createLocation(partial: Partial<Location$1> & {
 	lat: number;
 	lng: number;
 }): Location$1;
 export type WorkArea = "overview" | "location" | "duplicates" | "import" | "plugin" | "diff";
-/** Variants that wrap children — derived as exactly those carrying a `selections` array. */
-export type CompositeType = Extract<SelectionProps, {
-	selections: Selection$1[];
-}>["type"];
-/** Composite variants that are flat groups (no negation). */
-export type GroupType = Exclude<CompositeType, "Invert">;
-declare enum ValidationState {
-	Ok = 0,
-	UpdateAvailable = 1,
-	UpdateApplied = 2,
-	NotFound = 3,
-	PanoIdBroke = 4,
-	Unofficial = 5,
-	GoodcamAvailable = 6
-}
-export type FilterOp = "eq" | "neq" | "gt" | "lt" | "gte" | "lte" | "between" | "between_anyyear" | "between_anytime" | "has" | "nothas";
 /** When a move target already holds a value, which field's value survives. */
 export type MergeWinner = "from" | "to";
 export type RenderDelta = RenderDelta_Serialize;
@@ -775,6 +763,21 @@ declare class SelectedIds {
 	/** Yields each selected id once, ascending. Scans the bit array, so it's O(maxId/8);
 	 *  used by deliberate bulk consumers (export, bulk-tag, delete), not the per-frame path. */
 	[Symbol.iterator](): Iterator<number>;
+}
+/** Variants that wrap children — derived as exactly those carrying a `selections` array. */
+export type CompositeType = Extract<SelectionProps, {
+	selections: Selection$1[];
+}>["type"];
+/** Composite variants that are flat groups (no negation). */
+export type GroupType = Exclude<CompositeType, "Invert">;
+declare enum ValidationState {
+	Ok = 0,
+	UpdateAvailable = 1,
+	UpdateApplied = 2,
+	NotFound = 3,
+	PanoIdBroke = 4,
+	Unofficial = 5,
+	GoodcamAvailable = 6
 }
 /** Parsed-but-not-committed import shown while `workArea === "import"`. */
 export interface ImportStaging {
@@ -1606,7 +1609,7 @@ declare const mma: {
 	invalidateMapList(): Promise<void>;
 	getTagCounts(): Record<number, number>;
 	refreshAfterMutation(): void;
-	getVisibleTags(): Tag$1[];
+	getVisibleTags(): Tag[];
 	getImportPreviewPositions(): Float32Array<ArrayBuffer>;
 	getCommitDiffPreview(): CommitDiffPreview | null;
 	hasCommitDiff(): boolean;
@@ -1704,10 +1707,10 @@ declare const mma: {
 	getWorkArea(): WorkArea;
 	setPluginMode(pluginId: string): void;
 	exitPluginMode(): void;
-	createTags(names: string[]): Promise<Tag$1[]>;
+	createTags(names: string[]): Promise<Tag[]>;
 	updateTags(patches: {
 		id: number;
-		patch: Partial<Tag$1>;
+		patch: Partial<Tag>;
 	}[]): Promise<void>;
 	deleteTags(tagIds: number[]): Promise<void>;
 	reorderTags(orderedIds: number[]): Promise<void>;

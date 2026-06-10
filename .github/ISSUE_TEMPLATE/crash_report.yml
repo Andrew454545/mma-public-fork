@@ -1,0 +1,35 @@
+name: Crash / data loss report
+description: The app crashed, hung, or lost map data
+labels: [bug]
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: What happened? Include what you were doing when it occurred.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. ...
+        2. ...
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: App version
+      placeholder: e.g. 0.4.2
+    validations:
+      required: true
+  - type: textarea
+    id: log
+    attributes:
+      label: Log file
+      description: Attach or paste contents of `%LOCALAPPDATA%\app.map-making.local\logs\mma.log`
+      render: text
+    validations:
+      required: true

@@ -969,20 +969,9 @@ impl Store {
             }
         }
 
-        // Step 2: apply patches in place (preserves row order for sorted ID invariant)
+        // Step 2: apply patches column-wise (preserves row order for sorted ID invariant)
         if !self.overlay.patches.is_empty() {
-            let ids = col_id(&batch);
-            let has_any = (0..batch.num_rows()).any(|i| self.overlay.patches.contains_key(&ids.value(i)));
-            if has_any {
-                let all: Vec<Location> = (0..batch.num_rows()).map(|i| {
-                    let id = ids.value(i);
-                    match self.overlay.patches.get(&id) {
-                        Some(p) => p.clone(),
-                        None => arrow_bridge::row_to_location(&batch, i),
-                    }
-                }).collect();
-                batch = arrow_bridge::locations_to_batch(&all);
-            }
+            batch = arrow_bridge::patch_batch(&batch, &self.overlay.patches);
         }
 
         // Step 3: concat adds

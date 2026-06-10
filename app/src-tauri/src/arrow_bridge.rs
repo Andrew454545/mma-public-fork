@@ -36,6 +36,9 @@ pub fn location_schema() -> Schema {
                 DataType::List(Arc::new(Field::new("item", DataType::UInt32, true))),
                 false,
             ),
+            // TODO: extras-as-columns — promote known_field_keys to real typed columns
+            // (schema per-map), JSON only at import/export. Big project; kills the
+            // per-row JSON parse in filters/scans and the re-serialize cost in bake.
             Field::new("extra", DataType::Utf8, true),
             Field::new("created_at", DataType::UInt32, false),
             Field::new("modified_at", DataType::UInt32, true),
@@ -129,6 +132,120 @@ pub fn locations_to_batch(locs: &[Location]) -> RecordBatch {
     ];
 
     RecordBatch::try_new(schema, columns).expect("schema matches columns")
+}
+
+/// Apply `patches` (id -> new Location) to a batch column-wise: only columns a
+/// patch actually changed are rebuilt; untouched columns are reused via Arc clone.
+/// Row order is preserved (sorted id invariant). Patch ids absent from the batch
+/// are ignored.
+pub fn patch_batch(batch: &RecordBatch, patches: &std::collections::HashMap<u32, Location>) -> RecordBatch {
+    let n = batch.num_rows();
+    let ids = col_id(batch);
+    let hits: std::collections::HashMap<usize, &Location> = (0..n)
+        .filter_map(|i| patches.get(&ids.value(i)).map(|p| (i, p)))
+        .collect();
+    if hits.is_empty() {
+        return batch.clone();
+    }
+
+    let mut touched = [false; 12];
+    for (&i, p) in &hits {
+        let old = row_to_location(batch, i);
+        touched[COL_LAT] |= old.lat != p.lat;
+        touched[COL_LNG] |= old.lng != p.lng;
+        touched[COL_HEADING] |= old.heading != p.heading;
+        touched[COL_PITCH] |= old.pitch != p.pitch;
+        touched[COL_ZOOM] |= old.zoom != p.zoom;
+        touched[COL_PANO_ID] |= old.pano_id != p.pano_id;
+        touched[COL_FLAGS] |= old.flags != p.flags;
+        touched[COL_TAGS] |= old.tags != p.tags;
+        touched[COL_EXTRA] |= old.extra != p.extra;
+        touched[COL_CREATED_AT] |= old.created_at != p.created_at;
+        touched[COL_MODIFIED_AT] |= old.modified_at != p.modified_at;
+    }
+
+    let f64_col = |getter: fn(&RecordBatch) -> &Float64Array, pick: fn(&Location) -> f64| -> ArrayRef {
+        let old = getter(batch);
+        Arc::new(Float64Array::from_iter_values(
+            (0..n).map(|i| hits.get(&i).map_or_else(|| old.value(i), |p| pick(p))),
+        ))
+    };
+
+    let columns: Vec<ArrayRef> = batch
+        .columns()
+        .iter()
+        .enumerate()
+        .map(|(ci, col)| {
+            if !touched[ci] {
+                return col.clone();
+            }
+            match ci {
+                COL_LAT => f64_col(col_lat, |p| p.lat),
+                COL_LNG => f64_col(col_lng, |p| p.lng),
+                COL_HEADING => f64_col(col_heading, |p| p.heading),
+                COL_PITCH => f64_col(col_pitch, |p| p.pitch),
+                COL_ZOOM => f64_col(col_zoom, |p| p.zoom),
+                COL_PANO_ID => {
+                    let old = col_pano_id(batch);
+                    Arc::new((0..n).map(|i| match hits.get(&i) {
+                        Some(p) => p.pano_id.clone(),
+                        None => (!old.is_null(i)).then(|| old.value(i).to_string()),
+                    }).collect::<StringArray>())
+                }
+                COL_FLAGS => {
+                    let old = col_flags(batch);
+                    Arc::new(UInt32Array::from_iter_values(
+                        (0..n).map(|i| hits.get(&i).map_or_else(|| old.value(i), |p| p.flags.bits())),
+                    ))
+                }
+                COL_TAGS => {
+                    let old = col_tags(batch);
+                    let mut b = GenericListBuilder::<i32, UInt32Builder>::with_capacity(UInt32Builder::new(), n);
+                    for i in 0..n {
+                        match hits.get(&i) {
+                            Some(p) => {
+                                for &t in &p.tags {
+                                    b.values().append_value(t);
+                                }
+                            }
+                            None => {
+                                let v = old.value(i);
+                                let u = v.as_any().downcast_ref::<UInt32Array>().unwrap();
+                                for j in 0..u.len() {
+                                    b.values().append_value(u.value(j));
+                                }
+                            }
+                        }
+                        b.append(true);
+                    }
+                    Arc::new(b.finish())
+                }
+                COL_EXTRA => {
+                    let old = col_extra(batch);
+                    Arc::new((0..n).map(|i| match hits.get(&i) {
+                        Some(p) => p.extra.as_ref().map(|e| serde_json::to_string(e).unwrap()),
+                        None => (!old.is_null(i)).then(|| old.value(i).to_string()),
+                    }).collect::<StringArray>())
+                }
+                COL_CREATED_AT => {
+                    let old = col_created_at(batch);
+                    Arc::new(UInt32Array::from_iter_values(
+                        (0..n).map(|i| hits.get(&i).map_or_else(|| old.value(i), |p| p.created_at)),
+                    ))
+                }
+                COL_MODIFIED_AT => {
+                    let old = col_modified_at(batch);
+                    Arc::new((0..n).map(|i| match hits.get(&i) {
+                        Some(p) => p.modified_at,
+                        None => (!old.is_null(i)).then(|| old.value(i)),
+                    }).collect::<UInt32Array>())
+                }
+                _ => col.clone(),
+            }
+        })
+        .collect();
+
+    RecordBatch::try_new(batch.schema(), columns).expect("schema matches columns")
 }
 
 /// Extract a single [`Location`] from row `idx` of a batch.

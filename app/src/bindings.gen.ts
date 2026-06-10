@@ -27,23 +27,12 @@ export const commands = {
 	uninstallPlugin: (id: string) => typedError<null, string>(__TAURI_INVOKE("uninstall_plugin", { id })),
 	checkBorderFile: (level: string) => typedError<boolean, string>(__TAURI_INVOKE("check_border_file", { level })),
 	downloadBorderFile: (level: string) => typedError<null, string>(__TAURI_INVOKE("download_border_file", { level })),
-	borderLookup: (lat: number, lng: number, level: string) => typedError<{
-	coordinates: (([number, number])[])[],
-	extraPolygons?: ((([number, number])[])[])[] | null,
-	properties?: any | null,
-} | null, string>(__TAURI_INVOKE("border_lookup", { lat, lng, level })).then((v) => ((v.status === "ok" ? { ...v, data: v.data==null?v.data:({...v.data,coordinates:v.data.coordinates.map(i=>i.map(i=>i.map(i=>i))),extraPolygons:v.data.extraPolygons==null?v.data.extraPolygons:v.data.extraPolygons.map(i=>i.map(i=>i.map(i=>i.map(i=>i))))}) } : v) as typeof v)),
+	borderLookup: (lat: number, lng: number, level: string) => typedError<PolygonGeometry | null, string>(__TAURI_INVOKE("border_lookup", { lat, lng, level })).then((v) => ((v.status === "ok" ? { ...v, data: v.data==null?v.data:({...v.data,coordinates:v.data.coordinates.map(i=>i.map(i=>i.map(i=>i))),extraPolygons:v.data.extraPolygons==null?v.data.extraPolygons:v.data.extraPolygons.map(i=>i.map(i=>i.map(i=>i.map(i=>i))))}) } : v) as typeof v)),
 	/**
 	 *  Finds the nearest city/country for a coordinate. O(log n) k-d tree lookup.
 	 *  Always returns `Some` -- the GeoNames dataset covers every landmass.
 	 */
-	reverseGeocode: (lat: number, lng: number) => __TAURI_INVOKE<{
-	city: string,
-	/**  First-level administrative division (state, province, region). */
-	admin: string,
-	country: string,
-	/**  ISO 3166-1 alpha-2 (e.g. "US", "FR"). */
-	country_code: string,
-} | null>("reverse_geocode", { lat, lng }),
+	reverseGeocode: (lat: number, lng: number) => __TAURI_INVOKE<GeoResult | null>("reverse_geocode", { lat, lng }),
 	/**
 	 *  Load a map's Arrow data from disk, rebuild all indexes, and return initial state
 	 *  (tag counts, undo/redo availability). Must be called before any other store commands.
@@ -69,9 +58,7 @@ export const commands = {
 	/**  Return metadata for every map in the database. */
 	storeListMaps: () => typedError<MapMeta[], string>(__TAURI_INVOKE("store_list_maps")).then((v) => ((v.status === "ok" ? { ...v, data: v.data.map(i=>({...i,extra:({...i.extra,fields:i.extra.fields==null?i.extra.fields:Object.fromEntries(Object.entries(i.extra.fields).map(([k,v])=>[k,({...v,comparison:v.comparison==null?v.comparison:v.comparison})]))})})) } : v) as typeof v)),
 	/**  Fetch a single map's metadata by ID. Returns `None` if not found. */
-	storeGetMap: (id: string) => typedError<{
-	meta: MapMeta,
-} | null, string>(__TAURI_INVOKE("store_get_map", { id })).then((v) => ((v.status === "ok" ? { ...v, data: v.data==null?v.data:({...v.data,meta:({...v.data.meta,extra:({...v.data.meta.extra,fields:v.data.meta.extra.fields==null?v.data.meta.extra.fields:Object.fromEntries(Object.entries(v.data.meta.extra.fields).map(([k,v])=>[k,({...v,comparison:v.comparison==null?v.comparison:v.comparison})]))})})}) } : v) as typeof v)),
+	storeGetMap: (id: string) => typedError<MapData | null, string>(__TAURI_INVOKE("store_get_map", { id })).then((v) => ((v.status === "ok" ? { ...v, data: v.data==null?v.data:({...v.data,meta:({...v.data.meta,extra:({...v.data.meta.extra,fields:v.data.meta.extra.fields==null?v.data.meta.extra.fields:Object.fromEntries(Object.entries(v.data.meta.extra.fields).map(([k,v])=>[k,({...v,comparison:v.comparison==null?v.comparison:v.comparison})]))})})}) } : v) as typeof v)),
 	/**
 	 *  Create a new empty map with default settings. Returns the full metadata
 	 *  (including the generated UUID) so the frontend can navigate to it immediately.
@@ -119,29 +106,7 @@ export const commands = {
 	 */
 	storeSetActive: (id: number | null) => typedError<null, string>(__TAURI_INVOKE("store_set_active", { id })),
 	/**  Fetch a single location by ID. Returns `None` if the ID is dead or doesn't exist. */
-	storeGetLocation: (id: number) => typedError<{
-	/**
-	 *  Monotonically increasing within a map. Zero is a sentinel meaning
-	 *  "not yet assigned" (used during import before IDs are allocated).
-	 */
-	id: number,
-	lat: number,
-	lng: number,
-	heading: number,
-	pitch: number,
-	/**  Street View zoom level (0-5), not map zoom. */
-	zoom: number,
-	panoId: string | null,
-	/**  See [`LocationFlags`]. */
-	flags: number,
-	/**  Tag IDs applied to this location. References `Tag.id`. */
-	tags: number[],
-	/**  Arbitrary key-value metadata */
-	extra?: any | null,
-	/**  Unix timestamp (seconds) */
-	createdAt: number,
-	modifiedAt?: number | null,
-} | null, string>(__TAURI_INVOKE("store_get_location", { id })).then((v) => ((v.status === "ok" ? { ...v, data: v.data==null?v.data:v.data } : v) as typeof v)),
+	storeGetLocation: (id: number) => typedError<Location_Serialize | null, string>(__TAURI_INVOKE("store_get_location", { id })).then((v) => ((v.status === "ok" ? { ...v, data: v.data==null?v.data:v.data } : v) as typeof v)),
 	/**  Fetch multiple locations by ID. Silently skips IDs that don't exist. */
 	storeGetLocationsByIds: (ids: number[]) => typedError<Location_Serialize[], string>(__TAURI_INVOKE("store_get_locations_by_ids", { ids })).then((v) => ((v.status === "ok" ? { ...v, data: v.data.map(i=>i) } : v) as typeof v)),
 	/**
@@ -328,17 +293,9 @@ export const commands = {
 	 */
 	storeSeenWrite: (entry: SeenWriteEntry) => typedError<null, string>(__TAURI_INVOKE("store_seen_write", { entry })),
 	/**  Returns a page of seen entries, newest first, with optional filtering. */
-	storeSeenList: (limit: number, offset: number, filter: {
-	country?: string | null,
-	mapId?: string | null,
-	search?: string | null,
-} | null) => typedError<SeenEntry[], string>(__TAURI_INVOKE("store_seen_list", { limit, offset, filter })).then((v) => ((v.status === "ok" ? { ...v, data: v.data.map(i=>i) } : v) as typeof v)),
+	storeSeenList: (limit: number, offset: number, filter: SeenFilter | null) => typedError<SeenEntry[], string>(__TAURI_INVOKE("store_seen_list", { limit, offset, filter })).then((v) => ((v.status === "ok" ? { ...v, data: v.data.map(i=>i) } : v) as typeof v)),
 	/**  Returns the total number of seen entries matching the filter (for pagination). */
-	storeSeenCount: (filter: {
-	country?: string | null,
-	mapId?: string | null,
-	search?: string | null,
-} | null) => typedError<number, string>(__TAURI_INVOKE("store_seen_count", { filter })),
+	storeSeenCount: (filter: SeenFilter | null) => typedError<number, string>(__TAURI_INVOKE("store_seen_count", { filter })),
 	/**
 	 *  Returns all distinct country codes present in the seen table, sorted alphabetically.
 	 *  Used to populate the country filter dropdown.
@@ -353,19 +310,7 @@ export const commands = {
 	/**  Deletes all seen history entries. */
 	storeSeenClear: () => typedError<null, string>(__TAURI_INVOKE("store_seen_clear")),
 	storeReviewCreate: (session: ReviewCreate) => typedError<ReviewSession, string>(__TAURI_INVOKE("store_review_create", { session })),
-	storeReviewGet: (mapId: string, sourceKey: string) => typedError<{
-	id: string,
-	mapId: string,
-	name: string,
-	sourceKey: string,
-	sourceProps: any,
-	order: number[],
-	reviewed: number[],
-	cursorId: number,
-	status: string,
-	createdAt: string,
-	updatedAt: string,
-} | null, string>(__TAURI_INVOKE("store_review_get", { mapId, sourceKey })),
+	storeReviewGet: (mapId: string, sourceKey: string) => typedError<ReviewSession | null, string>(__TAURI_INVOKE("store_review_get", { mapId, sourceKey })),
 	storeReviewList: (mapId: string, status: string | null) => typedError<ReviewSession[], string>(__TAURI_INVOKE("store_review_list", { mapId, status })),
 	storeReviewUpdate: (update: ReviewUpdate) => typedError<null, string>(__TAURI_INVOKE("store_review_update", { update })),
 	storeReviewDelete: (id: string) => typedError<null, string>(__TAURI_INVOKE("store_review_delete", { id })),

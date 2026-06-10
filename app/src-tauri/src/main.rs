@@ -9,5 +9,16 @@ fn main() {
     app_lib::serve::run_server();
     return;
   }
+  // `--export-bindings` regenerates ../src/bindings.gen.ts and exits, without
+  // launching the app. Breaks the deadlock when broken bindings block the frontend build.
+  #[cfg(debug_assertions)]
+  if std::env::args().any(|a| a == "--export-bindings") {
+    let out = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../src/bindings.gen.ts");
+    app_lib::specta_builder()
+      .export(specta_typescript::Typescript::default(), &out)
+      .expect("bindings export failed");
+    println!("bindings exported to {}", out.display());
+    return;
+  }
   app_lib::run();
 }

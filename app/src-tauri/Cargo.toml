@@ -69,3 +69,11 @@ web-serve = ["dep:tauri-plugin-webserve"]
 [dependencies.tauri-plugin-webdriver]
 version = "0.2"
 optional = true
+
+# Forked fix: command signature types render named references instead of inlining
+# full type bodies (shallow_inline). github.com/ccmdi/{tauri-specta,specta} (submodules).
+[patch.crates-io]
+tauri-specta = { path = "crates/tauri-specta" }
+specta = { path = "crates/specta/specta" }
+specta-macros = { path = "crates/specta/specta-macros" }
+specta-typescript = { path = "crates/specta/specta-typescript" }

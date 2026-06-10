@@ -186,6 +186,15 @@ export type FieldCount = {
 	key: string;
 	count: number;
 };
+/**  Reverse geocode result: nearest populated place to a coordinate. */
+export type GeoResult = {
+	city: string;
+	/**  First-level administrative division (state, province, region). */
+	admin: string;
+	country: string;
+	/**  ISO 3166-1 alpha-2 (e.g. "US", "FR"). */
+	country_code: string;
+};
 /**
  *  Summary of a single map found during bulk import preview.
  *  Shown in the import dialog so the user can select which maps to import.
@@ -637,6 +646,7 @@ export type SelectionProps = {
 	op: string;
 	value: any;
 	value2?: any | null;
+	tzLocal?: boolean;
 };
 /**
  *  Selection bitmask sync payload. `bitmask` carries the packed per-cell bitmask bytes
@@ -727,7 +737,7 @@ declare enum ValidationState {
 	Unofficial = 5,
 	GoodcamAvailable = 6
 }
-export type FilterOp = "eq" | "neq" | "gt" | "lt" | "gte" | "lte" | "between" | "between_anyyear" | "between_anytime" | "between_local" | "has" | "nothas";
+export type FilterOp = "eq" | "neq" | "gt" | "lt" | "gte" | "lte" | "between" | "between_anyyear" | "between_anytime" | "has" | "nothas";
 /** When a move target already holds a value, which field's value survives. */
 export type MergeWinner = "from" | "to";
 export type RenderDelta = RenderDelta_Serialize;
@@ -1402,32 +1412,15 @@ declare const mma: {
 		uninstallPlugin: (id: string) => Promise<null>;
 		checkBorderFile: (level: string) => Promise<boolean>;
 		downloadBorderFile: (level: string) => Promise<null>;
-		borderLookup: (lat: number, lng: number, level: string) => Promise<{
-			coordinates: (([
-				number,
-				number
-			])[])[];
-			extraPolygons?: ((([
-				number,
-				number
-			])[])[])[] | null;
-			properties?: any | null;
-		} | null>;
-		reverseGeocode: (lat: number, lng: number) => Promise<{
-			city: string;
-			admin: string;
-			country: string;
-			country_code: string;
-		} | null>;
+		borderLookup: (lat: number, lng: number, level: string) => Promise<PolygonGeometry | null>;
+		reverseGeocode: (lat: number, lng: number) => Promise<GeoResult | null>;
 		storeOpenMap: (mapId: string) => Promise<StoreStatus>;
 		storeCloseMap: () => Promise<null>;
 		storeSaveDirty: () => Promise<SaveResult>;
 		storeBakeAndSave: () => Promise<null>;
 		storeGetSummary: () => Promise<SummaryResult>;
 		storeListMaps: () => Promise<MapMeta[]>;
-		storeGetMap: (id: string) => Promise<{
-			meta: MapMeta;
-		} | null>;
+		storeGetMap: (id: string) => Promise<MapData | null>;
 		storeCreateMap: (name: string, folder: string | null) => Promise<MapData>;
 		storeDeleteMap: (id: string) => Promise<null>;
 		storeUpdateMapMeta: (id: string, patch: MapMetaPatch_Deserialize) => Promise<null>;
@@ -1442,20 +1435,7 @@ declare const mma: {
 			LocationPatch_Deserialize
 		][], recordUndo: boolean | null) => Promise<MutationResult_Serialize>;
 		storeSetActive: (id: number | null) => Promise<null>;
-		storeGetLocation: (id: number) => Promise<{
-			id: number;
-			lat: number;
-			lng: number;
-			heading: number;
-			pitch: number;
-			zoom: number;
-			panoId: string | null;
-			flags: number;
-			tags: number[];
-			extra?: any | null;
-			createdAt: number;
-			modifiedAt?: number | null;
-		} | null>;
+		storeGetLocation: (id: number) => Promise<Location_Serialize | null>;
 		storeGetLocationsByIds: (ids: number[]) => Promise<Location_Serialize[]>;
 		storeGetAllLocations: () => Promise<string>;
 		storeCountryDistribution: (level: string) => Promise<[
@@ -1504,33 +1484,13 @@ declare const mma: {
 		storeDbClearTable: (table: string) => Promise<number>;
 		storeDbStats: () => Promise<DbStats>;
 		storeSeenWrite: (entry: SeenWriteEntry) => Promise<null>;
-		storeSeenList: (limit: number, offset: number, filter: {
-			country?: string | null;
-			mapId?: string | null;
-			search?: string | null;
-		} | null) => Promise<SeenEntry[]>;
-		storeSeenCount: (filter: {
-			country?: string | null;
-			mapId?: string | null;
-			search?: string | null;
-		} | null) => Promise<number>;
+		storeSeenList: (limit: number, offset: number, filter: SeenFilter | null) => Promise<SeenEntry[]>;
+		storeSeenCount: (filter: SeenFilter | null) => Promise<number>;
 		storeSeenCountries: () => Promise<string[]>;
 		storeSeenMaps: () => Promise<SeenMapInfo[]>;
 		storeSeenClear: () => Promise<null>;
 		storeReviewCreate: (session: ReviewCreate) => Promise<ReviewSession>;
-		storeReviewGet: (mapId: string, sourceKey: string) => Promise<{
-			id: string;
-			mapId: string;
-			name: string;
-			sourceKey: string;
-			sourceProps: any;
-			order: number[];
-			reviewed: number[];
-			cursorId: number;
-			status: string;
-			createdAt: string;
-			updatedAt: string;
-		} | null>;
+		storeReviewGet: (mapId: string, sourceKey: string) => Promise<ReviewSession | null>;
 		storeReviewList: (mapId: string, status: string | null) => Promise<ReviewSession[]>;
 		storeReviewUpdate: (update: ReviewUpdate) => Promise<null>;
 		storeReviewDelete: (id: string) => Promise<null>;
@@ -1719,7 +1679,7 @@ declare const mma: {
 	pruneDuplicates(props: SelectionProps, distance: number): Promise<number>;
 	selectTag(tagId: number): Promise<void>;
 	selectPolygon(polygon: PolygonGeometry, includeInformational?: boolean): Promise<void>;
-	selectFilter(field: string, op: FilterOp, value: unknown, value2?: unknown): Promise<void>;
+	selectFilter(field: string, op: FilterOp, value: unknown, value2?: unknown, tzLocal?: boolean): Promise<void>;
 	updateFilterSelection(oldKey: string, props: SelectionProps): Promise<void>;
 	setPolygonName(key: string, name: string): Promise<void>;
 	setSelectionColors(entries: {

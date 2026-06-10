@@ -1,0 +1,8 @@
+[submodule "app/src-tauri/crates/tauri-specta"]
+	path = app/src-tauri/crates/tauri-specta
+	url = https://github.com/ccmdi/tauri-specta
+	branch = fix/nullable-reference-inline
+[submodule "app/src-tauri/crates/specta"]
+	path = app/src-tauri/crates/specta
+	url = https://github.com/ccmdi/specta
+	branch = feat/shallow-inline-public

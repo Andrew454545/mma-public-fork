@@ -78,13 +78,16 @@ import { boundsToTiles, fetchPanoDots, type PanoDot } from "@/lib/geo/photometa"
 
 import {
 	buildTileUrl,
+	buildStyledTileUrl,
 	createRoadmapTileConfig,
+	createLegacyTileConfig,
 	createLabelsTileConfig,
 	createSatelliteTileConfig,
 	createSvTileConfig,
 	createSvBlobbyTileConfig,
 	createTerrainBasemapTileConfig,
 	createTerrainOverlayTileConfig,
+	LEGACY_STYLE_MAP_ID,
 	type MapStyle,
 } from "@/lib/geo/tiles";
 import type { Location } from "@/types";
@@ -1012,6 +1015,7 @@ export function MapEmbed() {
 		}) => {
 			const tileSize = new google.maps.Size(256, 256);
 			const layers: google.maps.ImageMapType[] = [];
+			const legacyBase = opts.style === "legacy" && opts.type === "map" && !opts.terrain;
 
 			const extraStyles: MapStyle[] = [];
 			if (opts.style === "darkMode") {
@@ -1089,6 +1093,24 @@ export function MapEmbed() {
 							maxZoom: 20,
 						}),
 					);
+				} else if (legacyBase) {
+					// Legacy style renders labels in the base tile (toggled via stylers),
+					// so the separate labels layer is skipped below.
+					const cfg = createLegacyTileConfig([
+						...(opts.labels
+							? []
+							: [{ elementType: "labels", stylers: [{ visibility: "off" }] } as MapStyle]),
+						...extraStyles,
+					]);
+					layers.push(
+						new google.maps.ImageMapType({
+							getTileUrl: (coord: TileCoord, zoom: number) =>
+								buildStyledTileUrl(cfg, LEGACY_STYLE_MAP_ID, coord.x, coord.y, zoom),
+							tileSize,
+							minZoom: 0,
+							maxZoom: 20,
+						}),
+					);
 				} else {
 					const cfg = createRoadmapTileConfig(extraStyles);
 					layers.push(
@@ -1128,7 +1150,7 @@ export function MapEmbed() {
 			svLayerRef.current = svLayer;
 			layers.push(svLayer);
 
-			if (opts.labels && opts.type !== "osm") {
+			if (opts.labels && opts.type !== "osm" && !legacyBase) {
 				const labelCfg = createLabelsTileConfig(extraStyles);
 				layers.push(
 					new google.maps.ImageMapType({

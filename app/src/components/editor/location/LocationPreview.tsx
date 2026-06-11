@@ -61,9 +61,12 @@ import { isOfficialPano } from "@/lib/sv/panoId";
 import { enrich } from "@/lib/sv/enrich";
 import {
 	buildTileUrl,
+	buildStyledTileUrl,
 	createRoadmapTileConfig,
+	createLegacyTileConfig,
 	createSatelliteTileConfig,
 	createTerrainBasemapTileConfig,
+	LEGACY_STYLE_MAP_ID,
 	type MapStyle,
 } from "@/lib/geo/tiles";
 import { PanoControls, CrosshairOverlay, sendHideCar } from "./PanoControls";
@@ -287,27 +290,16 @@ const DARK_MODE_STYLES: MapStyle[] = [
 
 function buildMiniMapType(): google.maps.ImageMapType {
 	const tileSize = new google.maps.Size(256, 256);
-	const basemap = (() => {
+	const prefs = (() => {
 		try {
-			return JSON.parse(localStorage.getItem("basemap") ?? '"map"');
+			return JSON.parse(localStorage.getItem("mapEmbedPrefs") ?? "{}");
 		} catch {
-			return "map";
+			return {};
 		}
-	})() as string;
-	const terrain = (() => {
-		try {
-			return JSON.parse(localStorage.getItem("terrain") ?? "false");
-		} catch {
-			return false;
-		}
-	})() as boolean;
-	const style = (() => {
-		try {
-			return JSON.parse(localStorage.getItem("mapstyle") ?? '"default"');
-		} catch {
-			return "default";
-		}
-	})() as string;
+	})() as Partial<{ mapType: string; showTerrain: boolean; mapStyleName: string }>;
+	const basemap = prefs.mapType ?? "map";
+	const terrain = prefs.showTerrain ?? false;
+	const style = prefs.mapStyleName ?? "default";
 	// Re-enable labels and borders that createRoadmapTileConfig strips (they're normally a separate layer)
 	const showLabelsAndBorders: MapStyle[] = [
 		{ elementType: "labels", stylers: [{ visibility: "on" }] },
@@ -344,6 +336,16 @@ function buildMiniMapType(): google.maps.ImageMapType {
 		const cfg = createTerrainBasemapTileConfig(extraStyles);
 		return new google.maps.ImageMapType({
 			getTileUrl: (c: TileCoord, z: number) => buildTileUrl(cfg, c.x, c.y, z),
+			tileSize,
+			minZoom: 0,
+			maxZoom: 20,
+		});
+	}
+	if (style === "legacy") {
+		const cfg = createLegacyTileConfig();
+		return new google.maps.ImageMapType({
+			getTileUrl: (c: TileCoord, z: number) =>
+				buildStyledTileUrl(cfg, LEGACY_STYLE_MAP_ID, c.x, c.y, z),
 			tileSize,
 			minZoom: 0,
 			maxZoom: 20,

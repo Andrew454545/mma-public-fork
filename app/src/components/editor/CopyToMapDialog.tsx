@@ -1,9 +1,10 @@
-import { useState, useEffect, useMemo, useRef } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { cmd } from "@/lib/commands";
 import { log } from "@/lib/util/log";
 import type { MapMeta } from "@/bindings.gen";
 import { Dialog, DialogContent } from "@/components/primitives/Dialog";
 import { HotkeyInput } from "@/components/primitives/HotkeyInput";
+import { SuggestInput } from "@/components/primitives/SuggestInput";
 import { useMapSetting } from "@/components/editor/map/useMapSetting";
 import { getMapCopyBindingKey, withMapCopyBinding } from "@/lib/map/mapKeyBindings";
 import { getCurrentMapId } from "@/store/useMapStore";
@@ -17,23 +18,10 @@ export function CopyToMapDialog({ onClose }: { onClose: () => void }) {
 	// Added via autocomplete but not yet keyed; persisted only once a key is recorded.
 	const [pendingIds, setPendingIds] = useState<string[]>([]);
 	const [query, setQuery] = useState("");
-	const [suggestionsOpen, setSuggestionsOpen] = useState(false);
-	const addRowRef = useRef<HTMLDivElement>(null);
 
 	useEffect(() => {
 		cmd.storeListMaps().then(setMaps).catch((e) => log.error("[copyToMap] list failed:", e));
 	}, []);
-
-	useEffect(() => {
-		if (!suggestionsOpen) return;
-		const handler = (e: MouseEvent) => {
-			if (addRowRef.current && !addRowRef.current.contains(e.target as Node)) {
-				setSuggestionsOpen(false);
-			}
-		};
-		document.addEventListener("mousedown", handler);
-		return () => document.removeEventListener("mousedown", handler);
-	}, [suggestionsOpen]);
 
 	const byId = useMemo(() => new Map((maps ?? []).map((m) => [m.id, m])), [maps]);
 
@@ -64,7 +52,6 @@ export function CopyToMapDialog({ onClose }: { onClose: () => void }) {
 	const addMap = (id: string) => {
 		setPendingIds((prev) => (prev.includes(id) ? prev : [...prev, id]));
 		setQuery("");
-		setSuggestionsOpen(false);
 	};
 
 	const removeRow = (id: string) => {
@@ -115,44 +102,23 @@ export function CopyToMapDialog({ onClose }: { onClose: () => void }) {
 						})}
 					</ul>
 				)}
-				<div className="copy-to-map-modal__add" ref={addRowRef}>
-					<input
-						className="input"
-						type="text"
-						placeholder="Add a map..."
-						value={query}
-						onChange={(e) => {
-							setQuery(e.target.value);
-							setSuggestionsOpen(e.target.value.trim().length > 0);
-						}}
-						onFocus={() => setSuggestionsOpen(query.trim().length > 0)}
-						onKeyDown={(e) => {
-							if (e.key === "Enter" && suggestions.length > 0) {
-								e.preventDefault();
-								addMap(suggestions[0].id);
-							}
-							if (e.key === "Escape" && suggestionsOpen) {
-								e.stopPropagation();
-								setSuggestionsOpen(false);
-							}
-						}}
-						autoFocus
-					/>
-					<ol
-						className="search-results"
-						hidden={!suggestionsOpen || suggestions.length === 0}
-						style={{ top: "100%", left: 0, right: 0, zIndex: 10 }}
-					>
-						{suggestions.map((m) => (
-							<li key={m.id}>
-								<button className="search-result" onClick={() => addMap(m.id)}>
-									<strong>{m.name || "(unnamed)"}</strong>
-									{m.folder && <span className="search-result__context"> · {m.folder}</span>}
-								</button>
-							</li>
-						))}
-					</ol>
-				</div>
+				<SuggestInput
+					containerClassName="copy-to-map-modal__add"
+					placeholder="Add a map..."
+					value={query}
+					onChange={setQuery}
+					suggestions={suggestions}
+					getKey={(m) => m.id}
+					onPick={(m) => addMap(m.id)}
+					listStyle={{ top: "100%", left: 0, zIndex: 10 }}
+					autoFocus
+					renderItem={(m) => (
+						<>
+							<strong>{m.name || "(unnamed)"}</strong>
+							{m.folder && <span className="search-result__context"> · {m.folder}</span>}
+						</>
+					)}
+				/>
 				</div>
 			</DialogContent>
 		</Dialog>

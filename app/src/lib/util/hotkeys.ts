@@ -317,7 +317,7 @@ const RAW_HOTKEY_DEFS: HotkeyDef[] = [
 	},
 	{
 		action: "toggleSelectOnly",
-		label: "Toggle select-only mode (block new locations)",
+		label: "Toggle select-only mode",
 		group: "Map Navigation",
 		defaultBinding: "o",
 	},

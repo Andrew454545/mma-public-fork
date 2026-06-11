@@ -465,7 +465,7 @@ export function MapSettingsDropdown({ settings: s }: { settings: MapSettingsDrop
 								checked={s.selectOnly}
 								onChange={(e) => s.setSelectOnly(e.target.checked)}
 							/>
-							Select-only mode (map clicks never add locations)
+							Select-only mode
 						</label>
 						<label className="settings-popup__item">
 							<input

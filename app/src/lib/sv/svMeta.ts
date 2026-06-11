@@ -1,6 +1,13 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { isOfficialPano } from "@/lib/sv/panoId";
 import { PanoType } from "@/types";
+import { PbfReader, PbfWriter } from "pbf";
+import {
+	readGetMetadataResponse,
+	writeGetMetadataRequest,
+	type GetMetadataRequest,
+	type ImageMetadata,
+} from "@/lib/sv/proto/getmetadata.gen";
 
 const RPC_URL =
 	"https://maps.googleapis.com/$rpc/google.internal.maps.mapsjs.v1.MapsJsInternalService/GetMetadata";
@@ -80,37 +87,24 @@ export function detectCameraType(data: google.maps.StreetViewResolvedPanoramaDat
 }
 
 /* Pano ID → imageKey array for protobuf request */
-function panoIdToImageKey(panoId: string): [number, string] {
+export function panoIdToImageKey(panoId: string): [number, string] {
 	if (panoId.startsWith("F:")) return [3, panoId.slice(2)];
 	if (isOfficialPano(panoId)) return [2, panoId];
-	// Base64-encoded protobuf (user-uploaded, etc.) — decode [type, id]
+	// Base64url-encoded binary protobuf ImageKey (user-uploaded, etc.) — {1: type, 2: id}
 	try {
 		const b64 = panoId.replace(/\.+$/, "").replace(/-/g, "+").replace(/_/g, "/");
 		const bin = atob(b64);
 		const bytes = new Uint8Array(bin.length);
 		for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-		// field 1 (varint): type
-		let pos = 0;
-		if ((bytes[pos++] & 0x07) !== 0) return [2, panoId]; // not varint, bail
-		let type = 0,
-			shift = 0;
-		while (pos < bytes.length) {
-			const b = bytes[pos++];
-			type |= (b & 0x7f) << shift;
-			if ((b & 0x80) === 0) break;
-			shift += 7;
+		const pbf = new PbfReader(bytes);
+		let type = 2;
+		let id = panoId;
+		let field;
+		while ((field = pbf.nextField())) {
+			if (field === 1) type = pbf.readVarint();
+			else if (field === 2) id = pbf.readString();
+			else pbf.skip(pbf.type);
 		}
-		// field 2 (length-delimited): id
-		if (pos >= bytes.length || (bytes[pos++] & 0x07) !== 2) return [type, panoId];
-		let len = 0;
-		shift = 0;
-		while (pos < bytes.length) {
-			const b = bytes[pos++];
-			len |= (b & 0x7f) << shift;
-			if ((b & 0x80) === 0) break;
-			shift += 7;
-		}
-		const id = new TextDecoder().decode(bytes.slice(pos, pos + len));
 		return [type, id];
 	} catch {
 		return [2, panoId];
@@ -124,118 +118,82 @@ export function imageKeyToPanoId(key: any[]): string {
 	const id: string = key[1];
 	if (type === 2 || type === 0) return id;
 	if (type === 3) return `F:${id}`;
-	// Other types (e.g. 10 = USER_UPLOADED): encode as protobuf + base64url
-	const enc = new TextEncoder();
-	const idBytes = enc.encode(id);
-	const buf = new Uint8Array(64);
-	let pos = 0;
-	// field 1 (type), wire type 0 (varint)
-	buf[pos++] = 0x08;
-	let v = type;
-	while (v > 0x7f) {
-		buf[pos++] = (v & 0x7f) | 0x80;
-		v >>>= 7;
-	}
-	buf[pos++] = v;
-	// field 2 (id), wire type 2 (length-delimited)
-	buf[pos++] = 0x12;
-	let len = idBytes.length;
-	while (len > 0x7f) {
-		buf[pos++] = (len & 0x7f) | 0x80;
-		len >>>= 7;
-	}
-	buf[pos++] = len;
-	buf.set(idBytes, pos);
-	pos += idBytes.length;
-	const b64 = btoa(String.fromCharCode(...buf.slice(0, pos)))
+	// Other types (e.g. 10 = USER_UPLOADED): encode as binary protobuf ImageKey + base64url
+	const pbf = new PbfWriter();
+	pbf.writeVarintField(1, type);
+	pbf.writeStringField(2, id);
+	const buf = pbf.finish();
+	return btoa(String.fromCharCode(...buf))
 		.replace(/\+/g, "-")
 		.replace(/\//g, "_")
 		.replace(/=+$/, "");
-	return b64;
 }
 
-function buildGetMetadataRequest(panoIds: string[]): any[] {
-	return [
-		["apiv3", null, null, null, "en"],
-		["en", "US"],
-		panoIds.map((id) => [panoIdToImageKey(id)]),
-		[[1, 2, 3, 4, 8, 6], [], null, null, [], []],
-	];
+function buildGetMetadataRequest(panoIds: string[]): GetMetadataRequest {
+	return {
+		context: { productId: "apiv3", language: "en" },
+		locale: { language: "en", regionCode: "US" },
+		key: panoIds.map((id) => {
+			const [frontend, keyId] = panoIdToImageKey(id);
+			return { key: { frontend, id: keyId } };
+		}),
+		spec: { component: [1, 2, 3, 4, 8, 6] },
+	};
 }
 
-function parseResult(r: any): google.maps.StreetViewResolvedPanoramaData | null {
-	if (!r) return null;
-	const status = r[0];
-	if (status?.[0] !== 1) return null;
+export function parseResult(m: ImageMetadata | undefined): google.maps.StreetViewResolvedPanoramaData | null {
+	if (!m || m.status?.code !== 1) return null;
 
-	const panoIdRaw = r[1];
-	const tiles = r[2];
-	const desc = r[3];
-	const attr = r[4];
-	const locs = r[5];
-	const dateInfo = r[6];
+	const info = m.information[0];
+	if (!info) return null;
 
-	const loc0 = locs?.[0];
-	if (!loc0) return null;
+	const locData = info.location;
+	const panoRefs = info.relations?.pano ?? [];
 
-	const locData = loc0[1];
-	const panoRefs = loc0[3]?.[0] ?? [];
-	const links = loc0[6] ?? [];
-	const timeEntries = loc0[8] ?? [];
-
-	const pos = locData?.[0];
-	const lat = pos?.[2] ?? 0;
-	const lng = pos?.[3] ?? 0;
-	const altitude = Number(locData?.[1]?.[0]) || 0;
-	// locData[2] is [heading, tilt, roll]; [0] is the driving direction (same value as tiles.centerHeading)
-	const drivingDirection = locData?.[2]?.[0] ?? null;
-	const countryCode = locData?.[4] || null;
-	const levelId = locData?.[3]?.[0] ?? null;
+	const lat = locData?.location?.lat ?? 0;
+	const lng = locData?.location?.lng ?? 0;
+	const altitude = locData?.altitude?.meters || 0;
+	// pov.heading is the driving direction (same value as tiles.centerHeading)
+	const drivingDirection = locData?.pov?.heading ?? null;
+	const countryCode = locData?.countryCode || null;
+	const levelId = locData?.level?.id ?? null;
 	// "launch" = car, "scout" = trekker/alleycat
-	const source = dateInfo?.[5]?.[2] ?? null;
+	const source = m.date?.sourceInfo?.source || null;
 
-	const incDate = dateInfo?.[7];
+	const incDate = m.date?.date;
 	const imageDate =
-		incDate && incDate[0] > 0
-			? `${String(incDate[0]).padStart(4, "0")}-${String(incDate[1] ?? 0).padStart(2, "0")}`
+		incDate && incDate.year > 0
+			? `${String(incDate.year).padStart(4, "0")}-${String(incDate.month).padStart(2, "0")}`
 			: "";
 
-	const panoId = imageKeyToPanoId(panoIdRaw);
+	const panoId = m.pano ? imageKeyToPanoId([m.pano.frontend, m.pano.id]) : "";
+	const refPanoId = (ref?: { key?: { frontend: number; id: string } }) =>
+		ref?.key ? imageKeyToPanoId([ref.key.frontend, ref.key.id]) : "";
 
-	const copyrightName = attr?.[0]?.[0]?.[0]?.[0] ?? "";
-	const uploaderName = attr?.[1]?.[0]?.[0]?.[0] ?? null;
-	const descParts = desc?.[2] ?? [];
-	const description = descParts.map((p: any) => p?.[0] ?? "").join(", ");
+	const copyrightName = m.attribution?.item?.[0]?.name?.name ?? "";
+	const uploaderName = m.attribution?.author?.[0]?.name?.text || null;
+	const description = (m.description?.description ?? []).map((p) => p.text).join(", ");
 
-	const worldW = tiles?.[2]?.[1] ?? 0;
-	const worldH = tiles?.[2]?.[0] ?? 0;
-	const tileW = tiles?.[3]?.[1]?.[1] ?? 0;
-	const tileH = tiles?.[3]?.[1]?.[0] ?? 0;
+	const worldW = m.tiles?.worldSize?.width ?? 0;
+	const worldH = m.tiles?.worldSize?.height ?? 0;
+	const tileW = m.tiles?.tileSize?.tileSize?.width ?? 0;
+	const tileH = m.tiles?.tileSize?.tileSize?.height ?? 0;
 
-	const time = timeEntries
-		.map((e: any) => {
-			const targetIdx = e[0];
-			const ref = panoRefs[targetIdx];
-			const d = e[1];
-			return {
-				pano: ref ? imageKeyToPanoId(ref[0]) : panoId,
-				date: new Date(d?.[0] ?? 0, d?.[1] ?? 0, d?.[2] ?? 0),
-			};
-		})
+	const time = info.time
+		.map((e) => ({
+			pano: refPanoId(panoRefs[e.target]) || panoId,
+			date: new Date(e.date?.year ?? 0, e.date?.month ?? 0, e.date?.day ?? 0),
+		}))
 		.concat({
 			pano: panoId,
-			date: new Date(incDate?.[0] ?? 0, incDate?.[1] ?? 0, incDate?.[2] ?? 0),
+			date: new Date(incDate?.year ?? 0, incDate?.month ?? 0, incDate?.day ?? 0),
 		})
-		.sort((a: any, b: any) => a.date.getTime() - b.date.getTime());
+		.sort((a, b) => a.date.getTime() - b.date.getTime());
 
-	const parsedLinks = links.map((l: any) => {
-		const targetIdx = l[0];
-		const ref = panoRefs[targetIdx];
-		return {
-			pano: ref ? imageKeyToPanoId(ref[0]) : "",
-			heading: l[1]?.[3] ?? 0,
-		};
-	});
+	const parsedLinks = info.link.map((l) => ({
+		pano: refPanoId(panoRefs[l.target]),
+		heading: l.properties?.heading ?? 0,
+	}));
 
 	const data = {
 		copyright: copyrightName,
@@ -253,7 +211,7 @@ function parseResult(r: any): google.maps.StreetViewResolvedPanoramaData | null 
 		},
 		extra: {
 			altitude,
-			panoType: panoIdRaw?.[0] ?? PanoType.Official,
+			panoType: m.pano?.frontend || PanoType.Official,
 			cameraType: null as CameraType,
 			countryCode,
 			uploaderName,
@@ -272,21 +230,22 @@ export async function fetchSvMetadata(
 	panoIds: string[],
 ): Promise<(google.maps.StreetViewResolvedPanoramaData | null)[]> {
 	if (panoIds.length === 0) return [];
-	const body = buildGetMetadataRequest(panoIds);
+	const writer = new PbfWriter();
+	writeGetMetadataRequest(buildGetMetadataRequest(panoIds), writer);
+	// Binary protobuf both ways: the response format mirrors the request content-type
 	const res = await fetch(RPC_URL, {
 		method: "POST",
 		headers: {
-			"content-type": "application/json+protobuf",
+			"content-type": "application/x-protobuf",
 			"x-user-agent": "grpc-web-javascript/0.1",
 		},
-		body: JSON.stringify(body),
+		body: writer.finish().slice(),
 		mode: "cors",
 		credentials: "omit",
 	});
 	if (!res.ok) return panoIds.map(() => null);
-	const json = await res.json();
-	const statusCode = json[0]?.[0];
+	const resp = readGetMetadataResponse(new PbfReader(new Uint8Array(await res.arrayBuffer())));
+	const statusCode = resp.status?.code;
 	if (statusCode === 3 || statusCode === 5) return panoIds.map(() => null);
-	const results = json[1] ?? [];
-	return results.map(parseResult);
+	return resp.metadata.map(parseResult);
 }

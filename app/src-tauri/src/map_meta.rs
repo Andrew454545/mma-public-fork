@@ -17,6 +17,24 @@ use crate::util::now_iso;
 // Typed sub-structs for MapMeta
 // ---------------------------------------------------------------------------
 
+/// Action performed by a per-map key binding on the active location.
+/// New action kinds (e.g. copy-to-map) are added as variants here.
+#[derive(Clone, serde::Serialize, serde::Deserialize, specta::Type)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum MapKeyAction {
+    #[serde(rename_all = "camelCase")]
+    ApplyTag { tag_id: u32 },
+}
+
+/// One user-defined per-map key binding. `key` is a combo string in the same
+/// canonical format as global hotkey bindings (e.g. "m", "Mod+Shift+x").
+#[derive(Clone, serde::Serialize, serde::Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct MapKeyBinding {
+    pub key: String,
+    pub action: MapKeyAction,
+}
+
 /// Per-map editor preferences. Controls Street View lookup behavior (official vs
 /// unofficial, camera type filters), export defaults, and metadata enrichment.
 #[derive(Clone, serde::Serialize, serde::Deserialize, specta::Type)]
@@ -35,6 +53,7 @@ pub struct MapSettings {
     pub enrich_metadata: bool,
     pub enrich_fields: Option<Vec<String>>,
     pub generated_location_tag: Option<String>,
+    pub key_bindings: Vec<MapKeyBinding>,
 }
 
 /// Canonical default map settings.
@@ -54,6 +73,7 @@ impl Default for MapSettings {
             enrich_metadata: false,
             enrich_fields: None,
             generated_location_tag: None,
+            key_bindings: Vec::new(),
         }
     }
 }
@@ -660,6 +680,26 @@ pub fn store_db_stats(app: tauri::AppHandle) -> AppResult<DbStats> {
 mod tests {
     use super::*;
     use std::collections::HashSet;
+
+    #[test]
+    fn map_settings_key_bindings_default_empty() {
+        // Old settings JSON (no keyBindings) must deserialize with an empty list.
+        let old_json = r#"{"pointAlongRoad":true}"#;
+        let settings: MapSettings = serde_json::from_str(old_json).unwrap();
+        assert!(settings.key_bindings.is_empty());
+        assert!(MapSettings::default().key_bindings.is_empty());
+    }
+
+    #[test]
+    fn map_key_binding_wire_format_round_trip() {
+        // Wire shape is the contract with the TS bindings: tagged union, camelCase.
+        let json = r#"{"key":"Mod+Shift+x","action":{"type":"applyTag","tagId":5}}"#;
+        let binding: MapKeyBinding = serde_json::from_str(json).unwrap();
+        assert_eq!(binding.key, "Mod+Shift+x");
+        let MapKeyAction::ApplyTag { tag_id } = &binding.action;
+        assert_eq!(*tag_id, 5);
+        assert_eq!(serde_json::to_string(&binding).unwrap(), json);
+    }
 
     #[test]
     fn infer_number() {

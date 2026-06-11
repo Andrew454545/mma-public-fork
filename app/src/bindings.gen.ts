@@ -755,6 +755,21 @@ export type MapMetaPatch_Serialize = {
 };
 
 /**
+ *  Action performed by a per-map key binding on the active location.
+ *  New action kinds (e.g. copy-to-map) are added as variants here.
+ */
+export type MapKeyAction = { type: "applyTag"; tagId: number };
+
+/**
+ *  One user-defined per-map key binding. `key` is a combo string in the same
+ *  canonical format as global hotkey bindings (e.g. "m", "Mod+Shift+x").
+ */
+export type MapKeyBinding = {
+	key: string,
+	action: MapKeyAction,
+};
+
+/**
  *  Per-map editor preferences. Controls Street View lookup behavior (official vs
  *  unofficial, camera type filters), export defaults, and metadata enrichment.
  */
@@ -772,6 +787,7 @@ export type MapSettings = {
 	enrichMetadata?: boolean,
 	enrichFields?: string[] | null,
 	generatedLocationTag?: string | null,
+	keyBindings?: MapKeyBinding[],
 };
 
 /**

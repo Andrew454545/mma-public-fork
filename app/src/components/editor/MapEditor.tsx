@@ -6,6 +6,7 @@ import {
 	addLocations,
 	setActiveLocation,
 	getActiveLocation,
+	getCurrentMap,
 	getSelectedLocationIds,
 	removeLocations,
 	createTags,
@@ -39,6 +40,7 @@ import { PluginSidebarHost } from "@/components/editor/PluginSidebarHost";
 import SameLocation from "@/components/editor/SameLocation";
 import { log } from "@/lib/util/log"
 import { useCountrySelect } from "@/lib/map/useCountrySelect";
+import { useMapKeyBindings } from "@/lib/map/mapKeyBindings";
 
 function zoomToPasted(bounds: [number, number, number, number] | null, padding = 0) {
 	if (!getSettings().panToImported) return;
@@ -214,6 +216,7 @@ export function MapEditor() {
 	usePasteHandler();
 	const fileDragging = useFileDrop();
 	useCommandHotkeys();
+	useMapKeyBindings(() => getCurrentMap()?.meta.settings.keyBindings ?? []);
 	useCountrySelect();
 	useHotkey(useBinding("toggleFullscreenMap"), () => {
 		setSetting("fullscreenMap", !getSettings().fullscreenMap);

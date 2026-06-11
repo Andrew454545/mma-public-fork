@@ -38,6 +38,8 @@ import { loadOpenSV, google } from "@/lib/sv/opensv";
 import { fetchSvMetadata } from "@/lib/sv/svMeta";
 import { useHotkey, parseHotkey, matchesKey, isEditableElement } from "@/lib/hooks/useHotkey";
 import { registerMapKeyActionHandler } from "@/lib/map/mapKeyBindings";
+import { cmd } from "@/lib/commands";
+import { log } from "@/lib/util/log";
 import { useBinding, getBinding } from "@/lib/util/hotkeys";
 import { useSettings, useSetting, setSetting, getSettings } from "@/store/settings";
 import { useTimezone } from "@/lib/util/timezone";
@@ -1216,17 +1218,43 @@ function LocationPreviewInner() {
 		const has = cur.includes(tag.id);
 		setPendingTags(has ? cur.filter((t) => t !== tag.id) : [...cur, tag.id]);
 	};
-	// Per-map applyTag bindings: registered only while a location is open, so the
-	// keys fall through to global hotkeys otherwise. Soft-deleted (invisible) tags
+	// Per-map bindings: registered only while a location is open, so the keys
+	// fall through to global hotkeys otherwise. Soft-deleted (invisible) tags
 	// keep their binding for undo symmetry; declining lets the key fall through.
 	const hasLocation = location != null;
 	useEffect(() => {
 		if (!hasLocation) return;
-		return registerMapKeyActionHandler("applyTag", ({ tagId }) => {
+		const unregisterApply = registerMapKeyActionHandler("applyTag", ({ tagId }) => {
 			if (!getVisibleTags().some((t) => t.id === tagId)) return false;
 			const cur = pendingTagsRef.current;
 			setPendingTags(cur.includes(tagId) ? cur.filter((t) => t !== tagId) : [...cur, tagId]);
 		});
+		const unregisterCopy = registerMapKeyActionHandler("copyToMap", ({ mapId }) => {
+			const loc = getActiveLocation();
+			if (!loc) return false;
+			const container = fullscreenContainerRef.current ?? panoContainerRef.current?.parentElement;
+			const t0 = performance.now();
+			cmd
+				.storeCopyLocationsToMap(mapId, [loc.id])
+				.then((res) => {
+					log.debug(`[copyToMap] ipc=${Math.round(performance.now() - t0)}ms`);
+					if (!container) return;
+					showToast(
+						container,
+						res.copied > 0
+							? `Copied to "${res.targetName}"`
+							: `Already in "${res.targetName}"`,
+					);
+				})
+				.catch((e) => {
+					log.error("[copyToMap] failed:", e);
+					if (container) showToast(container, "Copy failed");
+				});
+		});
+		return () => {
+			unregisterApply();
+			unregisterCopy();
+		};
 	}, [hasLocation]);
 
 	useHotkey(useBinding("quicktag1"), () => quicktagSlot(0));

@@ -1838,6 +1838,252 @@ pub(crate) fn read_full_state_from_disk(app: &tauri::AppHandle, map_id: &str) ->
     Ok(locs)
 }
 
+/// Result of a cross-map location copy. `target_name` feeds the toast.
+#[derive(serde::Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct CopyToMapResult {
+    pub copied: u32,
+    pub skipped: u32,
+    pub target_name: String,
+}
+
+/// Cross-map dedup: a source is a duplicate of a target location if they share a
+/// panoId (when the source has one) or exact lat/lng bits (pano-less sources).
+/// Makes the copy hotkey idempotent; fuzzy spatial matching stays the job of the
+/// in-map Duplicates selection.
+pub(crate) fn split_new_locations(sources: Vec<Location>, existing: &[Location]) -> (Vec<Location>, u32) {
+    let mut panos: HashSet<&str> = HashSet::new();
+    let mut coords: HashSet<(u64, u64)> = HashSet::new();
+    for l in existing {
+        if let Some(p) = &l.pano_id {
+            if !p.is_empty() {
+                panos.insert(p.as_str());
+            }
+        }
+        coords.insert((l.lat.to_bits(), l.lng.to_bits()));
+    }
+    let mut fresh = Vec::new();
+    let mut skipped = 0u32;
+    for l in sources {
+        let dup = match &l.pano_id {
+            Some(p) if !p.is_empty() => panos.contains(p.as_str()),
+            _ => coords.contains(&(l.lat.to_bits(), l.lng.to_bits())),
+        };
+        if dup {
+            skipped += 1;
+        } else {
+            fresh.push(l);
+        }
+    }
+    (fresh, skipped)
+}
+
+/// Merge `source_tags` into `target_tags` by case-insensitive name matching:
+/// matches remap to the existing target id; misses are inserted as a clone of
+/// the source tag (count reset) under a fresh id from `next_id`. Returns the
+/// `{source_id -> target_id}` remap table. Single source of truth for tag
+/// reconciliation — used by import and cross-map copy.
+pub(crate) fn reconcile_tags_by_name(
+    source_tags: &[Tag],
+    target_tags: &mut HashMap<u32, Tag>,
+    next_id: &mut u32,
+) -> HashMap<u32, u32> {
+    let mut name_to_id: HashMap<String, u32> =
+        target_tags.values().map(|t| (t.name.to_lowercase(), t.id)).collect();
+    let mut remap: HashMap<u32, u32> = HashMap::new();
+    for tag in source_tags {
+        let target_id = match name_to_id.get(&tag.name.to_lowercase()) {
+            Some(&id) => id,
+            None => {
+                let id = *next_id;
+                *next_id += 1;
+                target_tags.insert(id, Tag { id, count: 0, ..tag.clone() });
+                name_to_id.insert(tag.name.to_lowercase(), id);
+                id
+            }
+        };
+        remap.insert(tag.id, target_id);
+    }
+    remap
+}
+
+/// Copy locations from the current window's map into another map (routing
+/// hotkeys). Duplicates in the target are skipped (`split_new_locations`).
+/// Tags carry over import-style (`reconcile_copied_tags`), extras carry with
+/// field defs auto-registered in the target; timestamps are fresh. If the
+/// target is open (any window), its live store is mutated and a
+/// `store-external-mutation` event tells its windows to resync; either way
+/// the result is persisted immediately (delta sidecar + tags + count).
+#[tauri::command]
+#[specta::specta]
+pub fn store_copy_locations_to_map(
+    app: tauri::AppHandle,
+    webview: tauri::Webview,
+    state: tauri::State<'_, StoreState>,
+    target_map_id: String,
+    ids: Vec<u32>,
+) -> AppResult<CopyToMapResult> {
+    use tauri::Emitter;
+    let _t = std::time::Instant::now();
+    let conn = fast_io::open_db(&app)?;
+    let target_name: String = conn.query_row(
+        "SELECT name FROM maps WHERE id = ?1",
+        [&target_map_id],
+        |r| r.get(0),
+    )?;
+
+    // The manager lock is held for both paths: it serializes the closed-path
+    // delta-file rewrite against a concurrent store_open_map of the same map.
+    let mut mgr = state.lock()?;
+    let source_map_id = mgr.map_id_for_window(webview.label())?;
+    if source_map_id == target_map_id {
+        return Err(AppError("cannot copy a location into its own map".into()));
+    }
+
+    let now = crate::util::now_unix();
+    let mut sources: Vec<Location> = Vec::new();
+    let mut source_tags: HashMap<u32, Tag> = HashMap::new();
+    {
+        let src = mgr.store_for_map(&source_map_id)?;
+        for &id in &ids {
+            if let Some(mut loc) = src.get_loc_by_id(id) {
+                loc.created_at = now;
+                loc.modified_at = Some(now);
+                for &t in &loc.tags {
+                    if let Some(tag) = src.tags.all.get(&t) {
+                        source_tags.insert(t, tag.clone());
+                    }
+                }
+                sources.push(loc);
+            }
+        }
+    }
+    if sources.is_empty() {
+        return Ok(CopyToMapResult { copied: 0, skipped: 0, target_name });
+    }
+
+    let used_tags = |fresh: &[Location]| -> Vec<Tag> {
+        let used: HashSet<u32> = fresh.iter().flat_map(|l| l.tags.iter().copied()).collect();
+        used.iter().filter_map(|id| source_tags.get(id).cloned()).collect()
+    };
+
+    if mgr.stores.contains_key(&target_map_id) {
+        // Target open in some window: insert through the import path (reconcile,
+        // id alloc, counts, field defs, undo, render cells), persist its dirty
+        // state, and emit so its windows resync.
+        let target = mgr.store_for_map(&target_map_id)?;
+        let t_scan = std::time::Instant::now();
+        let existing = target.collect_scoped(None);
+        let (fresh, skipped) = split_new_locations(sources, &existing);
+        let scan_ms = t_scan.elapsed().as_millis();
+        let copied = fresh.len() as u32;
+        if copied > 0 {
+            let tags = used_tags(&fresh);
+            let t_add = std::time::Instant::now();
+            crate::import::add_copied_to_store(&app, target, fresh, tags)?;
+            let add_ms = t_add.elapsed().as_millis();
+            target.tags.dirty = false;
+            let t_save = std::time::Instant::now();
+            persist_dirty_inner(
+                &app,
+                &target_map_id,
+                Some(overlay_delta_bytes(target)?),
+                target.alive_count,
+                Some(serialize_tags_json(&target.tags.all)),
+            )?;
+            log::debug!("[cmd] store_copy_locations_to_map open-target scan={}ms add={}ms save={}ms total={}ms",
+                scan_ms, add_ms, t_save.elapsed().as_millis(), _t.elapsed().as_millis());
+            let _ = app.emit("store-external-mutation", &target_map_id);
+        }
+        return Ok(CopyToMapResult { copied, skipped, target_name });
+    }
+
+    // Target closed: append to the uncommitted delta sidecar (what autosave writes).
+    let t_read = std::time::Instant::now();
+    let existing = read_full_state_from_disk(&app, &target_map_id)?;
+    let read_ms = t_read.elapsed().as_millis();
+    let (mut fresh, skipped) = split_new_locations(sources, &existing);
+    let copied = fresh.len() as u32;
+    if copied > 0 {
+        let mut target_tags = read_tags_json(&conn, &target_map_id);
+        let mut next_tag = target_tags.keys().max().copied().unwrap_or(0) + 1;
+        let remap = reconcile_tags_by_name(&used_tags(&fresh), &mut target_tags, &mut next_tag);
+        for loc in &mut fresh {
+            loc.tags = loc.tags.iter().filter_map(|t| remap.get(t).copied()).collect();
+            for t in &loc.tags {
+                if let Some(tag) = target_tags.get_mut(t) {
+                    tag.count += 1;
+                }
+            }
+        }
+
+        // Register any extra-field defs the copies introduce. `persist_field_defs`
+        // skips keys the target already defines, so an empty known-set is safe.
+        {
+            let extras: Vec<&serde_json::Map<String, serde_json::Value>> =
+                fresh.iter().filter_map(|l| l.extra.as_ref()).collect();
+            if let Some(defs) = map_meta::auto_register_field_defs(&HashSet::<String>::new(), &extras) {
+                map_meta::persist_field_defs(&conn, &target_map_id, &defs)?;
+            }
+        }
+
+        let t_hist = std::time::Instant::now();
+        let (undo, redo) = load_edit_history_inner(&app, &target_map_id)?;
+        let hist_ms = t_hist.elapsed().as_millis();
+        let base_max = existing.iter().map(|l| l.id).max().unwrap_or(0);
+        let next = seed_next_id(base_max, &[], &undo, &redo);
+        for (loc, id) in fresh.iter_mut().zip(next..) {
+            loc.id = id;
+        }
+        let t_save = std::time::Instant::now();
+        let delta_path = fast_io::arrow_delta_path(&app, &target_map_id)?;
+        let mut delta: DeltaOverlay = if delta_path.exists() {
+            rmp_serde::from_slice(&std::fs::read(&delta_path)?)?
+        } else {
+            DeltaOverlay { adds: Vec::new(), dead_ids: Vec::new(), patches: Vec::new() }
+        };
+        delta.adds.extend(fresh);
+        let bytes = rmp_serde::to_vec_named(&delta)?;
+        let alive = existing.len() + copied as usize;
+        persist_dirty_inner(
+            &app,
+            &target_map_id,
+            Some(bytes),
+            alive,
+            Some(serialize_tags_json(&target_tags)),
+        )?;
+        log::debug!("[cmd] store_copy_locations_to_map closed-target read={}ms history={}ms save={}ms total={}ms",
+            read_ms, hist_ms, t_save.elapsed().as_millis(), _t.elapsed().as_millis());
+    }
+    Ok(CopyToMapResult { copied, skipped, target_name })
+}
+
+/// Write a map's dirty state: delta sidecar (if any), location count, and tags
+/// JSON (if any). Sync core shared by `store_save_dirty` and cross-map copy.
+pub(crate) fn persist_dirty_inner(
+    app: &tauri::AppHandle,
+    map_id: &str,
+    delta_data: Option<Vec<u8>>,
+    alive: usize,
+    tags_json: Option<String>,
+) -> AppResult<()> {
+    if let Some(delta_data) = delta_data {
+        let path = fast_io::arrow_delta_path(app, map_id)?;
+        fast_io::atomic_write(&path, |mut file| {
+            use std::io::Write;
+            file.write_all(&delta_data).map_err(AppError::from)
+        })?;
+    }
+    let conn = fast_io::open_db(app)?;
+    conn.execute("UPDATE maps SET location_count = ?1 WHERE id = ?2",
+        rusqlite::params![alive, map_id])?;
+    if let Some(tags_json) = tags_json {
+        conn.execute("UPDATE maps SET tags = ?1 WHERE id = ?2",
+            rusqlite::params![tags_json, map_id])?;
+    }
+    Ok(())
+}
+
 /// Delta-only autosave: writes only dirty geohash chunks to disk (~17ms).
 /// Does NOT bake the overlay — call `store_bake_and_save` for a full merge.
 #[tauri::command]
@@ -1878,24 +2124,8 @@ pub async fn store_save_dirty(
     let size = delta_data.as_ref().map_or(0, |d| d.len());
     let app2 = app.clone();
     let map_id2 = map_id.clone();
-    tokio::task::spawn_blocking(move || {
-        if let Some(delta_data) = delta_data {
-            let path = fast_io::arrow_delta_path(&app2, &map_id2)?;
-            fast_io::atomic_write(&path, |mut file| {
-                use std::io::Write;
-                file.write_all(&delta_data).map_err(AppError::from)
-            })?;
-        }
-        let conn = fast_io::open_db(&app2)?;
-        conn.execute("UPDATE maps SET location_count = ?1 WHERE id = ?2",
-            rusqlite::params![alive, &map_id2])?;
-        if let Some(tags_json) = tags_json {
-            conn.execute("UPDATE maps SET tags = ?1 WHERE id = ?2",
-                rusqlite::params![tags_json, &map_id2])?;
-        }
-        Ok::<_, AppError>(())
-    })
-    .await??;
+    tokio::task::spawn_blocking(move || persist_dirty_inner(&app2, &map_id2, delta_data, alive, tags_json))
+        .await??;
 
     log::debug!("[cmd] store_save_dirty total={}ms size={}", _t.elapsed().as_millis(), size);
     Ok(SaveResult { saved_chunks: size })

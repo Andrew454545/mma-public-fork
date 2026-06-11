@@ -31,27 +31,59 @@ export function registerMapKeyActionHandler<T extends ActionType>(
 	};
 }
 
+/**
+ * New bindings list with `key` assigned to `action`. Enforces uniqueness both
+ * ways: the key is taken from any binding that held it, and the action target's
+ * previous key is dropped. An empty `key` just clears the target's binding.
+ */
+function withKeyBinding(
+	bindings: MapKeyBinding[],
+	key: string,
+	action: MapKeyAction,
+	sameTarget: (a: MapKeyAction) => boolean,
+): MapKeyBinding[] {
+	const rest = bindings.filter((b) => !sameTarget(b.action) && (!key || b.key !== key));
+	if (!key) return rest;
+	return [...rest, { key, action }];
+}
+
 /** Combo currently assigned to a tag, if any. */
 export function getTagBindingKey(bindings: MapKeyBinding[], tagId: number): string | undefined {
 	return bindings.find((b) => b.action.type === "applyTag" && b.action.tagId === tagId)?.key;
 }
 
-/**
- * New bindings list with `key` assigned to `tagId`. Enforces uniqueness both
- * ways: the key is taken from any binding that held it, and the tag's previous
- * key is dropped. An empty `key` just clears the tag's binding.
- */
 export function withTagKeyBinding(
 	bindings: MapKeyBinding[],
 	tagId: number,
 	key: string,
 ): MapKeyBinding[] {
-	const rest = bindings.filter(
-		(b) =>
-			!(b.action.type === "applyTag" && b.action.tagId === tagId) && (!key || b.key !== key),
+	return withKeyBinding(
+		bindings,
+		key,
+		{ type: "applyTag", tagId },
+		(a) => a.type === "applyTag" && a.tagId === tagId,
 	);
-	if (!key) return rest;
-	return [...rest, { key, action: { type: "applyTag", tagId } }];
+}
+
+/** Combo currently assigned to copy-to-`mapId`, if any. */
+export function getMapCopyBindingKey(
+	bindings: MapKeyBinding[],
+	mapId: string,
+): string | undefined {
+	return bindings.find((b) => b.action.type === "copyToMap" && b.action.mapId === mapId)?.key;
+}
+
+export function withMapCopyBinding(
+	bindings: MapKeyBinding[],
+	mapId: string,
+	key: string,
+): MapKeyBinding[] {
+	return withKeyBinding(
+		bindings,
+		key,
+		{ type: "copyToMap", mapId },
+		(a) => a.type === "copyToMap" && a.mapId === mapId,
+	);
 }
 
 export function matchMapKeyBinding(

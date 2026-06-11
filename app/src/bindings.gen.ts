@@ -49,6 +49,16 @@ export const commands = {
 	 */
 	storeSaveDirty: () => typedError<SaveResult, string>(__TAURI_INVOKE("store_save_dirty")),
 	/**
+	 *  Copy locations from the current window's map into another map (routing
+	 *  hotkeys). Duplicates in the target are skipped (`split_new_locations`).
+	 *  Tags carry over import-style (`reconcile_copied_tags`), extras carry with
+	 *  field defs auto-registered in the target; timestamps are fresh. If the
+	 *  target is open (any window), its live store is mutated and a
+	 *  `store-external-mutation` event tells its windows to resync; either way
+	 *  the result is persisted immediately (delta sidecar + tags + count).
+	 */
+	storeCopyLocationsToMap: (targetMapId: string, ids: number[]) => typedError<CopyToMapResult, string>(__TAURI_INVOKE("store_copy_locations_to_map", { targetMapId, ids })),
+	/**
 	 *  Merge the overlay into the Arrow batch, then write the full file to disk.
 	 *  Expensive at 10M+ rows — only called on commit, not on autosave.
 	 */
@@ -420,6 +430,13 @@ export type CommitInfo = {
  */
 export type ComparisonType = { type: "linear" } | { type: "circular"; period: number } | { type: "categorical" };
 
+/**  Result of a cross-map location copy. `target_name` feeds the toast. */
+export type CopyToMapResult = {
+	copied: number,
+	skipped: number,
+	targetName: string,
+};
+
 /**  Aggregate database statistics for the debug panel. */
 export type DbStats = {
 	maps: number,
@@ -699,6 +716,21 @@ export type MapExtra = {
 };
 
 /**
+ *  Action performed by a per-map key binding on the active location.
+ *  New action kinds (e.g. copy-to-map) are added as variants here.
+ */
+export type MapKeyAction = { type: "applyTag"; tagId: number } | { type: "copyToMap"; mapId: string };
+
+/**
+ *  One user-defined per-map key binding. `key` is a combo string in the same
+ *  canonical format as global hotkey bindings (e.g. "m", "Mod+Shift+x").
+ */
+export type MapKeyBinding = {
+	key: string,
+	action: MapKeyAction,
+};
+
+/**
  *  Full metadata for a map, deserialized from the SQLite `maps` row.
  *  JSON columns (settings, tags, extra, etc.) are parsed into typed structs.
  */
@@ -752,21 +784,6 @@ export type MapMetaPatch_Serialize = {
 	extra: MapExtra | null,
 	tags: { [key in string]: Tag } | null,
 	labels: string[] | null,
-};
-
-/**
- *  Action performed by a per-map key binding on the active location.
- *  New action kinds (e.g. copy-to-map) are added as variants here.
- */
-export type MapKeyAction = { type: "applyTag"; tagId: number };
-
-/**
- *  One user-defined per-map key binding. `key` is a combo string in the same
- *  canonical format as global hotkey bindings (e.g. "m", "Mod+Shift+x").
- */
-export type MapKeyBinding = {
-	key: string,
-	action: MapKeyAction,
 };
 
 /**

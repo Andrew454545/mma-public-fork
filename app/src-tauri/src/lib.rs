@@ -344,6 +344,7 @@ pub fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             location_store::store_open_map,
             location_store::store_close_map,
             location_store::store_save_dirty,
+            location_store::store_copy_locations_to_map,
             location_store::store_bake_and_save,
             location_store::store_get_summary,
             // --- Map metadata ---

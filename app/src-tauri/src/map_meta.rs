@@ -24,6 +24,8 @@ use crate::util::now_iso;
 pub enum MapKeyAction {
     #[serde(rename_all = "camelCase")]
     ApplyTag { tag_id: u32 },
+    #[serde(rename_all = "camelCase")]
+    CopyToMap { map_id: String },
 }
 
 /// One user-defined per-map key binding. `key` is a combo string in the same
@@ -696,8 +698,18 @@ mod tests {
         let json = r#"{"key":"Mod+Shift+x","action":{"type":"applyTag","tagId":5}}"#;
         let binding: MapKeyBinding = serde_json::from_str(json).unwrap();
         assert_eq!(binding.key, "Mod+Shift+x");
-        let MapKeyAction::ApplyTag { tag_id } = &binding.action;
+        let MapKeyAction::ApplyTag { tag_id } = &binding.action else {
+            panic!("expected applyTag");
+        };
         assert_eq!(*tag_id, 5);
+        assert_eq!(serde_json::to_string(&binding).unwrap(), json);
+
+        let json = r#"{"key":"m","action":{"type":"copyToMap","mapId":"abc"}}"#;
+        let binding: MapKeyBinding = serde_json::from_str(json).unwrap();
+        let MapKeyAction::CopyToMap { map_id } = &binding.action else {
+            panic!("expected copyToMap");
+        };
+        assert_eq!(map_id, "abc");
         assert_eq!(serde_json::to_string(&binding).unwrap(), json);
     }
 

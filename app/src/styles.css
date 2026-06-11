@@ -3842,6 +3842,41 @@ summary.button {
 	font-size: 0.85em;
 	color: #ffffff99;
 }
+.copy-to-map-modal {
+	display: grid;
+	grid-gap: 0.5rem;
+}
+.copy-to-map-modal__hint {
+	margin: 0;
+	font-size: 0.85em;
+	color: #ffffff99;
+}
+.copy-to-map-modal__list {
+	margin: 0;
+	padding: 0;
+	list-style: none;
+	max-height: 50vh;
+	overflow-y: auto;
+	display: grid;
+	grid-gap: 0.25rem;
+}
+.copy-to-map-modal__row {
+	display: grid;
+	grid-template-columns: 1fr 9rem auto;
+	grid-gap: 0.25rem;
+	align-items: center;
+}
+.copy-to-map-modal__name {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.copy-to-map-modal__name small {
+	color: #ffffff80;
+}
+.copy-to-map-modal__empty {
+	color: #ffffff80;
+}
 .edit-tag-modal__color {
 	grid-gap: 0.25rem;
 	grid-area: color;

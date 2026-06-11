@@ -811,34 +811,26 @@ pub struct EditorImportResult {
 }
 
 
-/// Merge imported tags with existing map tags by case-insensitive name matching.
-/// Tags that already exist get remapped to the existing ID; new tags get fresh
-/// IDs from the store's allocator. Returns a `{parsed_id -> store_id}` remap table.
-fn reconcile_tags(
+/// Insert pre-deduped copied locations (cross-map copy) through the same path
+/// as editor import: tag reconcile, id alloc, counts, field defs, undo entry,
+/// and render cell registration. `tags` are the source tag defs referenced by
+/// `locations`.
+pub(crate) fn add_copied_to_store(
+    app: &tauri::AppHandle,
     store: &mut location_store::Store,
-    parsed: &mut ParsedMap,
-    existing_tags: &HashMap<u32, Tag>,
-) -> HashMap<u32, u32> {
-    let mut name_to_id: HashMap<String, u32> = HashMap::new();
-    for (_, tag) in existing_tags {
-        name_to_id.insert(tag.name.to_lowercase(), tag.id);
-    }
-
-    let mut remap: HashMap<u32, u32> = HashMap::new();
-    parsed.tags.retain_mut(|tag| {
-        if let Some(&existing_id) = name_to_id.get(&tag.name.to_lowercase()) {
-            remap.insert(tag.id, existing_id);
-            false
-        } else {
-            let new_id = store.alloc_tag_id();
-            remap.insert(tag.id, new_id);
-            name_to_id.insert(tag.name.to_lowercase(), new_id);
-            tag.id = new_id;
-            true
-        }
-    });
-
-    remap
+    locations: Vec<Location>,
+    tags: Vec<Tag>,
+) -> AppResult<()> {
+    let mut parsed = ParsedMap {
+        name: String::new(),
+        folder: None,
+        locations,
+        tags,
+        fields: None,
+        warnings: Vec::new(),
+    };
+    add_parsed_to_store(app, store, &mut parsed, None)?;
+    Ok(())
 }
 
 /// Insert parsed locations into the open map's store via the overlay.
@@ -855,16 +847,15 @@ fn add_parsed_to_store(
     parsed: &mut ParsedMap,
     bulk_tag: Option<&str>,
 ) -> AppResult<location_store::MutationResult> {
-    let existing_tags = store.tags.all.clone();
-
-    let tag_id_remap = reconcile_tags(store, parsed, &existing_tags);
-
-    if !parsed.tags.is_empty() {
-        for tag in &parsed.tags {
-            store.tags.all.insert(tag.id, tag.clone());
+    let tag_id_remap = {
+        let tags = &mut store.tags;
+        let before = tags.all.len();
+        let remap = location_store::reconcile_tags_by_name(&parsed.tags, &mut tags.all, &mut tags.next_id);
+        if tags.all.len() > before {
+            tags.dirty = true;
         }
-        store.tags.dirty = true;
-    }
+        remap
+    };
 
     for loc in &mut parsed.locations {
         loc.id = store.alloc_id();

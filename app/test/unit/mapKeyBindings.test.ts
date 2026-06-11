@@ -7,6 +7,8 @@ import {
 	handleMapKeyEvent,
 	getTagBindingKey,
 	withTagKeyBinding,
+	getMapCopyBindingKey,
+	withMapCopyBinding,
 } from "@/lib/map/mapKeyBindings";
 import { isEditableElement } from "@/lib/hooks/useHotkey";
 import type { MapKeyBinding } from "@/bindings.gen";
@@ -109,6 +111,29 @@ describe("tag binding helpers", () => {
 		expect(getTagBindingKey(next, 1)).toBeUndefined();
 		expect(next).toHaveLength(1);
 		expect(withTagKeyBinding(base, 99, "")).toHaveLength(2);
+	});
+});
+
+describe("map copy binding helpers", () => {
+	it("assigns, reads back, and clears a copy binding", () => {
+		let bindings = withMapCopyBinding([], "map-b", "m");
+		expect(getMapCopyBindingKey(bindings, "map-b")).toBe("m");
+		bindings = withMapCopyBinding(bindings, "map-b", "");
+		expect(getMapCopyBindingKey(bindings, "map-b")).toBeUndefined();
+		expect(bindings).toHaveLength(0);
+	});
+
+	it("key uniqueness spans action kinds: copy binding steals a tag's key", () => {
+		const withTag = withTagKeyBinding([], 1, "m");
+		const next = withMapCopyBinding(withTag, "map-b", "m");
+		expect(getMapCopyBindingKey(next, "map-b")).toBe("m");
+		expect(getTagBindingKey(next, 1)).toBeUndefined();
+	});
+
+	it("does not confuse targets across kinds", () => {
+		const both = withMapCopyBinding(withTagKeyBinding([], 1, "a"), "map-b", "b");
+		expect(getTagBindingKey(both, 1)).toBe("a");
+		expect(getMapCopyBindingKey(both, "map-b")).toBe("b");
 	});
 });
 

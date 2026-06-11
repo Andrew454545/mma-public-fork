@@ -7,13 +7,16 @@ import {
 	setActiveLocation,
 	getActiveLocation,
 	getCurrentMap,
+	getCurrentMapId,
 	getSelectedLocationIds,
+	refreshFromExternalMutation,
 	removeLocations,
 	createTags,
 	beginImportPaste,
 	beginImportFromPath,
 } from "@/store/useMapStore";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
+import { listen } from "@tauri-apps/api/event";
 import { goToList } from "@/store/router";
 import { activatePlugins, deactivatePlugins } from "@/plugins/registry";
 import { getGoogleMap as getGoogleMapInstance, waitForGoogleMap, fitMapToBounds } from "@/lib/map/mapState";
@@ -211,6 +214,16 @@ export function MapEditor() {
 			deactivatePlugins();
 		};
 	}, [map?.meta.id]);
+
+	// Another window copied locations into this map: resync from the store.
+	useEffect(() => {
+		const unlisten = listen<string>("store-external-mutation", (e) => {
+			if (e.payload === getCurrentMapId()) void refreshFromExternalMutation();
+		});
+		return () => {
+			unlisten.then((f) => f());
+		};
+	}, []);
 
 	const appSettings = useSettings();
 	usePasteHandler();

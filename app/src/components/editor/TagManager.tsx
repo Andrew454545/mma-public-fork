@@ -27,7 +27,7 @@ import { textColorFor, hexToHsl, hslToHex } from "@/lib/util/color";
 import { useLocalStorage } from "@/lib/hooks/useLocalStorage";
 import { useSetting } from "@/store/settings";
 import { useMapSetting } from "@/components/editor/map/useMapSetting";
-import { formatBinding, buildComboString } from "@/lib/hooks/useHotkey";
+import { HotkeyInput } from "@/components/primitives/HotkeyInput";
 import { getConflicts } from "@/lib/util/hotkeys";
 import { getTagBindingKey, withTagKeyBinding } from "@/lib/map/mapKeyBindings";
 import { TagTreeView } from "./TagTree";
@@ -502,7 +502,6 @@ function EditTagDialog({
 	const hexValue = hslToHex(hsl.h, hsl.s, hsl.l);
 	const [bindings, setBindings] = useMapSetting("keyBindings");
 	const [hotkey, setHotkey] = useState(() => getTagBindingKey(bindings ?? [], tag.id) ?? "");
-	const [recording, setRecording] = useState(false);
 
 	// Informational only: per-map bindings preempt these while this map is open,
 	// and assigning steals the key from whichever tag held it.
@@ -513,9 +512,10 @@ function EditTagDialog({
 					b.key === hotkey && !(b.action.type === "applyTag" && b.action.tagId === tag.id),
 			)
 		: undefined;
+	const holderAction = holder?.action;
 	const holderTag =
-		holder?.action.type === "applyTag"
-			? getVisibleTags().find((t) => t.id === holder.action.tagId)
+		holderAction?.type === "applyTag"
+			? getVisibleTags().find((t) => t.id === holderAction.tagId)
 			: undefined;
 
 	const handleSave = () => {
@@ -574,32 +574,7 @@ function EditTagDialog({
 					</div>
 					<div className="edit-tag-modal__hotkey">
 						<span>Hotkey:</span>
-						<input
-							className="input"
-							type="text"
-							readOnly
-							value={recording ? "" : hotkey ? formatBinding(hotkey) : ""}
-							placeholder={recording ? "Press a key..." : "None"}
-							onFocus={() => setRecording(true)}
-							onBlur={() => setRecording(false)}
-							onKeyDown={(e) => {
-								if (!recording) return;
-								e.preventDefault();
-								e.stopPropagation();
-								if (e.key === "Escape") {
-									e.currentTarget.blur();
-									return;
-								}
-								if (e.key === "Backspace" || e.key === "Delete") {
-									setHotkey("");
-									return;
-								}
-								const combo = buildComboString(e.nativeEvent);
-								if (!combo) return;
-								setHotkey(combo);
-								e.currentTarget.blur();
-							}}
-						/>
+						<HotkeyInput value={hotkey} onChange={setHotkey} />
 						<button
 							type="button"
 							className="button"

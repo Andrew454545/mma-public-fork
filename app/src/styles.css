@@ -1330,15 +1330,19 @@ summary.button {
 }
 .page-map-list {
 	grid-gap: 1rem 4rem;
-	grid-template-columns: 1fr 1fr;
+	/* maps column grows with its longest entry, widening the page from center */
+	grid-template-columns: minmax(35rem, max-content) minmax(0, 35rem);
 	justify-content: center;
-	max-width: 1200px;
+	width: fit-content;
+	min-width: min(74rem, 100%);
+	max-width: 100%;
 	margin: 0.5rem auto;
 	display: grid;
 }
 @media (max-width: 800px) {
 	.page-map-list {
 		grid-template-columns: 100%;
+		width: 100%;
 	}
 }
 .map-link {

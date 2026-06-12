@@ -67,7 +67,7 @@ pub fn store_create_commit(
     message: Option<String>,
 ) -> AppResult<String> {
     let _t = std::time::Instant::now();
-    let conn = fast_io::open_db(&app)?;
+    let conn = fast_io::open_db()?;
 
     // 1. Parent = current HEAD commit.
     let parent_id: Option<String> = conn
@@ -157,7 +157,7 @@ pub fn store_commit_and_bake(
     message: Option<String>,
 ) -> AppResult<String> {
     let _t = std::time::Instant::now();
-    let conn = fast_io::open_db(&app)?;
+    let conn = fast_io::open_db()?;
 
     let parent_id: Option<String> = conn
         .query_row(
@@ -233,10 +233,9 @@ pub fn store_commit_and_bake(
 #[tauri::command]
 #[specta::specta]
 pub fn store_list_commits(
-    app: tauri::AppHandle,
     map_id: String,
 ) -> AppResult<Vec<CommitInfo>> {
-    let conn = fast_io::open_db(&app)?;
+    let conn = fast_io::open_db()?;
     let mut stmt = conn
         .prepare(
             "SELECT id, map_id, parent_id, message, tree_hash, added, removed, modified, location_count, created_at FROM commits WHERE map_id = ?1 ORDER BY created_at DESC, rowid DESC",
@@ -277,7 +276,7 @@ pub fn store_checkout_commit(
     map_id: String,
     commit_id: String,
 ) -> AppResult<()> {
-    let conn = fast_io::open_db(&app)?;
+    let conn = fast_io::open_db()?;
     let materialized = vcs_delta::materialize_commit(&app, &conn, &map_id, &commit_id)?;
     // BTreeMap yields ascending id order, satisfying the sorted-id invariant the
     // base batch requires.

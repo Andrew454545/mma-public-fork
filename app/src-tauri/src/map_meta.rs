@@ -389,8 +389,8 @@ fn row_to_map_meta(row: &rusqlite::Row<'_>) -> Result<MapMeta, rusqlite::Error> 
 /// Return metadata for every map in the database.
 #[tauri::command]
 #[specta::specta]
-pub fn store_list_maps(app: tauri::AppHandle) -> AppResult<Vec<MapMeta>> {
-    let conn = fast_io::open_db(&app)?;
+pub fn store_list_maps() -> AppResult<Vec<MapMeta>> {
+    let conn = fast_io::open_db()?;
     let mut stmt = conn
         .prepare("SELECT * FROM maps")?;
     let rows = stmt
@@ -405,8 +405,8 @@ pub fn store_list_maps(app: tauri::AppHandle) -> AppResult<Vec<MapMeta>> {
 /// Fetch a single map's metadata by ID. Returns `None` if not found.
 #[tauri::command]
 #[specta::specta]
-pub fn store_get_map(app: tauri::AppHandle, id: String) -> AppResult<Option<MapData>> {
-    let conn = fast_io::open_db(&app)?;
+pub fn store_get_map(id: String) -> AppResult<Option<MapData>> {
+    let conn = fast_io::open_db()?;
     let result = conn.query_row("SELECT * FROM maps WHERE id = ?1", params![id], |row| {
         row_to_map_meta(row)
     });
@@ -422,11 +422,10 @@ pub fn store_get_map(app: tauri::AppHandle, id: String) -> AppResult<Option<MapD
 #[tauri::command]
 #[specta::specta]
 pub fn store_create_map(
-    app: tauri::AppHandle,
     name: String,
     folder: Option<String>,
 ) -> AppResult<MapData> {
-    let conn = fast_io::open_db(&app)?;
+    let conn = fast_io::open_db()?;
     let id = uuid::Uuid::new_v4().to_string();
     let now = now_iso();
     conn.execute(
@@ -446,7 +445,7 @@ pub fn store_create_map(
 #[tauri::command]
 #[specta::specta]
 pub fn store_delete_map(app: tauri::AppHandle, id: String) -> AppResult<()> {
-    let conn = fast_io::open_db(&app)?;
+    let conn = fast_io::open_db()?;
     conn.execute("DELETE FROM maps WHERE id = ?1", params![id])?;
     conn.execute("DELETE FROM edit_history WHERE map_id = ?1", params![id])?;
     conn.execute("DELETE FROM commits WHERE map_id = ?1", params![id])?;
@@ -471,7 +470,6 @@ pub fn store_delete_map(app: tauri::AppHandle, id: String) -> AppResult<()> {
 #[tauri::command]
 #[specta::specta]
 pub fn store_update_map_meta(
-    app: tauri::AppHandle,
     state: tauri::State<'_, StoreState>,
     id: String,
     patch: MapMetaPatch,
@@ -527,7 +525,7 @@ pub fn store_update_map_meta(
         sets.join(", ")
     );
     let param_refs: Vec<&dyn rusqlite::types::ToSql> = values.iter().map(|b| b.as_ref()).collect();
-    let conn = fast_io::open_db(&app)?;
+    let conn = fast_io::open_db()?;
     conn.execute(&sql, param_refs.as_slice())?;
     // Merge user-defined field keys into the runtime set (add-only -- never erase
     // data-derived keys that happen to lack a persisted field definition).
@@ -549,8 +547,8 @@ pub fn store_update_map_meta(
 /// list by recency in the dashboard.
 #[tauri::command]
 #[specta::specta]
-pub fn store_touch_map_opened(app: tauri::AppHandle, map_id: String) -> AppResult<()> {
-    let conn = fast_io::open_db(&app)?;
+pub fn store_touch_map_opened(map_id: String) -> AppResult<()> {
+    let conn = fast_io::open_db()?;
     let now = now_iso();
     conn.execute(
         "UPDATE maps SET last_opened_at = ?1 WHERE id = ?2",
@@ -562,8 +560,8 @@ pub fn store_touch_map_opened(app: tauri::AppHandle, map_id: String) -> AppResul
 /// Rename a folder across all maps that reference it.
 #[tauri::command]
 #[specta::specta]
-pub fn store_rename_folder(app: tauri::AppHandle, from: String, to: String) -> AppResult<()> {
-    let conn = fast_io::open_db(&app)?;
+pub fn store_rename_folder(from: String, to: String) -> AppResult<()> {
+    let conn = fast_io::open_db()?;
     conn.execute(
         "UPDATE maps SET folder = ?1 WHERE folder = ?2",
         params![to, from],
@@ -574,8 +572,8 @@ pub fn store_rename_folder(app: tauri::AppHandle, from: String, to: String) -> A
 /// Delete a folder by setting all its maps' folder to `NULL` (moves them to root).
 #[tauri::command]
 #[specta::specta]
-pub fn store_delete_folder(app: tauri::AppHandle, name: String) -> AppResult<()> {
-    let conn = fast_io::open_db(&app)?;
+pub fn store_delete_folder(name: String) -> AppResult<()> {
+    let conn = fast_io::open_db()?;
     conn.execute(
         "UPDATE maps SET folder = NULL WHERE folder = ?1",
         params![name],
@@ -611,8 +609,8 @@ pub struct DbStats {
 /// List all user-created tables with their row counts. Excludes SQLite internals.
 #[tauri::command]
 #[specta::specta]
-pub fn store_db_table_info(app: tauri::AppHandle) -> AppResult<Vec<DbTableInfo>> {
-    let conn = fast_io::open_db(&app)?;
+pub fn store_db_table_info() -> AppResult<Vec<DbTableInfo>> {
+    let conn = fast_io::open_db()?;
     let mut stmt = conn.prepare(
         "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_sqlx_%' AND name NOT LIKE '_mma_%' ORDER BY name"
     )?;
@@ -634,9 +632,9 @@ pub fn store_db_table_info(app: tauri::AppHandle) -> AppResult<Vec<DbTableInfo>>
 /// Used in the debug panel for cache/history cleanup.
 #[tauri::command]
 #[specta::specta]
-pub fn store_db_clear_table(app: tauri::AppHandle, table: String) -> AppResult<i64> {
+pub fn store_db_clear_table(table: String) -> AppResult<i64> {
     let safe = table.replace('"', "");
-    let conn = fast_io::open_db(&app)?;
+    let conn = fast_io::open_db()?;
     let deleted = conn.execute(&format!("DELETE FROM \"{}\"", safe), [])?;
     Ok(deleted as i64)
 }
@@ -646,8 +644,8 @@ pub fn store_db_clear_table(app: tauri::AppHandle, table: String) -> AppResult<i
 /// by parsing each map's tags JSON column.
 #[tauri::command]
 #[specta::specta]
-pub fn store_db_stats(app: tauri::AppHandle) -> AppResult<DbStats> {
-    let conn = fast_io::open_db(&app)?;
+pub fn store_db_stats() -> AppResult<DbStats> {
+    let conn = fast_io::open_db()?;
     let maps: i64 = conn.query_row("SELECT COUNT(*) FROM maps", [], |r| r.get(0)).unwrap_or(0);
     let locations: i64 = conn.query_row("SELECT COALESCE(SUM(location_count), 0) FROM maps", [], |r| r.get(0)).unwrap_or(0);
     let tags: i64 = {

@@ -634,7 +634,7 @@ pub async fn bulk_import_confirm(
     path: String,
     selected_indices: Vec<u32>,
 ) -> AppResult<Vec<ImportedMapInfo>> {
-    let main_path = fast_io::db_path(&app)?;
+    let main_path = fast_io::db_path()?;
     let app_handle = app.clone();
 
     tokio::task::spawn_blocking(move || {
@@ -826,7 +826,6 @@ pub struct EditorImportResult {
 /// and render cell registration. `tags` are the source tag defs referenced by
 /// `locations`.
 pub(crate) fn add_copied_to_store(
-    app: &tauri::AppHandle,
     store: &mut location_store::Store,
     locations: Vec<Location>,
     tags: Vec<Tag>,
@@ -839,7 +838,7 @@ pub(crate) fn add_copied_to_store(
         fields: None,
         warnings: Vec::new(),
     };
-    add_parsed_to_store(app, store, &mut parsed, None)?;
+    add_parsed_to_store(store, &mut parsed, None)?;
     Ok(())
 }
 
@@ -852,7 +851,6 @@ pub(crate) fn add_copied_to_store(
 /// Tag reconciliation, render cell registration, and extra-field auto-registration
 /// happen regardless of size.
 fn add_parsed_to_store(
-    app: &tauri::AppHandle,
     store: &mut location_store::Store,
     parsed: &mut ParsedMap,
     bulk_tag: Option<&str>,
@@ -928,7 +926,7 @@ fn add_parsed_to_store(
     result.tags = Some(store.tags.all.clone());
 
     if let Some(new_defs) = new_field_defs {
-        location_store::apply_field_defs(app, store, new_defs, &mut result);
+        location_store::apply_field_defs(store, new_defs, &mut result);
     }
     Ok(result)
 }
@@ -940,7 +938,6 @@ fn add_parsed_to_store(
 #[tauri::command]
 #[specta::specta]
 pub fn store_import_file(
-    app: tauri::AppHandle,
     webview: tauri::Webview,
     state: tauri::State<'_, location_store::StoreState>,
     dropped_fields: Vec<String>,
@@ -972,7 +969,7 @@ pub fn store_import_file(
     log::debug!("[import] parse=cached locs={}", imported_count);
 
     with_store!(webview, state, |store| {
-        let mutation = add_parsed_to_store(&app, store, &mut parsed, tag_name.as_deref())?;
+        let mutation = add_parsed_to_store(store, &mut parsed, tag_name.as_deref())?;
 
         log::debug!("[import] total={:.0}ms locs={}", t0.elapsed().as_millis(), imported_count);
 

@@ -555,6 +555,7 @@ pub fn run() {
         .plugin(iframe_theme::plugin())
         .setup(|app| {
             let t = std::time::Instant::now();
+            fast_io::init_db_path(app.handle())?;
             fast_io::run_migrations(app.handle())?;
             log::info!("[startup] migrations: {}ms", t.elapsed().as_millis());
 

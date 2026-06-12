@@ -244,7 +244,7 @@ pub async fn store_export_bulk_zip(
     let path = tokio::task::spawn_blocking(move || {
         use std::io::Cursor;
 
-        let conn = fast_io::open_db(&app2)?;
+        let conn = fast_io::open_db()?;
         let mut stmt = conn.prepare("SELECT id, name, folder, tags, extra FROM maps")?;
         let maps: Vec<(String, String, Option<String>, String, String)> = stmt.query_map([], |row| {
             Ok((

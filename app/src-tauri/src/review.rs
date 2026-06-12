@@ -195,32 +195,32 @@ pub(crate) fn delete(conn: &Connection, id: &str) -> AppResult<()> {
 
 #[tauri::command]
 #[specta::specta]
-pub fn store_review_create(app: tauri::AppHandle, session: ReviewCreate) -> AppResult<ReviewSession> {
-    create(&fast_io::open_db(&app)?, session)
+pub fn store_review_create(session: ReviewCreate) -> AppResult<ReviewSession> {
+    create(&fast_io::open_db()?, session)
 }
 
 #[tauri::command]
 #[specta::specta]
-pub fn store_review_get(app: tauri::AppHandle, map_id: String, source_key: String) -> AppResult<Option<ReviewSession>> {
-    get(&fast_io::open_db(&app)?, &map_id, &source_key)
+pub fn store_review_get(map_id: String, source_key: String) -> AppResult<Option<ReviewSession>> {
+    get(&fast_io::open_db()?, &map_id, &source_key)
 }
 
 #[tauri::command]
 #[specta::specta]
-pub fn store_review_list(app: tauri::AppHandle, map_id: String, status: Option<String>) -> AppResult<Vec<ReviewSession>> {
-    list(&fast_io::open_db(&app)?, &map_id, status.as_deref())
+pub fn store_review_list(map_id: String, status: Option<String>) -> AppResult<Vec<ReviewSession>> {
+    list(&fast_io::open_db()?, &map_id, status.as_deref())
 }
 
 #[tauri::command]
 #[specta::specta]
-pub fn store_review_update(app: tauri::AppHandle, update: ReviewUpdate) -> AppResult<()> {
-    self::update(&fast_io::open_db(&app)?, update)
+pub fn store_review_update(update: ReviewUpdate) -> AppResult<()> {
+    self::update(&fast_io::open_db()?, update)
 }
 
 #[tauri::command]
 #[specta::specta]
-pub fn store_review_delete(app: tauri::AppHandle, id: String) -> AppResult<()> {
-    delete(&fast_io::open_db(&app)?, &id)
+pub fn store_review_delete(id: String) -> AppResult<()> {
+    delete(&fast_io::open_db()?, &id)
 }
 
 #[cfg(test)]

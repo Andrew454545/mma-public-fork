@@ -22,17 +22,26 @@ pub fn db_filename() -> &'static str {
     if is_test_mode() { "mma_test.db" } else { "mma.db" }
 }
 
-/// Resolve the full path to the SQLite database inside the app data directory.
-pub(crate) fn db_path(app: &tauri::AppHandle) -> AppResult<std::path::PathBuf> {
-    app.path()
-        .app_data_dir()
-        .map(|p| p.join(db_filename()))
-        .map_err(AppError::from)
+/// SQLite path, resolved once at startup. Lets `open_db()`/`db_path()` be zero-arg
+/// instead of threading an `AppHandle` through every function that touches the DB.
+static DB_PATH: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
+
+/// Resolve and cache the database path. Called once from `setup()`, before any DB use.
+pub(crate) fn init_db_path(app: &tauri::AppHandle) -> AppResult<()> {
+    let path = app.path().app_data_dir().map_err(AppError::from)?.join(db_filename());
+    let _ = DB_PATH.set(path);
+    Ok(())
+}
+
+/// Full path to the SQLite database. Errors if `init_db_path` has not run.
+pub(crate) fn db_path() -> AppResult<std::path::PathBuf> {
+    DB_PATH.get().cloned().ok_or_else(|| AppError::from("db path not initialized".to_string()))
 }
 
 /// Open (or create) the SQLite database, ensuring the parent directory exists.
-pub(crate) fn open_db(app: &tauri::AppHandle) -> AppResult<Connection> {
-    let path = db_path(app)?;
+/// The one place that owns per-connection setup (busy timeout, future pragmas).
+pub(crate) fn open_db() -> AppResult<Connection> {
+    let path = db_path()?;
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| format!("failed to create app data dir: {e}"))?;
     }
@@ -49,7 +58,7 @@ pub(crate) fn open_db(app: &tauri::AppHandle) -> AppResult<Connection> {
 /// already-applied versions from `_sqlx_migrations` so they aren't replayed.
 /// Sets WAL mode and foreign keys as part of the connection setup.
 pub(crate) fn run_migrations(app: &tauri::AppHandle) -> AppResult<()> {
-    let conn = open_db(app)?;
+    let conn = open_db()?;
     conn.execute_batch("
         PRAGMA foreign_keys = ON;
         PRAGMA journal_mode = WAL;

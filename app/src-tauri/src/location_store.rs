@@ -1295,7 +1295,7 @@ pub async fn store_open_map(
         let n = batch.num_rows();
         let max_id = if n > 0 { col_id(&batch).value(n - 1) } else { 0 };
 
-        let (undo, redo) = load_edit_history_inner(&app2, &map_id2)?;
+        let (undo, redo) = load_edit_history_inner(&map_id2)?;
 
         log::debug!("[store_open] TOTAL={}ms", t_total.elapsed().as_millis());
         Ok::<_, AppError>((batch, mmap_handle, max_id, undo, redo, delta))
@@ -1322,7 +1322,7 @@ pub async fn store_open_map(
     let (alive, tag_counts) = store.count_tags();
     store.alive_count = alive;
     {
-        let conn = fast_io::open_db(&app)?;
+        let conn = fast_io::open_db()?;
         conn.execute("UPDATE maps SET location_count = ?1 WHERE id = ?2",
             rusqlite::params![alive, map_id])?;
         let mut tags = read_tags_json(&conn, &map_id);
@@ -1404,12 +1404,12 @@ pub fn store_close_map(
             })?;
         }
         let count = store.alive_count;
-        let conn = fast_io::open_db(&app)?;
+        let conn = fast_io::open_db()?;
         conn.execute("UPDATE maps SET location_count = ?1 WHERE id = ?2", rusqlite::params![count, map_id])?;
         if store.tags.dirty {
             write_tags_json(&conn, &map_id, &store.tags.all)?;
         }
-        save_edit_history_inner(&app, &map_id, &store.edits.undo, &store.edits.redo)?;
+        save_edit_history_inner(&map_id, &store.edits.undo, &store.edits.redo)?;
         log::debug!("[close_map] {map_id} flushed: undo={} redo={}", store.edits.undo.len(), store.edits.redo.len());
     }
     Ok(())
@@ -1420,14 +1420,13 @@ pub fn store_close_map(
 /// those definitions to JS via `result.new_field_defs` so they land in the live
 /// field-def registry immediately (no reload needed).
 pub(crate) fn auto_register_extras(
-    app: &tauri::AppHandle,
     store: &mut Store,
     extras: &[&serde_json::Map<String, serde_json::Value>],
     result: &mut MutationResult,
 ) {
     if extras.is_empty() { return; }
     if let Some(new_defs) = map_meta::auto_register_field_defs(&store.known_field_keys, extras) {
-        apply_field_defs(app, store, new_defs, result);
+        apply_field_defs(store, new_defs, result);
     }
 }
 
@@ -1435,13 +1434,12 @@ pub(crate) fn auto_register_extras(
 /// mutation result. Split out so callers that scan `extras` before consuming the
 /// source locations (e.g. import's move-into-overlay path) can apply defs afterward.
 pub(crate) fn apply_field_defs(
-    app: &tauri::AppHandle,
     store: &mut Store,
     new_defs: std::collections::HashMap<String, map_meta::ExtraFieldDef>,
     result: &mut MutationResult,
 ) {
     if let Some(map_id) = &store.map_id {
-        if let Ok(conn) = fast_io::open_db(app) {
+        if let Ok(conn) = fast_io::open_db() {
             let _ = map_meta::persist_field_defs(&conn, map_id, &new_defs);
         }
     }
@@ -1456,7 +1454,6 @@ pub(crate) fn apply_field_defs(
 #[tauri::command]
 #[specta::specta]
 pub fn store_add_locations(
-    app: tauri::AppHandle,
     webview: tauri::Webview,
     state: tauri::State<'_, StoreState>,
     mut locations: Vec<Location>,
@@ -1478,7 +1475,7 @@ pub fn store_add_locations(
         let extras: Vec<&serde_json::Map<String, serde_json::Value>> = added.iter()
             .filter_map(|l| l.extra.as_ref())
             .collect();
-        auto_register_extras(&app, store, &extras, &mut result);
+        auto_register_extras(store, &extras, &mut result);
         log::debug!("[cmd] store_add_locations lock={}ms total={}ms", _lock, _t.elapsed().as_millis());
         Ok(result)
     })
@@ -1518,7 +1515,6 @@ pub fn store_remove_locations(
 #[tauri::command]
 #[specta::specta]
 pub fn store_update_locations(
-    app: tauri::AppHandle,
     webview: tauri::Webview,
     state: tauri::State<'_, StoreState>,
     updates: Vec<(u32, LocationPatch)>,
@@ -1561,7 +1557,7 @@ pub fn store_update_locations(
             let extras: Vec<&serde_json::Map<String, serde_json::Value>> = updated.iter()
                 .filter_map(|(_, n)| n.extra.as_ref())
                 .collect();
-            auto_register_extras(&app, store, &extras, &mut result);
+            auto_register_extras(store, &extras, &mut result);
         }
         log::debug!("[cmd] store_update_locations n={} undo={} total={}ms",
             updates.len(), record_undo, _t.elapsed().as_millis());
@@ -1930,7 +1926,7 @@ pub fn store_copy_locations_to_map(
 ) -> AppResult<CopyToMapResult> {
     use tauri::Emitter;
     let _t = std::time::Instant::now();
-    let conn = fast_io::open_db(&app)?;
+    let conn = fast_io::open_db()?;
     let target_name: String = conn.query_row(
         "SELECT name FROM maps WHERE id = ?1",
         [&target_map_id],
@@ -1985,7 +1981,7 @@ pub fn store_copy_locations_to_map(
         if copied > 0 {
             let tags = used_tags(&fresh);
             let t_add = std::time::Instant::now();
-            crate::import::add_copied_to_store(&app, target, fresh, tags)?;
+            crate::import::add_copied_to_store(target, fresh, tags)?;
             let add_ms = t_add.elapsed().as_millis();
             target.tags.dirty = false;
             let t_save = std::time::Instant::now();
@@ -2033,7 +2029,7 @@ pub fn store_copy_locations_to_map(
         }
 
         let t_hist = std::time::Instant::now();
-        let (undo, redo) = load_edit_history_inner(&app, &target_map_id)?;
+        let (undo, redo) = load_edit_history_inner(&target_map_id)?;
         let hist_ms = t_hist.elapsed().as_millis();
         let base_max = existing.iter().map(|l| l.id).max().unwrap_or(0);
         let next = seed_next_id(base_max, &[], &undo, &redo);
@@ -2079,7 +2075,7 @@ pub(crate) fn persist_dirty_inner(
             file.write_all(&delta_data).map_err(AppError::from)
         })?;
     }
-    let conn = fast_io::open_db(app)?;
+    let conn = fast_io::open_db()?;
     conn.execute("UPDATE maps SET location_count = ?1 WHERE id = ?2",
         rusqlite::params![alive, map_id])?;
     if let Some(tags_json) = tags_json {
@@ -2156,8 +2152,8 @@ pub fn store_get_summary(
 }
 
 /// Persist undo/redo stacks to SQLite as msgpack blobs, capped at MAX_UNDO_ENTRIES.
-fn save_edit_history_inner(app: &tauri::AppHandle, map_id: &str, undo: &[EditEntry], redo: &[EditEntry]) -> AppResult<()> {
-    let conn = fast_io::open_db(app)?;
+fn save_edit_history_inner(map_id: &str, undo: &[EditEntry], redo: &[EditEntry]) -> AppResult<()> {
+    let conn = fast_io::open_db()?;
     let undo_capped = if undo.len() > MAX_UNDO_ENTRIES { &undo[undo.len() - MAX_UNDO_ENTRIES..] } else { undo };
     let redo_capped = if redo.len() > MAX_UNDO_ENTRIES { &redo[redo.len() - MAX_UNDO_ENTRIES..] } else { redo };
     let undo_bytes = rmp_serde::to_vec_named(undo_capped)?;
@@ -2189,8 +2185,8 @@ pub(crate) fn seed_next_id(base_max: u32, adds: &[Location], undo: &[EditEntry],
 }
 
 /// Load undo/redo stacks from SQLite. Returns empty stacks if no history exists.
-fn load_edit_history_inner(app: &tauri::AppHandle, map_id: &str) -> AppResult<(Vec<EditEntry>, Vec<EditEntry>)> {
-    let conn = fast_io::open_db(app)?;
+fn load_edit_history_inner(map_id: &str) -> AppResult<(Vec<EditEntry>, Vec<EditEntry>)> {
+    let conn = fast_io::open_db()?;
     let result = conn.query_row(
         "SELECT undo_stack, redo_stack FROM edit_history WHERE map_id = ?1",
         [map_id],
@@ -2261,7 +2257,7 @@ pub(crate) fn bake_and_save_inner(store: &mut Store, app: &tauri::AppHandle, map
         store.mmap_handle = Some(handle);
     }
     let count = store.batch.as_ref().map_or(0, |b| b.num_rows());
-    let conn = fast_io::open_db(app)?;
+    let conn = fast_io::open_db()?;
     conn.execute("UPDATE maps SET location_count = ?1 WHERE id = ?2", rusqlite::params![count, map_id])?;
     if store.tags.dirty {
         write_tags_json(&conn, map_id, &store.tags.all)?;

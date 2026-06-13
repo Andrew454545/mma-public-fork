@@ -138,7 +138,8 @@ export const exactDateProvider: EnrichmentProvider = {
 				ctx?.onUnit?.();
 			}
 		}
-		await Promise.all(Array.from({ length: Math.min(1000, pending.length) }, () => worker()));
+		// ~128 saturates SingleImageSearch; beyond it throughput drops and latency balloons.
+		await Promise.all(Array.from({ length: Math.min(128, pending.length) }, () => worker()));
 		return out;
 	},
 };

@@ -91,7 +91,7 @@ export async function resolvePanoIds(
 		onProgress?: (done: number, total: number) => void;
 	} = {},
 ): Promise<ResolvePanoResult> {
-	const { concurrency = 500, batchSize = 200, signal, onProgress } = opts;
+	const { concurrency = 128, batchSize = 200, signal, onProgress } = opts;
 	const result: ResolvePanoResult = { resolved: [], failed: [] };
 	if (!google) return result;
 	const { runConcurrent } = await import("@/lib/util/concurrent");

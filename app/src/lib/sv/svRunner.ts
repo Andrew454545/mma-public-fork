@@ -15,8 +15,11 @@ import { batchUpdateLocations, fetchLocationsByIds } from "@/store/useMapStore";
 import { fetchSvMetadata } from "@/lib/sv/svMeta";
 import { resolvePanoIds } from "@/lib/sv/lookup";
 import { getEnrichmentProviders, providerWaves } from "@/lib/data/fieldDefs";
+import { runConcurrent } from "@/lib/util/concurrent";
 
+// 200 is GetMetadata's hard per-request cap; concurrency saturates the endpoint ~48.
 const BATCH_SIZE = 200;
+const META_CONCURRENCY = 48;
 
 export type PanoData = google.maps.StreetViewResolvedPanoramaData;
 
@@ -168,15 +171,19 @@ export async function runResolvers(
 	}
 
 	if (metaPending.length > 0) onProgress?.(0, metaPending.length);
-	for (let i = 0; i < metaLocs.length; i += BATCH_SIZE) {
-		signal?.throwIfAborted();
-		const batch = metaLocs.slice(i, i + BATCH_SIZE);
-		await metaBatch(
-			batch,
-			batch.map((l) => panoIdFor(l)!),
-		);
-		tick(Math.min(BATCH_SIZE, batch.length));
-	}
+	const metaBatches: Location[][] = [];
+	for (let i = 0; i < metaLocs.length; i += BATCH_SIZE) metaBatches.push(metaLocs.slice(i, i + BATCH_SIZE));
+	await runConcurrent(
+		metaBatches,
+		async (batch) => {
+			await metaBatch(
+				batch,
+				batch.map((l) => panoIdFor(l)!),
+			);
+			tick(Math.min(BATCH_SIZE, batch.length));
+		},
+		{ concurrency: META_CONCURRENCY, signal },
+	);
 	if (metaNoPano.length > 0) tick(metaNoPano.length);
 
 	// --- Flag-only resolvers (pin to pano): patch off the prelude result. ---

@@ -430,7 +430,7 @@ export function MapEmbed() {
 						radiusUnits: "pixels",
 						radiusMinPixels: 3,
 						// Selection overlay is drawn on top of the cell markers, so it must also be pickable on
-						// top ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â otherwise clicks fall through to the cell layer where selected markers have no
+						// top — otherwise clicks fall through to the cell layer where selected markers have no
 						// z-priority, and an overlapping neighbor gets picked instead of the marker on top.
 						pickable: true,
 						updateTriggers: {
@@ -1034,7 +1034,7 @@ export function MapEmbed() {
 				gMapRef.current.addListener("mousemove", (e: google.maps.MapMouseEvent) => {
 					if (e.latLng) {
 						if (coordDisplayRef.current) {
-							coordDisplayRef.current.textContent = `${e.latLng.lat().toFixed(6)}Ãƒâ€šÃ‚Â° ${e.latLng.lng().toFixed(6)}Ãƒâ€šÃ‚Â°`;
+							coordDisplayRef.current.textContent = `${e.latLng.lat().toFixed(6)}° ${e.latLng.lng().toFixed(6)}°`;
 						}
 					}
 				});
@@ -1111,7 +1111,7 @@ export function MapEmbed() {
 	const [fullResetCounter, setFullResetCounter] = useState(0);
 
 	// Fetch render buffer from Rust ONLY when data changes (not on viewport pan).
-	// deck.gl handles camera transforms on the GPU ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â cached buffer stays valid during pan.
+	// deck.gl handles camera transforms on the GPU — cached buffer stays valid during pan.
 	useEffect(() => {
 		if (!mapReady) {
 			cellMgrRef.current.clear();
@@ -1539,7 +1539,7 @@ export function MapEmbed() {
 				<MeasurementBar />
 				<div className="embed-controls__control" style={{ bottom: 0, left: 0 }}>
 					<div className="map-control coordinate-control">
-						<span ref={coordDisplayRef} /> Ãƒâ€šÃ‚Â· zoom {mapZoom}
+						<span ref={coordDisplayRef} /> · zoom {mapZoom}
 					</div>
 				</div>
 			</div>

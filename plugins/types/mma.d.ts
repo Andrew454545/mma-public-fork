@@ -751,6 +751,7 @@ declare function createLocation(partial: Partial<Location$1> & {
 	lat: number;
 	lng: number;
 }): Location$1;
+export type TagSortMode = "default" | "name" | "amount";
 export type WorkArea = "overview" | "location" | "duplicates" | "import" | "plugin" | "diff";
 /** When a move target already holds a value, which field's value survives. */
 export type MergeWinner = "from" | "to";
@@ -1400,6 +1401,7 @@ declare const DEFAULTS: {
 		b: number;
 	};
 	tagViewMode: TagViewMode;
+	tagSortMode: TagSortMode;
 	borderDetail: BorderDetail;
 	previewAspectRatio: PreviewAspectRatio;
 	savedSelections: SavedSelection[];
@@ -1606,6 +1608,7 @@ declare const mma: {
 			b: number;
 		};
 		tagViewMode: TagViewMode;
+		tagSortMode: TagSortMode;
 		borderDetail: BorderDetail;
 		previewAspectRatio: PreviewAspectRatio;
 		savedSelections: SavedSelection[];

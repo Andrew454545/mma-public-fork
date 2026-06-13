@@ -25,27 +25,20 @@ import { bulkPinToPano } from "@/lib/sv/pinPano";
 import { bulkPanHeading, type RoadDirection } from "@/lib/sv/headingRoad";
 import { fmt } from "@/lib/util/format";
 
-export type BulkOperation =
-	| "validate"
-	| "enrich"
-	| "pinPano"
-	| "clearFields"
-	| "setField"
-	| "headingRoad";
-
-interface Props {
-	operation: BulkOperation;
-	onClose: () => void;
-}
-
-const TITLES: Record<BulkOperation, string> = {
+const TITLES = {
 	validate: "Validate locations",
 	enrich: "Enrich metadata",
 	pinPano: "Pin to Pano ID",
 	clearFields: "Clear metadata fields",
 	setField: "Set metadata field",
 	headingRoad: "Pan headings along road",
-};
+} as const;
+export type BulkOperation = keyof typeof TITLES;
+
+interface Props {
+	operation: BulkOperation;
+	onClose: () => void;
+}
 
 type Scope = "all" | "selection";
 

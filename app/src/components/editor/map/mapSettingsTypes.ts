@@ -1,19 +1,4 @@
-export type SvColor =
-	| "red"
-	| "pink"
-	| "purple"
-	| "violet"
-	| "indigo"
-	| "blue"
-	| "cyan"
-	| "teal"
-	| "green"
-	| "lime"
-	| "yellow"
-	| "orange"
-	| "choco";
-
-export const SV_COLORS: SvColor[] = [
+export const SV_COLORS = [
 	"red",
 	"pink",
 	"purple",
@@ -27,6 +12,7 @@ export const SV_COLORS: SvColor[] = [
 	"yellow",
 	"orange",
 	"choco",
-];
+] as const;
+export type SvColor = (typeof SV_COLORS)[number];
 
 export type MapTypeKey = "map" | "satellite" | "osm";

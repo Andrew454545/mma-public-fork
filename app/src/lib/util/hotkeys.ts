@@ -2,72 +2,13 @@ import { useSyncExternalStore } from "react";
 import { getCommands, getCommand } from "@/store/commands";
 import { createSyncStore } from "@/lib/util/syncStore";
 
+type QuicktagSlot = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
+
+/** Derived from the def table: command-level actions (bindings live in the
+ *  command registry), the raw UI defs below, and the generated quicktag slots. */
 export type HotkeyAction =
-	// Command-level actions (binding defined in command registry)
-	| "undo"
-	| "redo"
-	| "selectAll"
-	| "deselectAll"
-	| "save"
-	// UI-level actions (binding defined here)
-	| "openCommandPalette"
-	| "openManualSearch"
-	| "toggleStats"
-	| "locationSave"
-	| "locationClose"
-	| "locationDelete"
-	| "duplicateLocation"
-	| "toggleFullscreen"
-	| "returnToSpawn"
-	| "pointNorth"
-	| "centerRoad"
-	| "zoomIn"
-	| "zoomOut"
-	| "panoZoomReset"
-	| "copyLink"
-	| "copyLinkLong"
-	| "toggleCrosshair"
-	| "toggleHideCar"
-	| "togglePanoUI"
-	| "toggleFullscreenMap"
-	| "followRoad"
-	| "downloadPanoTile"
-	| "reviewNext"
-	| "reviewPrev"
-	| "nextPanoDate"
-	| "prevPanoDate"
-	| "spin180"
-	| "refreshPano"
-	| "panLeft"
-	| "panRight"
-	| "panUp"
-	| "panDown"
-	| "mapZoomIn"
-	| "mapZoomOut"
-	| "mapZoomBounds"
-	| "mapZoomReset"
-	| "mapZoomSelection"
-	| "panoLookLeft"
-	| "panoLookRight"
-	| "panoLookUp"
-	| "panoLookDown"
-	| "panoMoveForward"
-	| "panoMoveBackward"
-	| "jumpForward"
-	| "jumpBackward"
-	| "panToLocation"
-	| "viewportLock"
-	| "countrySelect"
-	| "toggleSelectOnly"
-	| "quicktag1"
-	| "quicktag2"
-	| "quicktag3"
-	| "quicktag4"
-	| "quicktag5"
-	| "quicktag6"
-	| "quicktag7"
-	| "quicktag8"
-	| "quicktag9";
+	| (typeof STATIC_HOTKEY_DEFS)[number]["action"]
+	| `quicktag${QuicktagSlot}`;
 
 export type HotkeyGroup =
 	| "Commands"
@@ -86,7 +27,7 @@ export interface HotkeyDef {
 }
 
 // Raw input bindings only. Command-level bindings are derived from the command registry.
-const RAW_HOTKEY_DEFS: HotkeyDef[] = [
+const STATIC_HOTKEY_DEFS = [
 	{
 		action: "openCommandPalette",
 		label: "Open command palette",
@@ -321,8 +262,12 @@ const RAW_HOTKEY_DEFS: HotkeyDef[] = [
 		group: "Map Navigation",
 		defaultBinding: "o",
 	},
+] as const satisfies readonly (Omit<HotkeyDef, "action"> & { action: string })[];
+
+const RAW_HOTKEY_DEFS: HotkeyDef[] = [
+	...STATIC_HOTKEY_DEFS,
 	...Array.from({ length: 9 }, (_, i): HotkeyDef => ({
-		action: `quicktag${i + 1}` as HotkeyAction,
+		action: `quicktag${(i + 1) as QuicktagSlot}`,
 		label: `Quick-tag slot ${i + 1}`,
 		group: "Quicktag",
 		defaultBinding: String(i + 1),
@@ -334,7 +279,7 @@ export function getAllBindings(): HotkeyDef[] {
 	const commandDefs: HotkeyDef[] = getCommands().map((cmd) => ({
 		action: cmd.id as HotkeyAction,
 		label: cmd.label,
-		group: "Commands" as HotkeyGroup,
+		group: "Commands",
 		defaultBinding: cmd.defaultBinding ?? "",
 	}));
 	return [...commandDefs, ...RAW_HOTKEY_DEFS];

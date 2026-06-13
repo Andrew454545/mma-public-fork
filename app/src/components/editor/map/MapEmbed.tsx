@@ -201,7 +201,6 @@ export function MapEmbed({ onAddLocation }: { onAddLocation: (parsed: ParsedLoca
 		showPreviews,
 		selectOnly,
 	} = prefs;
-	// handleClick needs the live value; prefs state has no store getter.
 	const selectOnlyRef = useRef(selectOnly);
 	selectOnlyRef.current = selectOnly;
 	const coordDisplayRef = useRef<HTMLSpanElement>(null);

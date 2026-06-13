@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useEffectEvent } from "react";
 import { google } from "@/lib/sv/opensv";
 
 type DrawMode = "polygon" | "rectangle" | "freehand" | null;
@@ -44,11 +44,9 @@ export function PolygonTools({
 }) {
 	const [mode, setMode] = useState<DrawMode>(null);
 	const managerRef = useRef<google.maps.drawing.DrawingManager>(null);
-	const onDrawRef = useRef(onDraw);
-	onDrawRef.current = onDraw;
 	const isDrawingRef = useRef(false);
-	const requestUpdateRef = useRef(requestOverlayUpdate);
-	requestUpdateRef.current = requestOverlayUpdate;
+	const emitDraw = useEffectEvent((rings: number[][][]) => onDraw(rings));
+	const emitUpdate = useEffectEvent(() => requestOverlayUpdate());
 
 	useEffect(() => {
 		if (!map) return;
@@ -90,7 +88,7 @@ export function PolygonTools({
 							const last = ring[ring.length - 1];
 							if (first[0] !== last[0] || first[1] !== last[1]) ring.push([first[0], first[1]]);
 						}
-						onDrawRef.current([ring]);
+						emitDraw([ring]);
 					} else if (e.type === Ym.RECTANGLE) {
 						const b = (e.overlay as google.maps.Rectangle).getBounds()!.toJSON();
 						let east = b.east;
@@ -103,7 +101,7 @@ export function PolygonTools({
 							[west, b.north],
 							[west, b.south],
 						];
-						onDrawRef.current([ring]);
+						emitDraw([ring]);
 					}
 				},
 			);
@@ -140,20 +138,20 @@ export function PolygonTools({
 			points.length = 0;
 			points.push([e.latLng.lng(), e.latLng.lat()]);
 			freehandPathRef.current = points;
-			requestUpdateRef.current();
+			emitUpdate();
 		});
 
 		const move = google.maps.event.addListener(map, "mousemove", (e: google.maps.MapMouseEvent) => {
 			if (!isDrawingRef.current || !e.latLng) return;
 			points.push([e.latLng.lng(), e.latLng.lat()]);
-			requestUpdateRef.current();
+			emitUpdate();
 		});
 
 		const up = google.maps.event.addListener(map, "mouseup", () => {
 			if (!isDrawingRef.current) return;
 			isDrawingRef.current = false;
 			freehandPathRef.current = null;
-			requestUpdateRef.current();
+			emitUpdate();
 
 			if (points.length < 3) return;
 
@@ -165,7 +163,7 @@ export function PolygonTools({
 			}
 
 			setMode(null);
-			onDrawRef.current([simplified]);
+			emitDraw([simplified]);
 		});
 
 		return () => {

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback } from "react";
+import { useEffect, useRef, useCallback, useEffectEvent } from "react";
 import { getCommands } from "@/store/commands";
 import { getBinding } from "@/lib/util/hotkeys";
 
@@ -134,48 +134,45 @@ export function useHotkey(
 	callback: (e: KeyboardEvent) => void,
 	options: { enableInInputs?: boolean; bubble?: boolean; ignoreAlt?: boolean; ignoreShift?: boolean } = {},
 ) {
-	const cbRef = useRef(callback);
-	cbRef.current = callback;
-	const matchRef = useRef({ ignoreAlt: options.ignoreAlt, ignoreShift: options.ignoreShift });
-	matchRef.current = { ignoreAlt: options.ignoreAlt, ignoreShift: options.ignoreShift };
 	const parsed = useRef(parseHotkey(hotkey));
 
 	useEffect(() => {
 		parsed.current = parseHotkey(hotkey);
 	}, [hotkey]);
 
-	useEffect(() => {
-		function handler(e: KeyboardEvent) {
-			if (e.defaultPrevented) return;
-			if (!options.enableInInputs && isEditableElement(e.target)) return;
+	const onKey = useEffectEvent((e: KeyboardEvent) => {
+		if (e.defaultPrevented) return;
+		if (!options.enableInInputs && isEditableElement(e.target)) return;
 
-			for (const alt of parsed.current) {
-				if (alt.length === 1 && matchesKey(e, alt[0], matchRef.current)) {
-					e.preventDefault();
-					cbRef.current(e);
-					return;
-				}
+		for (const alt of parsed.current) {
+			if (alt.length === 1 && matchesKey(e, alt[0], { ignoreAlt: options.ignoreAlt, ignoreShift: options.ignoreShift })) {
+				e.preventDefault();
+				callback(e);
+				return;
 			}
 		}
+	});
+
+	useEffect(() => {
+		const handler = (e: KeyboardEvent) => onKey(e);
 		// Default: capture phase so global hotkeys fire before focused widgets (e.g. the SV
 		// pano viewer) that stopPropagation arrow/wasd keys in their own capture handler.
 		// Bubble phase is for lower-priority handlers that yield to capture-phase ones.
 		const useCapture = !options.bubble;
 		document.addEventListener("keydown", handler, useCapture);
 		return () => document.removeEventListener("keydown", handler, useCapture);
-	}, [options.enableInInputs]);
+	}, [options.bubble]);
 }
 
 export function useHoldHotkey(hotkey: string, onHold: () => void, onRelease?: () => void) {
-	const cbRef = useRef(onHold);
-	cbRef.current = onHold;
-	const releaseRef = useRef(onRelease);
-	releaseRef.current = onRelease;
 	const parsed = useRef(parseHotkey(hotkey));
 
 	useEffect(() => {
 		parsed.current = parseHotkey(hotkey);
 	}, [hotkey]);
+
+	const hold = useEffectEvent(() => onHold());
+	const release = useEffectEvent(() => onRelease?.());
 
 	useEffect(() => {
 		let held = false;
@@ -186,7 +183,7 @@ export function useHoldHotkey(hotkey: string, onHold: () => void, onRelease?: ()
 				rafId = 0;
 				return;
 			}
-			cbRef.current();
+			hold();
 			rafId = requestAnimationFrame(tick);
 		}
 
@@ -207,7 +204,7 @@ export function useHoldHotkey(hotkey: string, onHold: () => void, onRelease?: ()
 			for (const alt of parsed.current) {
 				if (alt.length === 1 && e.key.toLowerCase() === alt[0].key) {
 					held = false;
-					releaseRef.current?.();
+					release();
 					return;
 				}
 			}

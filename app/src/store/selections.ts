@@ -6,6 +6,7 @@ import { hslToRgb } from "@/lib/util/color";
 import { getFieldDef } from "@/lib/data/fieldDefRegistry";
 import { localDateTime, utcDateTime } from "@/lib/util/format";
 import { isVariant, unionTuple, type Variant } from "@/lib/util/union";
+import { pointInPolygon } from "@/lib/geo/geo";
 
 import type { Selection, SelectionProps } from "@/bindings.gen";
 
@@ -128,6 +129,18 @@ export function addSelection(
 	props: SelectionProps,
 ): Selection[] {
 	return dedupe([...current, buildSelection(props)]);
+}
+
+/** Keys of every Polygon selection whose geometry contains the point. */
+export function polygonSelectionsContaining(selections: Selection[], lat: number, lng: number): string[] {
+	const keys: string[] = [];
+	for (const sel of selections) {
+		if (sel.props.type !== "Polygon") continue;
+		const { coordinates, extraPolygons } = sel.props.polygon;
+		const polys = extraPolygons ? [coordinates, ...extraPolygons] : [coordinates];
+		if (polys.some((rings) => pointInPolygon(lng, lat, rings))) keys.push(sel.key);
+	}
+	return keys;
 }
 
 /** Remove a selection by key. Composites (Intersection/Union/Invert) unwrap their children back into the list. */

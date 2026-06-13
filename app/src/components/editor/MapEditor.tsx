@@ -43,6 +43,7 @@ import { PluginSidebarHost } from "@/components/editor/PluginSidebarHost";
 import SameLocation from "@/components/editor/SameLocation";
 import { log } from "@/lib/util/log"
 import { useCountrySelect } from "@/lib/map/useCountrySelect";
+import { useDeletePolygon } from "@/lib/map/useDeletePolygon";
 import { useMapKeyBindings } from "@/lib/map/mapKeyBindings";
 
 function zoomToPasted(bounds: [number, number, number, number] | null, padding = 0) {
@@ -231,6 +232,7 @@ export function MapEditor() {
 	useCommandHotkeys();
 	useMapKeyBindings(() => getCurrentMap()?.meta.settings.keyBindings ?? []);
 	useCountrySelect();
+	useDeletePolygon();
 	useHotkey(useBinding("toggleFullscreenMap"), () => {
 		setSetting("fullscreenMap", !getSettings().fullscreenMap);
 	});

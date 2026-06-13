@@ -252,6 +252,12 @@ const STATIC_HOTKEY_DEFS = [
 		defaultBinding: "q",
 	},
 	{
+		action: "deletePolygon",
+		label: "Hold + click to delete polygon",
+		group: "Global",
+		defaultBinding: "e",
+	},
+	{
 		action: "mapZoomSelection",
 		label: "Zoom to selection bounds",
 		group: "Map Navigation",

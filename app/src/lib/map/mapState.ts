@@ -35,14 +35,18 @@ export function fitMapToBounds(bounds: [number, number, number, number] | null |
 }
 
 type ClickInterceptor = (lat: number, lng: number) => boolean;
-let clickInterceptor: ClickInterceptor | null = null;
+const clickInterceptors = new Set<ClickInterceptor>();
 
-export function setClickInterceptor(fn: ClickInterceptor | null) {
-	clickInterceptor = fn;
+export function addClickInterceptor(fn: ClickInterceptor): () => void {
+	clickInterceptors.add(fn);
+	return () => clickInterceptors.delete(fn);
 }
 
 export function tryInterceptClick(lat: number, lng: number): boolean {
-	return clickInterceptor ? clickInterceptor(lat, lng) : false;
+	for (const fn of clickInterceptors) {
+		if (fn(lat, lng)) return true;
+	}
+	return false;
 }
 
 type DrawInterceptor = (rings: number[][][]) => boolean;

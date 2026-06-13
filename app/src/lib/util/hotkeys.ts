@@ -99,12 +99,6 @@ const STATIC_HOTKEY_DEFS = [
 		defaultBinding: "Mod+c",
 	},
 	{
-		action: "copyLinkLong",
-		label: "Quick copy Street View link (long URL)",
-		group: "Location Editor",
-		defaultBinding: "Mod+Alt+c",
-	},
-	{
 		action: "toggleCrosshair",
 		label: "Toggle crosshair",
 		group: "Location Editor",

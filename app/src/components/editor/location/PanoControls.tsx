@@ -8,7 +8,7 @@ import { shortenMapsUrl } from "@/lib/sv/shortUrl";
 import { useSettings } from "@/store/settings";
 import { getCurrentMap } from "@/store/useMapStore";
 import { useBinding } from "@/lib/util/hotkeys";
-import { useHotkey, useHotkeyRef } from "@/lib/hooks/useHotkey";
+import { useHotkeyRef } from "@/lib/hooks/useHotkey";
 import { open } from "@tauri-apps/plugin-shell";
 import { tweenPov } from "@/lib/sv/tweenPov";
 
@@ -291,16 +291,19 @@ export function PanoControls({
 		if (url) open(url.toString());
 	}, [buildMapsUrl]);
 
-	// `long` skips the shortenMapsUrl redirect lookup and copies the raw long URL.
-	const doCopy = useCallback(async (long: boolean) => {
+	// `long` skips the shortenMapsUrl redirect lookup and copies the raw long URL;
+	// `noTags` omits the tag/loadMode params.
+	const doCopy = useCallback(async ({ long, noTags }: { long: boolean; noTags: boolean }) => {
 		const url = buildMapsUrl();
 		if (!url) return;
-		const tagsById = getCurrentMap()?.meta.tags ?? {};
-		for (const id of location.tags) {
-			const name = tagsById[id]?.name;
-			if (name) url.searchParams.append("extra[tags]", name);
+		if (!noTags) {
+			const tagsById = getCurrentMap()?.meta.tags ?? {};
+			for (const id of location.tags) {
+				const name = tagsById[id]?.name;
+				if (name) url.searchParams.append("extra[tags]", name);
+			}
+			if (!hasLoadAsPanoId(location)) url.searchParams.set("extra[loadMode]", "latLng");
 		}
-		if (!hasLoadAsPanoId(location)) url.searchParams.set("extra[loadMode]", "latLng");
 		const longStr = url.toString();
 		if (long) {
 			await navigator.clipboard.writeText(longStr).catch(() => {});
@@ -318,12 +321,6 @@ export function PanoControls({
 		setCopyState("done");
 		setTimeout(() => setCopyState("idle"), 500);
 	}, [buildMapsUrl, location]);
-
-	const copyLink = useCallback(() => doCopy(false), [doCopy]);
-
-	useHotkey(useBinding("copyLinkLong"), () => {
-		doCopy(true);
-	});
 
 	const hasChanged =
 		panorama.getPov().heading !== location.heading ||
@@ -556,9 +553,9 @@ export function PanoControls({
 							</svg>
 						</button>
 						<button
-							onClick={copyLink}
+							onClick={(e) => doCopy({ long: e.altKey, noTags: e.shiftKey })}
 							role="tooltip"
-							aria-label="Copy link"
+							aria-label="Copy link - Shift: without tags, Alt: long URL"
 							data-microtip-position="right"
 						>
 							{copyState === "loading" ? (

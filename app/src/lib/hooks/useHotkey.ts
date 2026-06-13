@@ -88,7 +88,11 @@ const SHIFTED_CHARS = new Set('?!@#$%^&*()_+{}|:"<>~');
 
 // ignoreAlt: Alt is the global "slow" navigation modifier, so nav handlers match
 // bindings regardless of whether Alt is held. Single source of truth for that rule.
-export function matchesKey(e: KeyboardEvent, pk: ParsedKey, opts?: { ignoreAlt?: boolean }): boolean {
+export function matchesKey(
+	e: KeyboardEvent,
+	pk: ParsedKey,
+	opts?: { ignoreAlt?: boolean; ignoreShift?: boolean },
+): boolean {
 	const ctrl = e.ctrlKey;
 	const alt = e.altKey;
 	const meta = e.metaKey;
@@ -103,7 +107,7 @@ export function matchesKey(e: KeyboardEvent, pk: ParsedKey, opts?: { ignoreAlt?:
 		ctrl === pk.ctrl &&
 		(opts?.ignoreAlt || alt === pk.alt) &&
 		meta === pk.meta &&
-		(shiftImplied || shift === pk.shift) &&
+		(opts?.ignoreShift || shiftImplied || shift === pk.shift) &&
 		key === pk.key
 	);
 }
@@ -128,10 +132,12 @@ export function isEditableElement(el: EventTarget | null): boolean {
 export function useHotkey(
 	hotkey: string,
 	callback: (e: KeyboardEvent) => void,
-	options: { enableInInputs?: boolean; bubble?: boolean } = {},
+	options: { enableInInputs?: boolean; bubble?: boolean; ignoreAlt?: boolean; ignoreShift?: boolean } = {},
 ) {
 	const cbRef = useRef(callback);
 	cbRef.current = callback;
+	const matchRef = useRef({ ignoreAlt: options.ignoreAlt, ignoreShift: options.ignoreShift });
+	matchRef.current = { ignoreAlt: options.ignoreAlt, ignoreShift: options.ignoreShift };
 	const parsed = useRef(parseHotkey(hotkey));
 
 	useEffect(() => {
@@ -144,7 +150,7 @@ export function useHotkey(
 			if (!options.enableInInputs && isEditableElement(e.target)) return;
 
 			for (const alt of parsed.current) {
-				if (alt.length === 1 && matchesKey(e, alt[0])) {
+				if (alt.length === 1 && matchesKey(e, alt[0], matchRef.current)) {
 					e.preventDefault();
 					cbRef.current(e);
 					return;

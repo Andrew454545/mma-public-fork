@@ -1136,11 +1136,17 @@ function LocationPreviewInner() {
 			singletonPano.setZoom(0);
 		}
 	});
-	useHotkey(useBinding("copyLink"), () => {
-		if (!location) return;
-		const btn = document.querySelector<HTMLButtonElement>('button[aria-label^="Copy link"]');
-		btn?.click();
-	});
+	useHotkey(
+		useBinding("copyLink"),
+		(e) => {
+			if (!location) return;
+			const btn = document.querySelector<HTMLButtonElement>('button[aria-label^="Copy link"]');
+			btn?.dispatchEvent(
+				new MouseEvent("click", { bubbles: true, cancelable: true, shiftKey: e.shiftKey, altKey: e.altKey }),
+			);
+		},
+		{ ignoreAlt: true, ignoreShift: true },
+	);
 	useHotkey(useBinding("toggleCrosshair"), () => {
 		setSetting("showCrosshair", !getSettings().showCrosshair);
 	});

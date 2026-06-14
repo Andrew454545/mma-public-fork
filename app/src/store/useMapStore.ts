@@ -172,17 +172,21 @@ function getMapSnapshot() {
 	return mapVersion;
 }
 
+/** Mark the current map's content dirty and re-render its consumers. */
+function bump() {
+	mapVersion++;
+	notify();
+}
+
 export function refreshAfterMutation() {
 	if (!currentMap) {
 		selections = [];
 
 		selectedLocationIds = SelectedIds.EMPTY;
-		mapVersion++;
-		notify();
+		bump();
 		return;
 	}
-	mapVersion++;
-	notify();
+	bump();
 }
 
 export const useCurrentMap = makeStoreHook(() => currentMap);
@@ -247,8 +251,7 @@ export function useCommitDiff() {
 				d.modified !== cachedCommitDiff.modified
 			) {
 				cachedCommitDiff = d;
-				mapVersion++;
-				notify();
+				bump();
 			}
 		});
 	}, [version]);
@@ -358,8 +361,7 @@ export async function openMap(id: string) {
 	importPreviewPositions = new Float32Array(0);
 	commitDiffPreview = null;
 
-	mapVersion++;
-	notify();
+	bump();
 	t.end();
 	if (currentMap) emitEvent("map:open", currentMap);
 }
@@ -383,8 +385,7 @@ export async function closeMap() {
 	renderDeltaBus.emit({ added: [], updated: [], removed: [], colorPatches: [], fullReset: true });
 	undoRedoState = { canUndo: false, canRedo: false };
 	tagCounts = {};
-	mapVersion++;
-	notify();
+	bump();
 }
 
 /** Resync after another window mutated this map (store-external-mutation event):
@@ -515,8 +516,7 @@ export async function setMapExtraFields(fields: Record<string, ExtraFieldDef>) {
 	const replaced = { ...current, fields };
 	currentMap = { ...currentMap, meta: { ...currentMap.meta, extra: replaced } };
 	setUserFieldDefs(fields);
-	mapVersion++;
-	notify();
+	bump();
 	await cmd.storeUpdateMapMeta(currentMapId, { extra: replaced } as Partial<MapMeta>);
 }
 
@@ -545,8 +545,7 @@ function syncMutationResult(r: MutationResult) {
 	undoRedoState = { canUndo: r.canUndo, canRedo: r.canRedo };
 	tagCounts = r.tagCounts;
 	if (needsNotify) {
-		mapVersion++;
-		notify();
+		bump();
 	}
 	if (r.tags) {
 		const oldTags = currentMap.meta.tags;
@@ -583,8 +582,7 @@ function applySelectionSync(sync: {
 	assignCounts(sync.counts);
 	if (sync.bitmask) emitBitmask(sync.bitmask);
 
-	mapVersion++;
-	notify();
+	bump();
 }
 
 /** Await a mutation IPC, emit its render delta, sync JS state, and schedule a save. */
@@ -641,8 +639,7 @@ export async function removeLocations(ids: ReadonlyIdSet) {
 		cachedActiveLocation = null;
 		workArea = "overview";
 	}
-	mapVersion++;
-	notify();
+	bump();
 	emitEvent("location:remove", [...ids]);
 	await mutate(cmd.storeRemoveLocations([...ids])).catch((e) =>
 		log.error("[delete] store_remove_locations failed:", e),
@@ -669,8 +666,7 @@ export async function updateLocation(loc: Location, patch: Partial<Location>) {
 	await mutate(cmd.storeUpdateLocations(updates, true));
 	if (activeLocationId === loc.id) {
 		cachedActiveLocation = { ...loc, ...patch };
-		mapVersion++;
-		notify();
+		bump();
 	}
 }
 
@@ -748,8 +744,7 @@ export async function patchLocationExtra(
 	const patched = { ...loc, extra };
 	if (activeLocationId === loc.id) {
 		cachedActiveLocation = patched;
-		mapVersion++;
-		notify();
+		bump();
 	}
 
 	const triggered = getTriggeredProviders(Object.keys(extraPatch));
@@ -827,8 +822,7 @@ async function applySelectionUpdate(updater: (sels: Selection[]) => Selection[])
 	t.step("apply");
 	t.end({ selected: result.selectedCount });
 
-	mapVersion++;
-	notify();
+	bump();
 	emitEvent("selection:change", selections);
 }
 
@@ -1074,8 +1068,7 @@ export async function openStagedLocation(index: number) {
 	cachedActiveLocation = { ...loc, id: stagedIndexToVirtualId(index) };
 	workArea = "location";
 	importMarkerVersion++;
-	mapVersion++;
-	notify();
+	bump();
 	emitEvent("active:change", null);
 }
 
@@ -1086,8 +1079,7 @@ export async function setActiveLocation(id: number | null, checkDuplicates = tru
 		if (id == null) {
 			cachedActiveLocation = null;
 			workArea = "import";
-			mapVersion++;
-			notify();
+			bump();
 			emitEvent("active:change", null);
 			t.end();
 			return;
@@ -1105,8 +1097,7 @@ export async function setActiveLocation(id: number | null, checkDuplicates = tru
 				workArea = "duplicates";
 				activeLocationId = null;
 				cachedActiveLocation = null;
-				mapVersion++;
-				notify();
+				bump();
 				emitEvent("active:change", null);
 				t.end({ duplicates: nearby.length });
 				return;
@@ -1119,8 +1110,7 @@ export async function setActiveLocation(id: number | null, checkDuplicates = tru
 		duplicateLocations = [];
 		workArea = activePluginId ? "plugin" : "overview";
 	}
-	mapVersion++;
-	notify();
+	bump();
 	emitEvent("active:change", activeLocationId);
 	t.end();
 }
@@ -1130,14 +1120,12 @@ export function openDuplicateLocation(loc: Location) {
 	cachedActiveLocation = loc;
 	workArea = "location";
 	cmd.storeSetActive(loc.id).catch((e) => log.error("[setActive] store_set_active failed:", e));
-	mapVersion++;
-	notify();
+	bump();
 }
 
 export function removeDuplicate(id: number) {
 	duplicateLocations = duplicateLocations.filter((l) => l.id !== id);
-	mapVersion++;
-	notify();
+	bump();
 }
 
 export function closeDuplicates() {
@@ -1145,16 +1133,14 @@ export function closeDuplicates() {
 	activeLocationId = null;
 	cachedActiveLocation = null;
 	workArea = "overview";
-	mapVersion++;
-	notify();
+	bump();
 }
 
 export function setWorkArea(area: WorkArea) {
 	workArea = area;
 	if (area !== "location") activeLocationId = null;
 	if (area !== "plugin") activePluginId = null;
-	mapVersion++;
-	notify();
+	bump();
 }
 
 // --- Plugin mode ---
@@ -1169,15 +1155,13 @@ export function setPluginMode(pluginId: string) {
 	workArea = "plugin";
 	activePluginId = pluginId;
 	activeLocationId = null;
-	mapVersion++;
-	notify();
+	bump();
 }
 
 export function exitPluginMode() {
 	workArea = "overview";
 	activePluginId = null;
-	mapVersion++;
-	notify();
+	bump();
 }
 
 // --- Tag CRUD ---
@@ -1264,8 +1248,7 @@ async function setImportStaging(preview: ImportPreview, source: "file" | "paste"
 	importPreviewPositions = positions;
 	importMarkerVersion++;
 	workArea = "import";
-	mapVersion++;
-	notify();
+	bump();
 	if (getSettings().panToImported) fitMapToBounds(preview.bounds, 100);
 }
 
@@ -1310,8 +1293,7 @@ export async function confirmImport(droppedFields: string[], tagName?: string) {
 		await cmd.storeCommitAndBake(currentMapId, `Import ${r.importedCount} locations`);
 		undoRedoState = { canUndo: false, canRedo: false };
 		cachedCommitDiff = { added: 0, removed: 0, modified: 0 };
-		mapVersion++;
-		notify();
+		bump();
 	}
 	return r;
 }
@@ -1326,8 +1308,7 @@ export function cancelImport() {
 		workArea = "overview";
 	}
 	if (workArea === "import") workArea = "overview";
-	mapVersion++;
-	notify();
+	bump();
 }
 
 // --- Undo/redo ---
@@ -1400,8 +1381,7 @@ export async function commitMap(message?: string): Promise<string> {
 	t.end();
 	undoRedoState = { canUndo: false, canRedo: false };
 	cachedCommitDiff = { added: 0, removed: 0, modified: 0 };
-	mapVersion++;
-	notify();
+	bump();
 	return id;
 }
 
@@ -1446,8 +1426,7 @@ export async function beginCommitDiffPreview(commit: CommitInfo) {
 	};
 	diffMarkerVersion++;
 	workArea = "diff";
-	mapVersion++;
-	notify();
+	bump();
 	const all = [...added, ...removed, ...modified];
 	if (all.length > 0) {
 		let west = Infinity,
@@ -1468,8 +1447,7 @@ export function endCommitDiffPreview() {
 	commitDiffPreview = null;
 	diffMarkerVersion++;
 	if (workArea === "diff") workArea = "overview";
-	mapVersion++;
-	notify();
+	bump();
 }
 
 export async function checkoutCommit(commitId: string) {

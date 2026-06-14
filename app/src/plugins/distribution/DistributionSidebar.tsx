@@ -5,6 +5,7 @@ import { mdiArrowLeft } from "@mdi/js";
 import { cmd } from "@/lib/commands";
 import { getSettings } from "@/store/settings";
 import { fetchAllLocations } from "@/store/useMapStore";
+import { subscribeMany, LOCATION_DATA_EVENTS } from "@/lib/events";
 import "./distribution.css";
 
 type Source = "coords" | "metadata";
@@ -92,14 +93,7 @@ export function DistributionSidebar({ onClose }: { onClose: () => void }) {
 
 	useEffect(() => {
 		refresh();
-		const unsub1 = MMA.on("location:add", refresh);
-		const unsub2 = MMA.on("location:remove", refresh);
-		const unsub3 = MMA.on("location:update", refresh);
-		return () => {
-			unsub1();
-			unsub2();
-			unsub3();
-		};
+		return subscribeMany(LOCATION_DATA_EVENTS, refresh);
 	}, [refresh]);
 
 	const maxCount = entries.length > 0 ? entries[0].count : 1;

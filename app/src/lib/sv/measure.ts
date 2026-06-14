@@ -4,7 +4,7 @@ import type { Location } from "@/types";
 import { createSyncStore } from "@/lib/util/syncStore";
 import { useCurrentMap } from "@/store/useMapStore";
 import { cmd } from "@/lib/commands";
-import { subscribe } from "@/lib/events";
+import { subscribeMany, LOCATION_DATA_EVENTS } from "@/lib/events";
 
 // --- Measure tool state ---
 
@@ -251,12 +251,7 @@ export function useScoreMaxError(): number {
 	useEffect(() => {
 		if (!isAuto) return;
 		void refresh();
-		const unsubs = [
-			subscribe("location:add", () => void refresh()),
-			subscribe("location:remove", () => void refresh()),
-			subscribe("location:update", () => void refresh()),
-		];
-		return () => unsubs.forEach((u) => u());
+		return subscribeMany(LOCATION_DATA_EVENTS, () => void refresh());
 	}, [isAuto, refresh]);
 
 	if (isAuto) return resolveScoreMaxErrorFromBounds("auto", autoBbox);

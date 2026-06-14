@@ -70,6 +70,8 @@ const eventsWithPrefix = <P extends string>(prefix: P): EventsWithPrefix<P>[] =>
 
 /** The events that fire whenever location data changes. */
 export const LOCATION_DATA_EVENTS = eventsWithPrefix("location");
+/** Selection-related events. */
+export const SELECTION_EVENTS = eventsWithPrefix("selection");
 /** The events that fire whenever tag definitions change. */
 export const TAG_DATA_EVENTS = eventsWithPrefix("tag");
 /** Map open/close lifecycle. */

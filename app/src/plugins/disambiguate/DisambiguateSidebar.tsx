@@ -1,5 +1,7 @@
-import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
+import { useAsync } from "@/lib/hooks/useAsync";
+import { useEventVersion } from "@/lib/hooks/useEditorEvents";
+import { SELECTION_EVENTS } from "@/lib/events";
 import { Icon } from "@/components/primitives/Icon";
 import { mdiArrowLeft } from "@mdi/js";
 import type { Selection, ExtraFieldDef } from "@/bindings.gen";
@@ -154,33 +156,8 @@ async function analyze(): Promise<Analysis> {
 }
 
 export function DisambiguateSidebar({ onClose }: { onClose: () => void }) {
-	const [analysis, setAnalysis] = useState<Analysis | null>(null);
-	const [error, setError] = useState<string | null>(null);
-	const [loading, setLoading] = useState(false);
-
-	useEffect(() => {
-		let cancelled = false;
-		const run = () => {
-			setLoading(true);
-			setError(null);
-			analyze()
-				.then((a) => {
-					if (!cancelled) setAnalysis(a);
-				})
-				.catch((e) => {
-					if (!cancelled) setError(e instanceof Error ? e.message : String(e));
-				})
-				.finally(() => {
-					if (!cancelled) setLoading(false);
-				});
-		};
-		run();
-		const unsub = MMA.on("selection:change", run);
-		return () => {
-			cancelled = true;
-			unsub();
-		};
-	}, []);
+	const version = useEventVersion(SELECTION_EVENTS);
+	const { data: analysis, loading, error } = useAsync(() => analyze(), [version]);
 
 	return (
 		<section className="map-sidebar disambig">
@@ -191,7 +168,7 @@ export function DisambiguateSidebar({ onClose }: { onClose: () => void }) {
 				<h2>Disambiguate selections</h2>
 			</header>
 
-			{error && <div className="disambig__error">{error}</div>}
+			{error && <div className="disambig__error">{error.message}</div>}
 			{!error && loading && <div className="disambig__muted">Analyzing&hellip;</div>}
 			{!error && analysis && (
 				<>

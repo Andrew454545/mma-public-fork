@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { lerp, gradientColor, isNumericField, fieldScale } from "@/plugins/gradient/gradientMath";
+import {
+	lerp,
+	gradientColor,
+	isNumericField,
+	fieldScale,
+	buildGradientSelections,
+} from "@/plugins/gradient/gradientMath";
 
 describe("lerp", () => {
 	it("t=0 returns first color", () => {
@@ -140,5 +146,79 @@ describe("fieldScale", () => {
 		expect(fieldScale("gen4", "enum")).toBeNull();
 		expect(fieldScale("", "string")).toBeNull();
 		expect(fieldScale("2010-XX", "month")).toBeNull();
+	});
+});
+
+describe("buildGradientSelections", () => {
+	const stops: [number, number, number][] = [
+		[0, 0, 0],
+		[255, 255, 255],
+	];
+	const numericValues = [
+		{ id: 1, raw: 0 },
+		{ id: 2, raw: 50 },
+		{ id: 3, raw: 100 },
+	];
+
+	it("unscoped numeric emits live Filter buckets that match the whole map", () => {
+		const sels = buildGradientSelections(numericValues, {
+			numeric: true,
+			fieldKey: "altitude",
+			fieldType: "number",
+			stops,
+			bucketCount: 2,
+			scoped: false,
+		});
+		expect(sels.every((s) => s.props.type === "Filter")).toBe(true);
+		expect(sels.every((s) => s.key.startsWith("filter:altitude:between:"))).toBe(true);
+	});
+
+	it("scoped numeric emits Locations buckets restricted to the subset's ids, each id in one bucket", () => {
+		const sels = buildGradientSelections(numericValues, {
+			numeric: true,
+			fieldKey: "altitude",
+			fieldType: "number",
+			stops,
+			bucketCount: 2,
+			scoped: true,
+		});
+		expect(sels.every((s) => s.props.type === "Locations")).toBe(true);
+		// every input id appears exactly once across all buckets
+		const ids = sels.flatMap((s) =>
+			s.props.type === "Locations" ? s.props.locations : [],
+		);
+		expect(ids.sort()).toEqual([1, 2, 3]);
+		// key mirrors the engine's Locations key (its id list)
+		const first = sels[0];
+		if (first.props.type === "Locations") {
+			expect(first.key).toBe(first.props.locations.join(","));
+		}
+	});
+
+	it("scoped enum groups the subset's ids by distinct value", () => {
+		const sels = buildGradientSelections(
+			[
+				{ id: 1, raw: "a" },
+				{ id: 2, raw: "b" },
+				{ id: 3, raw: "a" },
+			],
+			{ numeric: false, fieldKey: "tag", fieldType: "string", stops, bucketCount: 0, scoped: true },
+		);
+		expect(sels.every((s) => s.props.type === "Locations")).toBe(true);
+		const aBucket = sels.find((s) => s.props.type === "Locations" && s.props.locations.includes(1));
+		expect(aBucket?.props.type === "Locations" && aBucket.props.locations.sort()).toEqual([1, 3]);
+	});
+
+	it("empty values yield no selections", () => {
+		expect(
+			buildGradientSelections([], {
+				numeric: true,
+				fieldKey: "x",
+				fieldType: "number",
+				stops,
+				bucketCount: 5,
+				scoped: true,
+			}),
+		).toEqual([]);
 	});
 });

@@ -6,8 +6,7 @@ import {
 	describeRule,
 	type SavedSelection,
 } from "@/store/savedSelections";
-import { Icon } from "@/components/primitives/Icon";
-import { mdiArrowLeft } from "@mdi/js";
+import { Sidebar, Field, EmptyState } from "@/components/primitives/Sidebar";
 import type { ExtraFieldDef } from "@/bindings.gen";
 import { getFieldDef } from "@/lib/data/fieldDefRegistry";
 import { bucketize, compareNatural } from "@/lib/util/util";
@@ -247,17 +246,9 @@ export function PivotSidebar({ onClose }: { onClose: () => void }) {
 	}, [recompute, debouncedRecompute]);
 
 	return (
-		<section className="map-sidebar pivot-sidebar">
-			<header className="pivot-sidebar__header">
-				<button className="icon-button" onClick={onClose}>
-					<Icon path={mdiArrowLeft} />
-				</button>
-				<h2 className="pivot-sidebar__title">Pivot Table</h2>
-			</header>
-
+		<Sidebar title="Pivot Table" onBack={onClose} className="pivot-sidebar" flush>
 			<div className="pivot-sidebar__controls">
-				<label className="pivot-sidebar__control">
-					<span className="pivot-sidebar__control-label">Rows</span>
+				<Field label="Rows">
 					<select
 						className="nselect"
 						value={rowSource}
@@ -271,9 +262,8 @@ export function PivotSidebar({ onClose }: { onClose: () => void }) {
 							</option>
 						))}
 					</select>
-				</label>
-				<label className="pivot-sidebar__control">
-					<span className="pivot-sidebar__control-label">Column field</span>
+				</Field>
+				<Field label="Column field">
 					<select
 						className="nselect"
 						value={fieldKey}
@@ -285,10 +275,9 @@ export function PivotSidebar({ onClose }: { onClose: () => void }) {
 							</option>
 						))}
 					</select>
-				</label>
+				</Field>
 				{isNumericField && (
-					<label className="pivot-sidebar__control">
-						<span className="pivot-sidebar__control-label">Bucket numeric values</span>
+					<Field label="Bucket numeric values">
 						<select
 							className="nselect"
 							value={bucketCount ?? "off"}
@@ -302,29 +291,27 @@ export function PivotSidebar({ onClose }: { onClose: () => void }) {
 							<option value="15">15 buckets</option>
 							<option value="20">20 buckets</option>
 						</select>
-					</label>
+					</Field>
 				)}
 			</div>
 
 			<div className="pivot-sidebar__body">
 				{fields.length === 0 && (
-					<div className="pivot-sidebar__empty">
-						No extra fields on this map. Enrich locations first.
-					</div>
+					<EmptyState>No extra fields on this map. Enrich locations first.</EmptyState>
 				)}
 				{fields.length > 0 && !data && !loading && (
-					<div className="pivot-sidebar__empty">
+					<EmptyState>
 						{rowSource === "active"
 							? "No active selections. Add selections to see pivot data."
 							: rowSource === "all"
 								? "No locations on this map."
 								: "Saved selection could not be resolved."}
-					</div>
+					</EmptyState>
 				)}
-				{loading && <div className="pivot-sidebar__empty">Computing...</div>}
+				{loading && <EmptyState>Computing...</EmptyState>}
 				{data && <PivotTable data={data} />}
 			</div>
-		</section>
+		</Sidebar>
 	);
 }
 

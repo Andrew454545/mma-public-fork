@@ -71,9 +71,6 @@ export function RegionSelector({
 
 	return (
 		<div className="generator-regions">
-			<div className="generator-regions__header">
-				<span>Regions ({polygonSelections.length})</span>
-			</div>
 			{polygonSelections.length === 0 && (
 				<div className="generator-regions__hint">
 					Draw a polygon on the map or hold <kbd>Q</kbd> + click to select a country outline.

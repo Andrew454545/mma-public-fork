@@ -2,8 +2,7 @@ import type { ReactNode } from "react";
 import { useAsync } from "@/lib/hooks/useAsync";
 import { useEventVersion } from "@/lib/hooks/useEditorEvents";
 import { SELECTION_EVENTS } from "@/lib/events";
-import { Icon } from "@/components/primitives/Icon";
-import { mdiArrowLeft } from "@mdi/js";
+import { Sidebar } from "@/components/primitives/Sidebar";
 import type { Selection, ExtraFieldDef } from "@/bindings.gen";
 import type { Location } from "@/types";
 import { computeDivergence, soleGroup } from "./engine";
@@ -160,14 +159,7 @@ export function DisambiguateSidebar({ onClose }: { onClose: () => void }) {
 	const { data: analysis, loading, error } = useAsync(() => analyze(), [version]);
 
 	return (
-		<section className="map-sidebar disambig">
-			<header className="disambig__header">
-				<button className="icon-button" type="button" aria-label="Back" onClick={onClose}>
-					<Icon path={mdiArrowLeft} />
-				</button>
-				<h2>Disambiguate selections</h2>
-			</header>
-
+		<Sidebar title="Disambiguate selections" onBack={onClose} className="disambig">
 			{error && <div className="disambig__error">{error.message}</div>}
 			{!error && loading && <div className="disambig__muted">Analyzing&hellip;</div>}
 			{!error && analysis && (
@@ -193,6 +185,6 @@ export function DisambiguateSidebar({ onClose }: { onClose: () => void }) {
 					</div>
 				</>
 			)}
-		</section>
+		</Sidebar>
 	);
 }

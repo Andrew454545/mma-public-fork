@@ -2,7 +2,10 @@ import { useState, useEffect, useCallback } from "react";
 import { Dialog, DialogContent } from "@/components/primitives/Dialog";
 import { Icon } from "@/components/primitives/Icon";
 import {
+	getPlugin,
 	getPlugins,
+	getPluginSetting,
+	setPluginSetting,
 	isPluginEnabled,
 	setPluginEnabled,
 	activatePlugin,
@@ -29,6 +32,48 @@ interface RegistryEntry {
 type Tab = "core" | "additional";
 
 let registryCache: RegistryEntry[] | null = null;
+
+function PluginSettings({ pluginId }: { pluginId: string }) {
+	const plugin = getPlugin(pluginId);
+	const [, rerender] = useState(0);
+	if (!plugin?.settings?.length) return null;
+	return (
+		<div className="plugin-card__settings">
+			{plugin.settings.map((def) => {
+				const value = getPluginSetting(plugin, def.key);
+				const update = (v: unknown) => {
+					setPluginSetting(plugin.id, def.key, v);
+					rerender((n) => n + 1);
+				};
+				if (def.type === "boolean") {
+					return (
+						<label key={def.key} className="plugin-card__setting">
+							<input
+								type="checkbox"
+								checked={Boolean(value)}
+								onChange={(e) => update(e.target.checked)}
+							/>
+							<span>{def.label}</span>
+						</label>
+					);
+				}
+				return (
+					<label key={def.key} className="plugin-card__setting">
+						<span>{def.label}</span>
+						<input
+							type={def.type === "number" ? "number" : "text"}
+							className="input"
+							value={def.type === "number" ? Number(value ?? 0) : String(value ?? "")}
+							onChange={(e) =>
+								update(def.type === "number" ? Number(e.target.value) : e.target.value)
+							}
+						/>
+					</label>
+				);
+			})}
+		</div>
+	);
+}
 
 function CoreCard({ plugin }: { plugin: Plugin }) {
 	const [enabled, setEnabled] = useState(() => isPluginEnabled(plugin.id));
@@ -63,6 +108,7 @@ function CoreCard({ plugin }: { plugin: Plugin }) {
 					{enabled ? "Disable" : "Enable"}
 				</button>
 			)}
+			{enabled && <PluginSettings pluginId={plugin.id} />}
 		</div>
 	);
 }
@@ -140,6 +186,7 @@ function AdditionalCard({
 					</button>
 				)}
 			</div>
+			{installed && enabled && <PluginSettings pluginId={id} />}
 		</div>
 	);
 }

@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import type { Location } from "@/types";
-import { Icon } from "@/components/primitives/Icon";
-import { mdiArrowLeft } from "@mdi/js";
+import { Sidebar, SegmentedControl } from "@/components/primitives/Sidebar";
 import { cmd } from "@/lib/commands";
 import { getSettings } from "@/store/settings";
 import { fetchAllLocations } from "@/store/useMapStore";
@@ -99,67 +98,53 @@ export function DistributionSidebar({ onClose }: { onClose: () => void }) {
 	const maxCount = entries.length > 0 ? entries[0].count : 1;
 
 	return (
-		<section className="map-sidebar distribution-sidebar">
-			<header className="distribution-sidebar__header">
-				<button className="icon-button" onClick={onClose}>
-					<Icon path={mdiArrowLeft} />
-				</button>
-				<h2 className="distribution-sidebar__title">Distribution</h2>
-			</header>
-
-			<div className="distribution-sidebar__body">
-				<div className="distribution-sidebar__source" role="tablist">
-					<button
-						type="button"
-						className={`distribution-sidebar__source-btn${source === "coords" ? " is-active" : ""}`}
-						onClick={() => setSource("coords")}
-					>
-						Coordinates
-					</button>
-					<button
-						type="button"
-						className={`distribution-sidebar__source-btn${source === "metadata" ? " is-active" : ""}`}
-						onClick={() => setSource("metadata")}
-						disabled={!metaAvailable}
-						title={metaAvailable ? undefined : "Enrich metadata fields to enable"}
-					>
-						Metadata
-					</button>
-				</div>
-				<div className="distribution-sidebar__summary">
-					{total} location{total !== 1 ? "s" : ""} across {entries.length} countr
-					{entries.length !== 1 ? "ies" : "y"}
-					{unknown > 0 && (
-						<span className="distribution-sidebar__unknown"> ({unknown} without country data)</span>
-					)}
-				</div>
-
-				<div className="distribution-sidebar__list">
-					{entries.map((e) => (
-						<div key={e.code} className="distribution-row">
-							<div className="distribution-row__label">
-								<span className="distribution-row__name">
-									<img
-										src={`/flags/${e.code.toUpperCase()}.svg`}
-										alt={e.code}
-										width={20}
-										height={15}
-										style={{ borderRadius: 2, flexShrink: 0 }}
-									/>
-									{e.name}
-								</span>
-								<span className="distribution-row__count">{e.count}</span>
-							</div>
-							<div className="distribution-row__bar-track">
-								<div
-									className="distribution-row__bar-fill"
-									style={{ width: `${(e.count / maxCount) * 100}%` }}
-								/>
-							</div>
-						</div>
-					))}
-				</div>
+		<Sidebar title="Distribution" onBack={onClose} className="distribution-sidebar">
+			<SegmentedControl<Source>
+				value={source}
+				onChange={setSource}
+				options={[
+					{ value: "coords", label: "Coordinates" },
+					{
+						value: "metadata",
+						label: "Metadata",
+						disabled: !metaAvailable,
+						title: metaAvailable ? undefined : "Enrich metadata fields to enable",
+					},
+				]}
+			/>
+			<div className="distribution-sidebar__summary">
+				{total} location{total !== 1 ? "s" : ""} across {entries.length} countr
+				{entries.length !== 1 ? "ies" : "y"}
+				{unknown > 0 && (
+					<span className="distribution-sidebar__unknown"> ({unknown} without country data)</span>
+				)}
 			</div>
-		</section>
+
+			<div className="distribution-sidebar__list">
+				{entries.map((e) => (
+					<div key={e.code} className="distribution-row">
+						<div className="distribution-row__label">
+							<span className="distribution-row__name">
+								<img
+									src={`/flags/${e.code.toUpperCase()}.svg`}
+									alt={e.code}
+									width={20}
+									height={15}
+									style={{ borderRadius: 2, flexShrink: 0 }}
+								/>
+								{e.name}
+							</span>
+							<span className="distribution-row__count">{e.count}</span>
+						</div>
+						<div className="distribution-row__bar-track">
+							<div
+								className="distribution-row__bar-fill"
+								style={{ width: `${(e.count / maxCount) * 100}%` }}
+							/>
+						</div>
+					</div>
+				))}
+			</div>
+		</Sidebar>
 	);
 }

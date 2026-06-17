@@ -1,15 +1,7 @@
-.pivot-sidebar__header {
-	display: flex;
-	align-items: center;
-	gap: 8px;
-	padding: 12px;
-	border-bottom: 1px solid var(--border-color);
-}
-
-.pivot-sidebar__title {
-	font-size: 14px;
-	font-weight: 600;
-	margin: 0;
+/* min-width:0 lets the panel shrink to its flex track so a wide table scrolls
+   inside __table-wrap instead of widening the sidebar (and the whole page). */
+.pivot-sidebar {
+	min-width: 0;
 }
 
 .pivot-sidebar__controls {
@@ -17,24 +9,8 @@
 	display: flex;
 	flex-direction: column;
 	gap: 8px;
-	border-bottom: 1px solid var(--border-color);
-}
-
-.pivot-sidebar__control {
-	display: flex;
-	flex-direction: column;
-	gap: 2px;
-}
-
-.pivot-sidebar__control-label {
-	font-size: 11px;
-	color: var(--text-secondary);
-}
-
-/* min-width:0 lets the panel shrink to its flex track so a wide table scrolls
-   inside __table-wrap instead of widening the sidebar (and the whole page). */
-.pivot-sidebar {
-	min-width: 0;
+	border-bottom: 1px solid var(--pu-divider);
+	flex-shrink: 0;
 }
 
 .pivot-sidebar__body {
@@ -43,13 +19,6 @@
 	overflow: hidden;
 	display: flex;
 	flex-direction: column;
-}
-
-.pivot-sidebar__empty {
-	padding: 24px 12px;
-	font-size: 12px;
-	color: var(--text-secondary);
-	text-align: center;
 }
 
 .pivot-sidebar__table-wrap {
@@ -66,13 +35,12 @@
 .pivot-sidebar__table thead th {
 	position: sticky;
 	top: 0;
-	background: var(--bg-primary);
+	background: var(--background-color, #252521);
 	text-align: right;
 	padding: 6px 8px;
 	white-space: nowrap;
-	color: var(--text-secondary);
 	font-weight: 500;
-	border-bottom: 1px solid var(--border-color);
+	border-bottom: 1px solid rgba(255, 255, 255, 0.12);
 	z-index: 1;
 }
 
@@ -82,7 +50,7 @@
 }
 
 .pivot-sidebar__th-sort:hover {
-	color: var(--text-primary);
+	background: #2f2f2b;
 }
 
 .pivot-sidebar__th-corner {
@@ -96,15 +64,14 @@
 	padding: 5px 8px;
 	text-align: right;
 	font-variant-numeric: tabular-nums;
-	color: var(--text-primary);
-	border-bottom: 1px solid var(--border-color-subtle, rgba(255, 255, 255, 0.04));
+	border-bottom: 1px solid rgba(255, 255, 255, 0.05);
 }
 
 .pivot-sidebar__row-label {
 	text-align: left !important;
 	position: sticky;
 	left: 0;
-	background: var(--bg-primary);
+	background: var(--background-color, #252521);
 	z-index: 2;
 	display: flex;
 	align-items: center;
@@ -135,12 +102,12 @@
 
 .pivot-sidebar__table tfoot td {
 	font-weight: 600;
-	border-top: 1px solid var(--border-color);
+	border-top: 1px solid rgba(255, 255, 255, 0.12);
 	padding: 6px 8px;
 	text-align: right;
 	position: sticky;
 	bottom: 0;
-	background: var(--bg-primary);
+	background: var(--background-color, #252521);
 }
 
 .pivot-sidebar__table tfoot .pivot-sidebar__row-label {

@@ -14,8 +14,10 @@ import { cmd as commands } from "@/lib/commands";
 import { goToMap, goToList } from "@/store/router";
 import { createLocation } from "@/types";
 import type { Location } from "@/types";
-import { registerPlugin } from "@/plugins/registry";
+import { registerPlugin, createPluginStorage } from "@/plugins/registry";
 import { trackDisposable } from "@/plugins/scope";
+import { Sidebar, Section, Field, EmptyState, SegmentedControl } from "@/components/primitives/Sidebar";
+import { toast } from "@/lib/util/toast";
 import { preloadModules, getAvailableExternals } from "@/plugins/externals";
 import { registerEnrichFields, registerEnrichmentProvider } from "@/lib/data/fieldDefs";
 import { getFieldDef, getAllFieldDefs } from "@/lib/data/fieldDefRegistry";
@@ -105,6 +107,15 @@ const mma = {
 	preloadModules,
 	getAvailableExternals,
 	createLocationStore,
+
+	// --- UI primitives (for plugins) ---
+	ui: { Sidebar, Section, Field, EmptyState, SegmentedControl },
+
+	// --- Notifications ---
+	toast,
+
+	// --- Namespaced per-plugin storage ---
+	storage: createPluginStorage,
 
 	// --- Field definitions ---
 	getFieldDef,

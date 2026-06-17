@@ -7,27 +7,31 @@ import { RegionSelector } from "./RegionSelector";
 import { SettingsPanel } from "./SettingsPanel";
 import { ProgressDisplay } from "./ProgressDisplay";
 import { google } from "@/lib/sv/opensv";
-import { getSelections, getCurrentMap, createTags } from "@/store/useMapStore";
+import { getSelections, useSelections, getCurrentMap, createTags } from "@/store/useMapStore";
 import type { Selection } from "@/bindings.gen";
-import { Icon } from "@/components/primitives/Icon";
-import { mdiArrowLeft } from "@mdi/js";
+import { createPluginStorage } from "@/plugins/registry";
+import { Sidebar, Section } from "@/components/primitives/Sidebar";
 import { searchCoverage } from "../searchCoverage";
 import "./generator.css";
 
-const STORAGE_KEY = "mma_generator_settings";
+const genStore = createPluginStorage("map-generator");
+const LEGACY_SETTINGS_KEY = "mma_generator_settings";
 
 function loadSettings(): GeneratorSettings {
-	try {
-		const saved = localStorage.getItem(STORAGE_KEY);
-		if (saved) return { ...DEFAULT_SETTINGS, ...JSON.parse(saved) };
-	} catch {
-		// ignored
+	let saved = genStore.get<Partial<GeneratorSettings>>("settings");
+	if (!saved) {
+		try {
+			const legacy = localStorage.getItem(LEGACY_SETTINGS_KEY);
+			if (legacy) saved = JSON.parse(legacy);
+		} catch {
+			// ignored
+		}
 	}
-	return { ...DEFAULT_SETTINGS };
+	return { ...DEFAULT_SETTINGS, ...(saved ?? {}) };
 }
 
 function saveSettings(s: GeneratorSettings) {
-	localStorage.setItem(STORAGE_KEY, JSON.stringify(s));
+	genStore.set("settings", s);
 }
 
 function generatedToLocation(loc: GeneratedLocation, tagId: number | null) {
@@ -81,6 +85,7 @@ export function GeneratorSidebar({ onClose }: { onClose: () => void }) {
 	const [paused, setPaused] = useState(sessionPaused);
 	const [, rerender] = useState(0);
 	const engineRef = useRef<GenerationEngine | null>(sessionEngine);
+	const selections = useSelections();
 
 	useEffect(() => { sessionMeta = meta; }, [meta]);
 	useEffect(() => { sessionRunning = running; }, [running]);
@@ -204,9 +209,9 @@ export function GeneratorSidebar({ onClose }: { onClose: () => void }) {
 	}, [onClose]);
 
 	// Build regions from current selections + meta for progress display
+	const polygonSelections = selections.filter((s) => s.props.type === "Polygon");
 	const regions: GeneratorRegion[] = [];
-	const sels = getSelections().filter((s) => s.props.type === "Polygon");
-	for (const sel of sels) {
+	for (const sel of polygonSelections) {
 		const m = meta.get(sel.key);
 		if (m) {
 			const region = selectionToRegion(sel, m);
@@ -215,55 +220,44 @@ export function GeneratorSidebar({ onClose }: { onClose: () => void }) {
 	}
 
 	return (
-		<section className="map-sidebar generator-sidebar">
-			<header className="generator-sidebar__header">
-				<button className="icon-button" onClick={handleClose}>
-					<Icon path={mdiArrowLeft} />
-				</button>
-				<h2 className="generator-sidebar__title">Map Generator</h2>
-			</header>
+		<Sidebar title="Map Generator" onBack={handleClose} className="generator-sidebar">
+			<Section title={`Regions (${polygonSelections.length})`}>
+				<RegionSelector
+					defaultTarget={settings.defaultTarget}
+					onDefaultTargetChange={(v) => updateSettings({ defaultTarget: v })}
+					meta={meta}
+					onMetaChange={setMeta}
+				/>
+			</Section>
 
-			<div className="generator-sidebar__body">
-				<div className="generator-sidebar__section">
-					<RegionSelector
-						defaultTarget={settings.defaultTarget}
-						onDefaultTargetChange={(v) => updateSettings({ defaultTarget: v })}
-						meta={meta}
-						onMetaChange={setMeta}
-					/>
-				</div>
+			<SettingsPanel settings={settings} onChange={updateSettings} />
 
-				<div className="generator-sidebar__section">
-					<SettingsPanel settings={settings} onChange={updateSettings} />
-				</div>
-
-				<div className="generator-sidebar__actions">
-					{!running ? (
-						<button
-							className="button button--primary"
-							onClick={handleStart}
-							disabled={sels.length === 0}
-						>
-							Start
+			<div className="generator-sidebar__actions">
+				{!running ? (
+					<button
+						className="button button--primary"
+						onClick={handleStart}
+						disabled={polygonSelections.length === 0}
+					>
+						Start
+					</button>
+				) : (
+					<>
+						<button className="button" onClick={handlePause}>
+							{paused ? "Resume" : "Pause"}
 						</button>
-					) : (
-						<>
-							<button className="button" onClick={handlePause}>
-								{paused ? "Resume" : "Pause"}
-							</button>
-							<button className="button" onClick={handleStop}>
-								Stop
-							</button>
-						</>
-					)}
-				</div>
-
-				{running && regions.length > 0 && (
-					<div className="generator-sidebar__section">
-						<ProgressDisplay regions={regions} />
-					</div>
+						<button className="button" onClick={handleStop}>
+							Stop
+						</button>
+					</>
 				)}
 			</div>
-		</section>
+
+			{running && regions.length > 0 && (
+				<Section title="Progress">
+					<ProgressDisplay regions={regions} />
+				</Section>
+			)}
+		</Sidebar>
 	);
 }

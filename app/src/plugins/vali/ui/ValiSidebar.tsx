@@ -3,8 +3,7 @@ import { Command, type Child } from "@tauri-apps/plugin-shell";
 import { cmd } from "@/lib/commands";
 import { createLocation } from "@/types";
 import { getCurrentMap, createTags } from "@/store/useMapStore";
-import { Icon } from "@/components/primitives/Icon";
-import { mdiArrowLeft } from "@mdi/js";
+import { Sidebar } from "@/components/primitives/Sidebar";
 import "./vali.css";
 
 type Phase = "editing" | "generating" | "done" | "error";
@@ -183,14 +182,7 @@ export function ValiSidebar({ onClose }: { onClose: () => void }) {
 	}, [onClose]);
 
 	return (
-		<section className="map-sidebar vali-sidebar">
-			<header className="vali-sidebar__header">
-				<button className="icon-button" onClick={handleClose}>
-					<Icon path={mdiArrowLeft} />
-				</button>
-				<h2 className="vali-sidebar__title">Vali</h2>
-			</header>
-
+		<Sidebar title="Vali" onBack={handleClose} className="vali-sidebar" flush>
 			<div className="vali-sidebar__body">
 				{phase === "editing" && (
 					<>
@@ -254,6 +246,6 @@ export function ValiSidebar({ onClose }: { onClose: () => void }) {
 					</div>
 				)}
 			</div>
-		</section>
+		</Sidebar>
 	);
 }

@@ -105,6 +105,66 @@ export function getEnabledPlugins(): Plugin[] {
 	return [...plugins.values()].filter((p) => enabledSet.has(p.id));
 }
 
+// --- Plugin storage (namespaced localStorage, one JSON object per plugin) ---
+
+export interface PluginStorage {
+	get<T = unknown>(key: string, fallback?: T): T;
+	set(key: string, value: unknown): void;
+	remove(key: string): void;
+	keys(): string[];
+}
+
+function pluginStoreKey(id: string): string {
+	return `mma_plugin:${id}`;
+}
+
+function readPluginStore(id: string): Record<string, unknown> {
+	try {
+		return JSON.parse(localStorage.getItem(pluginStoreKey(id)) || "{}");
+	} catch {
+		return {};
+	}
+}
+
+function writePluginStore(id: string, data: Record<string, unknown>) {
+	localStorage.setItem(pluginStoreKey(id), JSON.stringify(data));
+}
+
+export function createPluginStorage(id: string): PluginStorage {
+	return {
+		get<T = unknown>(key: string, fallback?: T): T {
+			const data = readPluginStore(id);
+			return (key in data ? data[key] : fallback) as T;
+		},
+		set(key, value) {
+			const data = readPluginStore(id);
+			data[key] = value;
+			writePluginStore(id, data);
+		},
+		remove(key) {
+			const data = readPluginStore(id);
+			delete data[key];
+			writePluginStore(id, data);
+		},
+		keys() {
+			return Object.keys(readPluginStore(id));
+		},
+	};
+}
+
+// Declarative settings (Plugin.settings) are backed by the same namespaced store,
+// falling back to each def's `default` when unset.
+export function getPluginSetting<T = unknown>(plugin: Plugin, key: string): T {
+	const data = readPluginStore(plugin.id);
+	if (key in data) return data[key] as T;
+	return plugin.settings?.find((s) => s.key === key)?.default as T;
+}
+
+export function setPluginSetting(id: string, key: string, value: unknown) {
+	createPluginStorage(id).set(key, value);
+	notifyRegistry();
+}
+
 // --- Activation lifecycle ---
 
 export function activatePlugins() {

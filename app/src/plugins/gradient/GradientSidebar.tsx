@@ -1,6 +1,5 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
-import { Icon } from "@/components/primitives/Icon";
-import { mdiArrowLeft } from "@mdi/js";
+import { Sidebar, Field, EmptyState, SegmentedControl } from "@/components/primitives/Sidebar";
 import type { ExtraFieldDef } from "@/bindings.gen";
 import { getFieldDef } from "@/lib/data/fieldDefRegistry";
 import { compareNatural, bucketize } from "@/lib/util/util";
@@ -167,114 +166,92 @@ export function GradientSidebar({ onClose }: { onClose: () => void }) {
 	}, [fieldKey, fieldOpt, map, bucketCount, preset]);
 
 	return (
-		<section className="map-sidebar gradient-sidebar">
-			<header className="gradient-sidebar__header">
-				<button className="icon-button" onClick={onClose}>
-					<Icon path={mdiArrowLeft} />
-				</button>
-				<h2 className="gradient-sidebar__title">Gradient</h2>
-			</header>
-
-			<div className="gradient-sidebar__body">
-				{fields.length === 0 ? (
-					<div className="gradient-sidebar__empty">
-						No extra fields on this map. Enrich locations first.
-					</div>
-				) : (
-					<>
-						<label className="gradient-sidebar__control">
-							<span className="gradient-sidebar__control-label">Field</span>
-							<select
-								className="nselect"
-								value={fieldKey}
-								onChange={(e) => {
-									setFieldKey(e.target.value);
-								}}
-							>
-								{fields.map((f) => (
-									<option key={f.key} value={f.key}>
-										{f.label}
-									</option>
-								))}
-							</select>
-						</label>
-
-						<label className="gradient-sidebar__control">
-							<span className="gradient-sidebar__control-label">Gradient</span>
-							<div className="gradient-sidebar__presets">
-								{PRESETS.map((p, i) => (
-									<button
-										key={p.name}
-										className={`gradient-sidebar__preset ${i === presetIdx ? "gradient-sidebar__preset--active" : ""}`}
-										onClick={() => {
-											setPresetIdx(i);
-										}}
-										title={p.name}
-									>
-										<div
-											className="gradient-sidebar__preset-bar"
-											style={{
-												background: `linear-gradient(to right, ${p.stops
-													.map(
-														(s, si) =>
-															`rgb(${s[0]},${s[1]},${s[2]}) ${(si / (p.stops.length - 1)) * 100}%`,
-													)
-													.join(", ")})`,
-											}}
-										/>
-									</button>
-								))}
-							</div>
-						</label>
-
-						{fieldOpt?.numeric && (
-							<label className="gradient-sidebar__control">
-								<span className="gradient-sidebar__control-label">Buckets</span>
-								<div className="gradient-sidebar__bucket-options">
-									{BUCKET_COUNTS.map((n) => (
-										<button
-											key={n}
-											className={`gradient-sidebar__bucket-btn ${n === bucketCount ? "gradient-sidebar__bucket-btn--active" : ""}`}
-											onClick={() => {
-												setBucketCount(n);
-											}}
-										>
-											{n}
-										</button>
-									))}
-								</div>
-							</label>
-						)}
-
-						<div className="gradient-sidebar__preview">
-							<span className="gradient-sidebar__control-label">Preview</span>
-							<div
-								className="gradient-sidebar__preview-bar"
-								style={{
-									background: `linear-gradient(to right, ${preset.stops
-										.map(
-											(s, i) =>
-												`rgb(${s[0]},${s[1]},${s[2]}) ${(i / (preset.stops.length - 1)) * 100}%`,
-										)
-										.join(", ")})`,
-								}}
-							/>
-							<div className="gradient-sidebar__preview-labels">
-								<span>Low</span>
-								<span>High</span>
-							</div>
-						</div>
-
-						<button
-							className="button button--primary gradient-sidebar__apply"
-							onClick={applyGradient}
-							disabled={applying || !fieldKey}
+		<Sidebar title="Gradient" onBack={onClose} className="gradient-sidebar">
+			{fields.length === 0 ? (
+				<EmptyState>No extra fields on this map. Enrich locations first.</EmptyState>
+			) : (
+				<>
+					<Field label="Field">
+						<select
+							className="nselect"
+							value={fieldKey}
+							onChange={(e) => {
+								setFieldKey(e.target.value);
+							}}
 						>
-							Apply
-						</button>
-					</>
-				)}
-			</div>
-		</section>
+							{fields.map((f) => (
+								<option key={f.key} value={f.key}>
+									{f.label}
+								</option>
+							))}
+						</select>
+					</Field>
+
+					<Field label="Gradient">
+						<div className="gradient-sidebar__presets">
+							{PRESETS.map((p, i) => (
+								<button
+									key={p.name}
+									className={`gradient-sidebar__preset ${i === presetIdx ? "gradient-sidebar__preset--active" : ""}`}
+									onClick={() => {
+										setPresetIdx(i);
+									}}
+									title={p.name}
+								>
+									<div
+										className="gradient-sidebar__preset-bar"
+										style={{
+											background: `linear-gradient(to right, ${p.stops
+												.map(
+													(s, si) =>
+														`rgb(${s[0]},${s[1]},${s[2]}) ${(si / (p.stops.length - 1)) * 100}%`,
+												)
+												.join(", ")})`,
+										}}
+									/>
+								</button>
+							))}
+						</div>
+					</Field>
+
+					{fieldOpt?.numeric && (
+						<Field label="Buckets">
+							<SegmentedControl
+								value={bucketCount}
+								onChange={setBucketCount}
+								options={BUCKET_COUNTS.map((n) => ({ value: n, label: String(n) }))}
+							/>
+						</Field>
+					)}
+
+					<div className="gradient-sidebar__preview">
+						<span className="gradient-sidebar__control-label">Preview</span>
+						<div
+							className="gradient-sidebar__preview-bar"
+							style={{
+								background: `linear-gradient(to right, ${preset.stops
+									.map(
+										(s, i) =>
+											`rgb(${s[0]},${s[1]},${s[2]}) ${(i / (preset.stops.length - 1)) * 100}%`,
+									)
+									.join(", ")})`,
+							}}
+						/>
+						<div className="gradient-sidebar__preview-labels">
+							<span>Low</span>
+							<span>High</span>
+						</div>
+					</div>
+
+					<button
+						className="button button--primary gradient-sidebar__apply"
+						onClick={applyGradient}
+						disabled={applying || !fieldKey}
+					>
+						Apply
+					</button>
+				</>
+			)}
+		</Sidebar>
 	);
 }

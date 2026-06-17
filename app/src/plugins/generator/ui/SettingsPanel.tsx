@@ -1,26 +1,6 @@
-import { useState } from "react";
 import type { GeneratorSettings } from "../engine/types";
 import { DatePicker } from "@/components/primitives/DatePicker";
-
-function Section({
-	title,
-	children,
-	defaultOpen = true,
-}: {
-	title: string;
-	children: React.ReactNode;
-	defaultOpen?: boolean;
-}) {
-	const [open, setOpen] = useState(defaultOpen);
-	return (
-		<div className="generator-settings__section">
-			<h4 className="generator-settings__section-title" onClick={() => setOpen(!open)}>
-				{open ? "▾" : "▸"} {title}
-			</h4>
-			{open && <div className="generator-settings__section-body">{children}</div>}
-		</div>
-	);
-}
+import { Section, SegmentedControl } from "@/components/primitives/Sidebar";
 
 function Check({
 	label,
@@ -139,17 +119,17 @@ export function SettingsPanel({
 							onChange={(v) => set("findGeneration", v)}
 						/>
 						{settings.findGeneration && (
-							<RadioGroup
-								name="gen"
-								indent
-								value={String(settings.generation)}
-								onChange={(v) => set("generation", Number(v) as 1 | 23 | 4)}
-								options={[
-									{ value: "1", label: "Gen 1" },
-									{ value: "23", label: "Gen 2/3" },
-									{ value: "4", label: "Gen 4" },
-								]}
-							/>
+							<div className="generator-settings__indent">
+								<SegmentedControl
+									value={String(settings.generation)}
+									onChange={(v) => set("generation", Number(v) as 1 | 23 | 4)}
+									options={[
+										{ value: "1", label: "Gen 1" },
+										{ value: "23", label: "Gen 2/3" },
+										{ value: "4", label: "Gen 4" },
+									]}
+								/>
+							</div>
 						)}
 						<Check
 							label="Find trekker coverage"

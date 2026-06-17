@@ -414,17 +414,19 @@ function SelectionRow({
 										>
 											Review selection
 										</DropdownMenu.Item>
-										<DropdownMenu.Item
-											className="context-menu__item"
-											disabled={(selection.count ?? 0) === 0}
-											onSelect={() => {
-												const names = new Set(Object.values(map.meta.tags).map((t) => t.name));
-												setTagName(uniqueTagName(selectionDisplayName(map, selection), names));
-												setSavingTag(true);
-											}}
-										>
-											Save as tag
-										</DropdownMenu.Item>
+										{selection.props.type !== "Tag" && (
+											<DropdownMenu.Item
+												className="context-menu__item"
+												disabled={(selection.count ?? 0) === 0}
+												onSelect={() => {
+													const names = new Set(Object.values(map.meta.tags).map((t) => t.name));
+													setTagName(uniqueTagName(selectionDisplayName(map, selection), names));
+													setSavingTag(true);
+												}}
+											>
+												Save as tag
+											</DropdownMenu.Item>
+										)}
 										{pruneDistance(selection) != null && (
 											<DropdownMenu.Item
 												className="context-menu__item"

@@ -136,7 +136,7 @@ describe("Paste import edge cases", () => {
 
 	it("empty string paste does not crash", async () => {
 		await withApi(async (api) => {
-			try { await api.importPaste(""); } catch (_e: any) { /* expected */ }
+			try { await api._test.importPaste(""); } catch (_e: any) { /* expected */ }
 		});
 		const count = await getLocCount();
 		expect(count).toBe(0);
@@ -144,7 +144,7 @@ describe("Paste import edge cases", () => {
 
 	it("paste of random text does not add locations", async () => {
 		await withApi(async (api) => {
-			try { await api.importPaste("hello world this is not coordinates"); } catch (_e: any) { /* expected */ }
+			try { await api._test.importPaste("hello world this is not coordinates"); } catch (_e: any) { /* expected */ }
 		});
 		const count = await getLocCount();
 		expect(count).toBe(0);
@@ -152,7 +152,7 @@ describe("Paste import edge cases", () => {
 
 	it("paste with valid single coordinate works", async () => {
 		await withApi(async (api) => {
-			await api.importPaste("51.5074, -0.1278");
+			await api._test.importPaste("51.5074, -0.1278");
 		});
 		const count = await getLocCount();
 		expect(count).toBe(1);
@@ -166,7 +166,7 @@ describe("Paste import edge cases", () => {
 	it("paste with mixed valid and invalid lines imports valid ones", async () => {
 		const countBefore = await getLocCount();
 		await withApi(async (api) => {
-			try { await api.importPaste("40.7128, -74.0060\nnot a coord\n35.6762, 139.6503"); } catch (_e: any) { /* partial import may throw */ }
+			try { await api._test.importPaste("40.7128, -74.0060\nnot a coord\n35.6762, 139.6503"); } catch (_e: any) { /* partial import may throw */ }
 		});
 		const countAfter = await getLocCount();
 		// Should have added at least the valid coordinates

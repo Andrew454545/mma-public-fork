@@ -83,12 +83,6 @@ const mma = {
 	// --- Store ---
 	...store,
 
-	openMap: async (id: string) => {
-		goToMap(id);
-		while (!store.getCurrentMap()) await new Promise((r) => setTimeout(r, 16));
-	},
-	closeMap: () => { goToList(); return store.closeMap(); },
-
 	// --- Review sessions ---
 	...review,
 
@@ -151,21 +145,31 @@ const mma = {
 	validateLocations,
 	needsEnrichment: (loc: Pick<Location, "extra">) => needsEnrichment(loc as Location),
 
-	// --- Import (test convenience) ---
-	importPaste: async (text: string) => {
-		await commands.storeImportPastePreview(text);
-		const r = await commands.storeImportFile([], null);
-		await store.mutate(Promise.resolve(r));
-		return [r];
-	},
-	importFile: async (droppedFields: string[], tagName?: string) => {
-		const r = await commands.storeImportFile(droppedFields, tagName ?? null);
-		await store.mutate(Promise.resolve(r));
-		return r;
-	},
-
 	// --- Util ---
 	mmaBufUrl,
+
+	// --- Test-only convenience ---
+	_test: {
+		openMap: async (id: string) => {
+			goToMap(id);
+			while (!store.getCurrentMap()) await new Promise((r) => setTimeout(r, 16));
+		},
+		closeMap: () => {
+			goToList();
+			return store.closeMap();
+		},
+		importPaste: async (text: string) => {
+			await commands.storeImportPastePreview(text);
+			const r = await commands.storeImportFile([], null);
+			await store.mutate(Promise.resolve(r));
+			return [r];
+		},
+		importFile: async (droppedFields: string[], tagName?: string) => {
+			const r = await commands.storeImportFile(droppedFields, tagName ?? null);
+			await store.mutate(Promise.resolve(r));
+			return r;
+		},
+	},
 };
 
 export type MMA = typeof mma;

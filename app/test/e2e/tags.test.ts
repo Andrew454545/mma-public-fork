@@ -778,7 +778,7 @@ describe("Tag import dedup", () => {
 			],
 		});
 		const result = await withApi(async (api, existId, jsonStr) => {
-			await api.importPaste(jsonStr);
+			await api._test.importPaste(jsonStr);
 			const locs = await api.fetchAllLocations();
 			const withExisting = locs.filter((l: any) => l.tags.includes(existId));
 			const tags = api.getCurrentMap()!.meta.tags;
@@ -796,7 +796,7 @@ describe("Tag import dedup", () => {
 			],
 		});
 		const result = await withApi(async (api, hiddenId, jsonStr) => {
-			await api.importPaste(jsonStr);
+			await api._test.importPaste(jsonStr);
 			const locs = await api.fetchAllLocations();
 			const withHidden = locs.filter((l: any) => l.tags.includes(hiddenId));
 			return { withHidden: withHidden.length, id: hiddenId };

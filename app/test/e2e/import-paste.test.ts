@@ -28,7 +28,7 @@ describe("Import from paste — JSON", () => {
 		]);
 
 		const result = await withApi(async (api, text) => {
-			return api.importPaste(text);
+			return api._test.importPaste(text);
 		}, json);
 
 		expect(result[0].importedCount).toBe(2);
@@ -64,7 +64,7 @@ describe("Import from paste — CSV-like", () => {
 		const csv = "lat,lng\n51.5074,-0.1278\n35.6762,139.6503";
 
 		const result = await withApi(async (api, text) => {
-			return api.importPaste(text);
+			return api._test.importPaste(text);
 		}, csv);
 
 		expect(result[0].importedCount).toBeGreaterThanOrEqual(2);
@@ -92,7 +92,7 @@ describe("Import from paste — single coordinate", () => {
 
 	it("imports a single lat,lng pair", async () => {
 		const result = await withApi(async (api) => {
-			return api.importPaste("55.7558, 37.6173");
+			return api._test.importPaste("55.7558, 37.6173");
 		});
 
 		expect(result[0].importedCount).toBe(1);
@@ -121,7 +121,7 @@ describe("Import from paste — undo", () => {
 			{ lat: 30, lng: 30 },
 		]);
 
-		await withApi(async (api, text) => api.importPaste(text), json);
+		await withApi(async (api, text) => api._test.importPaste(text), json);
 		const before = await getLocCount();
 		expect(before).toBe(3);
 

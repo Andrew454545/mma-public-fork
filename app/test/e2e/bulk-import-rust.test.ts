@@ -107,7 +107,7 @@ describe("Rust bulk import — confirm and verify", () => {
 		const result = await withApi(async (api) => {
 			const maps = await api.cmd.storeListMaps();
 			const denmark = maps.find((m: any) => m.name === "Denmark Antennae")!;
-			await api.openMap(denmark.id);
+			await api._test.openMap(denmark.id);
 			const locCount = await api.cmd.storeLocationCount();
 			const map = api.getCurrentMap()!;
 			const locs = await api.fetchAllLocations();
@@ -162,8 +162,8 @@ describe("Rust bulk import — confirm and verify", () => {
 			const beforeFirst = beforeLocs[0];
 
 			await api.flushSave();
-			await api.closeMap();
-			await api.openMap(id);
+			await api._test.closeMap();
+			await api._test.openMap(id);
 
 			const afterCount = await api.cmd.storeLocationCount();
 			const afterLocs = await api.fetchAllLocations();
@@ -231,7 +231,7 @@ describe("Benchmarks — selection at scale", () => {
 		await waitForReady();
 		mapId = await withApi(async (api) => {
 			const map = await api.cmd.storeCreateMap("Bench Selections 100K", null);
-			await api.openMap(map.meta.id);
+			await api._test.openMap(map.meta.id);
 			const resolved = await api.createTags(["BenchTag"]);
 			const tagId = resolved[0].id;
 			const locs = [];
@@ -352,7 +352,7 @@ describe("Benchmarks — undo at scale", () => {
 		await waitForReady();
 		mapId = await withApi(async (api) => {
 			const map = await api.cmd.storeCreateMap("Bench Undo 100K", null);
-			await api.openMap(map.meta.id);
+			await api._test.openMap(map.meta.id);
 			const locs = [];
 			for (let i = 0; i < 100000; i++) {
 				locs.push({

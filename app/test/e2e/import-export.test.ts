@@ -293,7 +293,7 @@ describe("JSON import edge cases", () => {
 			});
 			const path = await api.cmd.writeTempFile("test_import.json", json);
 			const preview = await api.cmd.storeImportPreview(path);
-			await api.importFile([]);
+			await api._test.importFile([]);
 			const locs = await api.fetchAllLocations();
 			const imported = locs.find((l: any) => l.extra?.altitude === 500);
 			return {

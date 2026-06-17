@@ -54,19 +54,19 @@ export async function clearInput(selector: string) {
 export async function createAndOpenMap(name: string): Promise<string> {
 	return withApi(async (api, n) => {
 		const map = await api.cmd.storeCreateMap(n, null);
-		await api.openMap(map.meta.id);
+		await api._test.openMap(map.meta.id);
 		return map.meta.id;
 	}, name);
 }
 
 export async function openMap(id: string) {
-	await withApi(async (api, mapId) => api.openMap(mapId), id);
+	await withApi(async (api, mapId) => api._test.openMap(mapId), id);
 }
 
 export async function closeMap() {
 	const err = await withApi(async (api) => {
 		try {
-			await api.closeMap();
+			await api._test.closeMap();
 			return null;
 		} catch (e) {
 			return (e && (e as Error).message) || String(e);

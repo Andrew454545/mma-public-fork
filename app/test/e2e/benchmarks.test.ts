@@ -267,7 +267,7 @@ describe("Benchmarks - map open", () => {
 		for (let iter = 0; iter < ITERATIONS; iter++) {
 			const ms = await withApi(async (api, id) => {
 				const t0 = performance.now();
-				await api.openMap(id);
+				await api._test.openMap(id);
 				return performance.now() - t0;
 			}, mapId);
 			times.push(ms);
@@ -301,7 +301,7 @@ describe("Benchmarks - map open", () => {
 		for (let iter = 0; iter < ITERATIONS; iter++) {
 			const ms = await withApi(async (api, id) => {
 				const t0 = performance.now();
-				await api.openMap(id);
+				await api._test.openMap(id);
 				return performance.now() - t0;
 			}, mapId);
 			times.push(ms);
@@ -335,7 +335,7 @@ describe("Benchmarks - map open", () => {
 		for (let iter = 0; iter < ITERATIONS; iter++) {
 			const ms = await withApi(async (api, id) => {
 				const t0 = performance.now();
-				await api.openMap(id);
+				await api._test.openMap(id);
 				return performance.now() - t0;
 			}, mapId);
 			times.push(ms);

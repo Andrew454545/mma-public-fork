@@ -60,7 +60,7 @@ function seedLocs(n: number, tagId?: number, panoFrac = 0, flagsFrac = 0): Promi
 				}));
 			}
 			const json = JSON.stringify({ customCoordinates: locs });
-			await api.importPaste(json);
+			await api._test.importPaste(json);
 			return "ok";
 		},
 		n,
@@ -130,7 +130,7 @@ function timeAddLocs(n: number): Promise<number> {
 function timeOpenMap(id: string): Promise<number> {
 	return withApi(async (api, mapId: string) => {
 		const t0 = performance.now();
-		await api.openMap(mapId);
+		await api._test.openMap(mapId);
 		return performance.now() - t0;
 	}, id);
 }

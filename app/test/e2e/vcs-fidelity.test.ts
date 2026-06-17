@@ -152,7 +152,7 @@ describe("VCS data fidelity — exact restoration through checkout", () => {
 	it("checkout survives a save/load reopen with data intact", async () => {
 		await flushAndWait();
 		await closeMap();
-		await withApi(async (api, id) => api.openMap(id), mapId);
+		await withApi(async (api, id) => api._test.openMap(id), mapId);
 
 		const byId = Object.fromEntries((await getAllLocs()).map((l) => [l.id, l]));
 		expect(byId[ids[0]].heading).toBe(270);
@@ -244,7 +244,7 @@ describe("VCS revert-commit chain integrity", () => {
 		// Tip materializes to the c1 state (2 locs) -- proven by reopening.
 		await flushAndWait();
 		await closeMap();
-		await withApi(async (api, id) => api.openMap(id), mapId);
+		await withApi(async (api, id) => api._test.openMap(id), mapId);
 		expect(await getLocCount()).toBe(2);
 
 		// And we can still keep working + committing on top of the revert.

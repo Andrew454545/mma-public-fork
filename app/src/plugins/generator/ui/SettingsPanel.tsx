@@ -399,6 +399,14 @@ export function SettingsPanel({
 					onChange={(v) => set("checkAllDates", v)}
 				/>
 			</Section>
+			<Section title="Visualization" defaultOpen={false}>
+				<Check
+					label="Show search coverage"
+					checked={settings.showSearchOverlay}
+					onChange={(v) => set("showSearchOverlay", v)}
+					title="Draw where the generator has searched, as a growing overlay. Clears when you stop."
+				/>
+			</Section>
 		</div>
 	);
 }

@@ -11,6 +11,7 @@ import { getSelections, getCurrentMap, createTags } from "@/store/useMapStore";
 import type { Selection } from "@/bindings.gen";
 import { Icon } from "@/components/primitives/Icon";
 import { mdiArrowLeft } from "@mdi/js";
+import { searchCoverage } from "../searchCoverage";
 import "./generator.css";
 
 const STORAGE_KEY = "mma_generator_settings";
@@ -109,6 +110,18 @@ export function GeneratorSidebar({ onClose }: { onClose: () => void }) {
 			},
 		});
 	}, [running]);
+
+	// Drive the search-coverage overlay's visibility live from the toggle.
+	useEffect(() => {
+		searchCoverage.setEnabled(settings.showSearchOverlay);
+	}, [settings.showSearchOverlay]);
+
+	// Clear the overlay when leaving the generator, unless it's still running in the background.
+	useEffect(() => {
+		return () => {
+			if (!sessionRunning) searchCoverage.endSession();
+		};
+	}, []);
 
 	const updateSettings = useCallback((patch: Partial<GeneratorSettings>) => {
 		setSettings((prev) => {

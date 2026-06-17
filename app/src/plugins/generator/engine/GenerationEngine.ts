@@ -7,6 +7,7 @@ import type {
 import { randomPointInBounds, getBoundingBox, pointInGeoJsonGeometry } from "./geo";
 import { passesInitialFilters, passesDateFilters, isPanoGood, computeHeading } from "./filters";
 import { distMeters } from "@/lib/geo/geo";
+import { searchCoverage } from "../searchCoverage";
 
 function chunk<T>(arr: T[], n: number): T[][] {
 	const result: T[][] = [];
@@ -48,6 +49,7 @@ export class GenerationEngine {
 
 	async start(): Promise<void> {
 		this.running = true;
+		this.beginSearchOverlay();
 		try {
 			if (this.settings.oneCountryAtATime) {
 				for (const region of this.regions) {
@@ -91,6 +93,29 @@ export class GenerationEngine {
 		}
 		this.pendingBatch.length = 0;
 		this.resume();
+		searchCoverage.endSession();
+	}
+
+	private beginSearchOverlay(): void {
+		if (this.regions.length === 0) return;
+		let west = Infinity,
+			south = Infinity,
+			east = -Infinity,
+			north = -Infinity;
+		for (const region of this.regions) {
+			const [w, s, e, n] = getBoundingBox(region.feature);
+			if (w < west) west = w;
+			if (s < south) south = s;
+			if (e > east) east = e;
+			if (n > north) north = n;
+		}
+		const r = this.settings.radius;
+		const midLat = (south + north) / 2;
+		const mPerDegLng = 111320 * Math.cos((midLat * Math.PI) / 180) || 1;
+		searchCoverage.beginSession(
+			[west - r / mPerDegLng, south - r / 111320, east + r / mPerDegLng, north + r / 111320],
+			r,
+		);
 	}
 
 	isRunning(): boolean {
@@ -143,6 +168,7 @@ export class GenerationEngine {
 	}
 
 	private getLoc(coord: { lat: number; lng: number }, region: GeneratorRegion): Promise<void> {
+		searchCoverage.addProbe(coord.lng, coord.lat);
 		const s = this.settings;
 		const source = s.rejectUnofficial
 			? this.google.maps.StreetViewSource.GOOGLE

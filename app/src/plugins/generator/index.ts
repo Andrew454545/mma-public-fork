@@ -1,5 +1,6 @@
 const { registerPlugin } = window.MMA;
 import { GeneratorSidebar } from "./ui/GeneratorSidebar";
+import { mountCoverageOverlay } from "./coverageOverlay";
 import { mdiMapMarkerPlus } from "@mdi/js";
 
 registerPlugin({
@@ -7,6 +8,8 @@ registerPlugin({
 	name: "Map generator",
 	description: "Generate locations from Street View coverage",
 	icon: mdiMapMarkerPlus,
-	activate() {},
+	activate() {
+		return mountCoverageOverlay();
+	},
 	sidebar: GeneratorSidebar,
 });

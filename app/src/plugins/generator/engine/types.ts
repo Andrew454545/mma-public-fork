@@ -33,6 +33,7 @@ export interface GeneratorSettings {
 	findRegions: boolean;
 	regionRadius: number;
 	randomInTimeline: boolean;
+	showSearchOverlay: boolean;
 }
 
 const now = new Date();
@@ -73,6 +74,7 @@ export const DEFAULT_SETTINGS: GeneratorSettings = {
 	findRegions: false,
 	regionRadius: 100,
 	randomInTimeline: false,
+	showSearchOverlay: false,
 };
 
 export interface GeneratorRegionMeta {

@@ -1,3 +1,4 @@
+/// <reference path="../../types/measuretool.d.ts" />
 import { useSyncExternalStore, useEffect, useState, useCallback } from "react";
 import MeasureToolClass from "measuretool-googlemaps-v3";
 import type { Location } from "@/types";

@@ -164,6 +164,7 @@ const mma = {
 			goToList();
 			return store.closeMap();
 		},
+		deleteMap: (id: string) => store.deleteMap(id),
 		importPaste: async (text: string) => {
 			await commands.storeImportPastePreview(text);
 			const r = await commands.storeImportFile([], null);

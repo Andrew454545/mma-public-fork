@@ -366,8 +366,9 @@ export async function openMap(id: string) {
 	if (currentMap) emitEvent("map:open", currentMap);
 }
 
-export async function closeMap() {
-	await flushSave();
+// Tear down all in-memory state for the open map. Shared by closeMap (clean
+// close) and discardOpenMap (the map's data is gone, so we must NOT flush).
+function resetMapState() {
 	emitEvent("map:close");
 	currentMapId = null;
 	currentMap = null;
@@ -381,11 +382,23 @@ export async function closeMap() {
 	knownFieldKeys = new Set();
 	resetForMapChange();
 
-	await cmd.storeCloseMap();
 	renderDeltaBus.emit({ added: [], updated: [], removed: [], colorPatches: [], fullReset: true });
 	undoRedoState = { canUndo: false, canRedo: false };
 	tagCounts = {};
 	bump();
+}
+
+export async function closeMap() {
+	await flushSave();
+	resetMapState();
+	await cmd.storeCloseMap();
+}
+
+/* Drop the open map without persisting anything */
+export function discardOpenMap() {
+	if (autosaveTimer) clearTimeout(autosaveTimer);
+	autosaveTimer = null;
+	resetMapState();
 }
 
 /** Resync after another window mutated this map (store-external-mutation event):
@@ -542,10 +555,10 @@ export async function createMap(name: string, folder: string | null = null) {
 }
 
 export async function deleteMap(id: string) {
-	// TODO: if this map is open in another window, that window won't know it was deleted
 	await cmd.storeDeleteMap(id);
-	if (currentMapId === id) await closeMap();
 	await invalidateMapList();
+	// Tell every window (including this one) showing this map to close it.
+	tauriEmit("map-deleted", id);
 }
 
 export async function renameFolder(from: string, to: string) {

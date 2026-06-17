@@ -103,6 +103,27 @@ describe("Map management", () => {
 		expect(afterCount).toBe(beforeCount - 1);
 	});
 
+	it("deleting the currently-open map closes the editor and removes it", async () => {
+		const id = await createAndOpenMap("Delete While Open");
+		await addLocs([createLocation({ lat: 1, lng: 1 })]);
+		await flushAndWait();
+
+		// Real delete path (store.deleteMap broadcasts map-deleted), unlike the raw
+		// storeDeleteMap helper. The open window must drop the map in response.
+		await withApi(async (api, mapId) => api._test.deleteMap(mapId), id);
+
+		await browser.waitUntil(async () => withApi(async (api) => api.getCurrentMap() === null), {
+			timeout: 5000,
+			timeoutMsg: "open map was not closed after delete",
+		});
+
+		const exists = await withApi(
+			async (api, mapId) => (await api.cmd.storeListMaps()).some((m) => m.id === mapId),
+			id,
+		);
+		expect(exists).toBe(false);
+	});
+
 	it("open map with locations shows correct count", async () => {
 		await openMap(createdMapIds[0]);
 

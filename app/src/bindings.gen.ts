@@ -77,6 +77,12 @@ export const commands = {
 	/**
 	 *  Delete a map and all associated data: SQLite rows (maps, edit_history,
 	 *  commits) and Arrow base/delta/commit files on disk.
+	 * 
+	 *  Evicts any live in-memory state for the map, so a window still showing it
+	 *  (or a racing autosave) can't flush its overlay back to disk after the files
+	 *  are gone. The manager lock is held across the whole delete so a concurrent
+	 *  `store_open_map` of the same map can't reload it from disk mid-deletion and
+	 *  resurrect it.
 	 */
 	storeDeleteMap: (id: string) => typedError<null, string>(__TAURI_INVOKE("store_delete_map", { id })),
 	/**

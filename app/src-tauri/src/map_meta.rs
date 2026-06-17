@@ -442,9 +442,19 @@ pub fn store_create_map(
 
 /// Delete a map and all associated data: SQLite rows (maps, edit_history,
 /// commits) and Arrow base/delta/commit files on disk.
+///
+/// Evicts any live in-memory state for the map, so a window still showing it
+/// (or a racing autosave) can't flush its overlay back to disk after the files
+/// are gone. The manager lock is held across the whole delete so a concurrent
+/// `store_open_map` of the same map can't reload it from disk mid-deletion and
+/// resurrect it.
 #[tauri::command]
 #[specta::specta]
-pub fn store_delete_map(id: String) -> AppResult<()> {
+pub fn store_delete_map(state: tauri::State<'_, StoreState>, id: String) -> AppResult<()> {
+    let mut mgr = state.lock()?;
+    mgr.stores.remove(&id);
+    mgr.window_map.retain(|_, v| v != &id);
+
     let conn = storage::open_db()?;
     conn.execute("DELETE FROM maps WHERE id = ?1", params![id])?;
     conn.execute("DELETE FROM edit_history WHERE map_id = ?1", params![id])?;

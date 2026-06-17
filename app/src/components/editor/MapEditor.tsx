@@ -11,6 +11,7 @@ import {
 	getSelectedLocationIds,
 	refreshFromExternalMutation,
 	removeLocations,
+	discardOpenMap,
 	createTags,
 	beginImportPaste,
 	beginImportFromPath,
@@ -226,6 +227,20 @@ export function MapEditor() {
 		};
 	}, []);
 
+	// This map was deleted (here or in another window): drop it without flushing
+	// and back out to the list, which self-destructs the editor window on Tauri.
+	useEffect(() => {
+		const unlisten = listen<string>("map-deleted", (e) => {
+			if (e.payload === getCurrentMapId()) {
+				discardOpenMap();
+				goToList();
+			}
+		});
+		return () => {
+			unlisten.then((f) => f());
+		};
+	}, []);
+
 	const appSettings = useSettings();
 	usePasteHandler();
 	const fileDragging = useFileDrop();
@@ -332,7 +347,7 @@ export function MapEditor() {
 						</button>
 					</DialogTrigger>
 					<DialogContent title="Map settings" className="edit-map-modal">
-						<MapRenameForm currentName={map.meta.name} />
+						<MapRenameForm mapId={map.meta.id} currentName={map.meta.name} />
 					</DialogContent>
 				</Dialog>
 			</header>

@@ -995,6 +995,11 @@ summary.button {
 	gap: 0.5rem;
 	display: flex;
 }
+.edit-map-modal__delete {
+	margin-top: 1rem;
+	padding-top: 1rem;
+	border-top: 1px solid rgba(0, 0, 0, 0.1);
+}
 .edit-map-modal__collaborator-list {
 	margin: 0;
 	padding: 0;
@@ -2437,6 +2442,11 @@ summary.button {
 	justify-content: flex-end;
 	gap: 0.5rem;
 	display: flex;
+}
+.edit-map-modal__delete {
+	margin-top: 1rem;
+	padding-top: 1rem;
+	border-top: 1px solid rgba(0, 0, 0, 0.1);
 }
 .edit-map-modal__collaborator-list {
 	margin: 0;

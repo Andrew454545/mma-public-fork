@@ -50,7 +50,7 @@ import { beginReview } from "@/lib/review/review";
 import { Dialog, DialogContent } from "@/components/primitives/Dialog";
 import { ToolBlock } from "@/components/primitives/ToolBlock";
 import { Icon } from "@/components/primitives/Icon";
-import { mdiClose, mdiChevronLeft, mdiChevronRight, mdiDotsVertical } from "@mdi/js";
+import { mdiClose, mdiChevronLeft, mdiChevronRight, mdiDotsVertical, mdiGhost, mdiGhostOutline } from "@mdi/js";
 import { PluginToolbar } from "@/plugins/PluginPanels";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import { fmt } from "@/lib/util/format";
@@ -479,6 +479,16 @@ function SelectionRow({
 							</DropdownMenu.Content>
 						</DropdownMenu.Portal>
 					</DropdownMenu.Root>
+					{isTopLevel && (
+						<button
+							className="icon-button"
+							type="button"
+							aria-label={ghosted ? "Un-ghost selection" : "Ghost selection"}
+							onClick={() => toggleGhostSelection(selection.key)}
+						>
+							<Icon path={ghosted ? mdiGhost : mdiGhostOutline} />
+						</button>
+					)}
 					{onRemove && (
 						<button className="icon-button" type="button" onClick={onRemove} aria-label="Deselect">
 							<Icon path={mdiClose} />

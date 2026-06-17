@@ -3036,17 +3036,6 @@ summary.button {
 	justify-content: flex-end;
 	gap: 0.5rem;
 }
-.bulk-operation__scope {
-	display: flex;
-	gap: 1rem;
-	font-size: 0.875rem;
-}
-.bulk-operation__scope-option {
-	display: flex;
-	align-items: center;
-	gap: 0.375rem;
-	cursor: pointer;
-}
 .bulk-operation__field-list {
 	display: grid;
 	gap: 0.25rem;

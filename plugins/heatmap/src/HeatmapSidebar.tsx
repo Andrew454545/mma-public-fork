@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import {
 	getSettings,
 	updateSettings,
-	setScope,
+	scopeHandle,
 	getLocationCount,
 	setOnSettingsChange,
 	DEFAULT_SETTINGS,
@@ -90,7 +90,7 @@ function Icon({ path, size = 20 }: { path: string; size?: number }) {
 export function HeatmapSidebar({ onClose }: { onClose: () => void }) {
 	const [, rerender] = useState(0);
 	const s = getSettings();
-	const scopeCtl = MMA.useScope();
+	const scopeCtl = scopeHandle.use();
 
 	useEffect(() => {
 		injectCSS();
@@ -100,11 +100,6 @@ export function HeatmapSidebar({ onClose }: { onClose: () => void }) {
 			removeCSS();
 		};
 	}, []);
-
-	// Mirror the picker's choice into the renderer (module state drives rebuild()).
-	useEffect(() => {
-		setScope(scopeCtl.scope);
-	}, [scopeCtl.scope]);
 
 	const setSlider = useCallback(
 		(key: keyof HeatmapSettings, value: number) => updateSettings({ [key]: value }),

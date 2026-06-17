@@ -972,23 +972,17 @@ function sampleColorRange(stops, n = 6) {
 var overlay = null;
 var locStore = null;
 var settings = loadSettings();
-var scope = { kind: "selected" };
 var onSettingsChange = null;
+var scopeHandle = MMA.createScope();
 function getSettings() {
   return settings;
-}
-function setScope(next) {
-  if (scope.kind === next.kind) return;
-  scope = next;
-  rebuild();
-  onSettingsChange?.();
 }
 function getLocationCount() {
   return scopedLocations().length;
 }
 function scopedLocations() {
   if (!locStore) return [];
-  return locStore.get(scope).map((l) => ({ lat: l.lat, lng: l.lng }));
+  return locStore.get(scopeHandle.get()).map((l) => ({ lat: l.lat, lng: l.lng }));
 }
 function setOnSettingsChange(cb) {
   onSettingsChange = cb;
@@ -1024,20 +1018,21 @@ async function init() {
   const map = MMA.getGoogleMap();
   if (!map) throw new Error("No map instance");
   locStore = await MMA.createLocationStore();
+  scopeHandle.set(MMA.getSelectedLocationIds().size > 0 ? { kind: "selected" } : { kind: "all" });
   overlay = new import_google_maps.GoogleMapsOverlay({ layers: [] });
   overlay.setMap(map);
   rebuild();
-  const unsubStore = locStore.onChange(() => {
+  const onChange = () => {
     rebuild();
     onSettingsChange?.();
-  });
-  const unsubSel = MMA.on("selection:change", () => {
-    rebuild();
-    onSettingsChange?.();
-  });
+  };
+  const unsubStore = locStore.onChange(onChange);
+  const unsubSel = MMA.on("selection:change", onChange);
+  const unsubScope = scopeHandle.subscribe(onChange);
   return () => {
     unsubStore();
     unsubSel();
+    unsubScope();
     locStore?.destroy();
     locStore = null;
     if (overlay) {
@@ -1046,7 +1041,6 @@ async function init() {
       overlay = null;
     }
     settings = loadSettings();
-    scope = { kind: "selected" };
     onSettingsChange = null;
   };
 }
@@ -1124,7 +1118,7 @@ function Icon({ path, size = 20 }) {
 function HeatmapSidebar({ onClose }) {
   const [, rerender] = (0, import_react.useState)(0);
   const s = getSettings();
-  const scopeCtl = MMA.useScope();
+  const scopeCtl = scopeHandle.use();
   (0, import_react.useEffect)(() => {
     injectCSS();
     setOnSettingsChange(() => rerender((n) => n + 1));
@@ -1133,9 +1127,6 @@ function HeatmapSidebar({ onClose }) {
       removeCSS();
     };
   }, []);
-  (0, import_react.useEffect)(() => {
-    setScope(scopeCtl.scope);
-  }, [scopeCtl.scope]);
   const setSlider = (0, import_react.useCallback)(
     (key, value) => updateSettings({ [key]: value }),
     []

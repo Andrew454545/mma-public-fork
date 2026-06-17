@@ -472,19 +472,66 @@ export function applyScope<T extends { id: number }>(scope: Scope, pool: T[]): T
 	return pool.filter((item) => ids.has(item.id));
 }
 
-/** Reactive scope state + live counts. Defaults to the current selection when one
- *  exists at mount, else all locations. */
+function defaultScope(): Scope {
+	return getSelectedLocationIds().size > 0 ? { kind: "selected" } : { kind: "all" };
+}
+
+/** Reactive scope state + live counts, owned by the calling React component. Defaults to
+ *  the current selection when one exists at mount, else all locations. Use this for plugins
+ *  whose scope lives entirely in a React sidebar; reach for `createScope` when an imperative
+ *  renderer (e.g. a deck.gl overlay) outside React also needs to read the scope. */
 export function useScope(initial?: Scope): ScopeController {
 	const selectedIds = useSelectedLocationIds();
 	const map = useCurrentMap();
-	const [scope, setScope] = useState<Scope>(
-		() => initial ?? (getSelectedLocationIds().size > 0 ? { kind: "selected" } : { kind: "all" }),
-	);
+	const [scope, setScope] = useState<Scope>(() => initial ?? defaultScope());
 	return {
 		scope,
 		setScope,
 		allCount: map?.meta.locationCount ?? 0,
 		selectionCount: selectedIds.size,
+	};
+}
+
+/** A per-consumer scope store that lives outside React, so an imperative renderer can read it
+ *  synchronously and subscribe to changes while a React sidebar drives it via `use()`. Mirrors
+ *  the module-store + hook idiom (cf. settings). Isolated per call — one consumer's choice never
+ *  leaks into another's. */
+export interface ScopeHandle {
+	get(): Scope;
+	set(scope: Scope): void;
+	subscribe(listener: () => void): () => void;
+	/** React view of this handle: re-renders on change, with live counts. */
+	use(): ScopeController;
+}
+
+export function createScope(initial?: Scope): ScopeHandle {
+	let scope: Scope = initial ?? defaultScope();
+	const listeners = new Set<() => void>();
+	const get = () => scope;
+	const set = (next: Scope) => {
+		if (next.kind === scope.kind) return;
+		scope = next;
+		for (const l of listeners) l();
+	};
+	const subscribe = (listener: () => void) => {
+		listeners.add(listener);
+		return () => listeners.delete(listener);
+	};
+	return {
+		get,
+		set,
+		subscribe,
+		use(): ScopeController {
+			useSyncExternalStore(subscribe, get);
+			const selectedIds = useSelectedLocationIds();
+			const map = useCurrentMap();
+			return {
+				scope,
+				setScope: set,
+				allCount: map?.meta.locationCount ?? 0,
+				selectionCount: selectedIds.size,
+			};
+		},
 	};
 }
 

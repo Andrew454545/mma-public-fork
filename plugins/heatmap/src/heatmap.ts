@@ -1,6 +1,6 @@
 import { GoogleMapsOverlay } from "@deck.gl/google-maps";
 import { HeatmapLayer } from "@deck.gl/aggregation-layers";
-import type { Scope, LocationStore } from "mma-plugin-types";
+import type { LocationStore, ScopeHandle } from "mma-plugin-types";
 
 export interface HeatmapSettings {
 	visible: boolean;
@@ -81,22 +81,14 @@ interface LocPoint {
 let overlay: GoogleMapsOverlay | null = null;
 let locStore: LocationStore | null = null;
 let settings: HeatmapSettings = loadSettings();
-let scope: Scope = { kind: "selected" };
 let onSettingsChange: (() => void) | null = null;
+
+// Externalized scope: the sidebar drives it via scopeHandle.use(), the renderer reads it
+// synchronously and rebuilds via subscribe() — no hand-rolled state, no React bridge.
+export const scopeHandle: ScopeHandle = MMA.createScope();
 
 export function getSettings(): HeatmapSettings {
 	return settings;
-}
-
-export function getScope(): Scope {
-	return scope;
-}
-
-export function setScope(next: Scope): void {
-	if (scope.kind === next.kind) return;
-	scope = next;
-	rebuild();
-	onSettingsChange?.();
 }
 
 export function getLocationCount(): number {
@@ -106,7 +98,7 @@ export function getLocationCount(): number {
 // The renderer's pool is the plugin's own LocationStore; the scope just narrows it.
 function scopedLocations(): LocPoint[] {
 	if (!locStore) return [];
-	return locStore.get(scope).map((l) => ({ lat: l.lat, lng: l.lng }));
+	return locStore.get(scopeHandle.get()).map((l) => ({ lat: l.lat, lng: l.lng }));
 }
 
 export function setOnSettingsChange(cb: (() => void) | null) {
@@ -149,23 +141,25 @@ export async function init(): Promise<() => void> {
 	if (!map) throw new Error("No map instance");
 
 	locStore = await MMA.createLocationStore();
+	// Default to the current selection if there is one, else all locations.
+	scopeHandle.set(MMA.getSelectedLocationIds().size > 0 ? { kind: "selected" } : { kind: "all" });
 
 	overlay = new GoogleMapsOverlay({ layers: [] });
 	overlay.setMap(map);
 	rebuild();
 
-	const unsubStore = locStore.onChange(() => {
+	const onChange = () => {
 		rebuild();
 		onSettingsChange?.();
-	});
-	const unsubSel = MMA.on("selection:change", () => {
-		rebuild();
-		onSettingsChange?.();
-	});
+	};
+	const unsubStore = locStore.onChange(onChange);
+	const unsubSel = MMA.on("selection:change", onChange);
+	const unsubScope = scopeHandle.subscribe(onChange);
 
 	return () => {
 		unsubStore();
 		unsubSel();
+		unsubScope();
 		locStore?.destroy();
 		locStore = null;
 		if (overlay) {
@@ -174,7 +168,6 @@ export async function init(): Promise<() => void> {
 			overlay = null;
 		}
 		settings = loadSettings();
-		scope = { kind: "selected" };
 		onSettingsChange = null;
 	};
 }

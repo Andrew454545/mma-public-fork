@@ -843,6 +843,17 @@ export interface ScopeController {
 	allCount: number;
 	selectionCount: number;
 }
+/** A per-consumer scope store that lives outside React, so an imperative renderer can read it
+ *  synchronously and subscribe to changes while a React sidebar drives it via `use()`. Mirrors
+ *  the module-store + hook idiom (cf. settings). Isolated per call — one consumer's choice never
+ *  leaks into another's. */
+export interface ScopeHandle {
+	get(): Scope;
+	set(scope: Scope): void;
+	subscribe(listener: () => void): () => void;
+	/** React view of this handle: re-renders on change, with live counts. */
+	use(): ScopeController;
+}
 export interface PruneResult {
 	session: ReviewSession | null;
 	cursorMoved: boolean;
@@ -1763,6 +1774,7 @@ declare const mma: {
 		id: number;
 	}>(scope: Scope, pool: T[]): T[];
 	useScope(initial?: Scope): ScopeController;
+	createScope(initial?: Scope): ScopeHandle;
 	createMap(name: string, folder?: string | null): Promise<MapMeta>;
 	deleteMap(id: string): Promise<void>;
 	renameFolder(from: string, to: string): Promise<void>;

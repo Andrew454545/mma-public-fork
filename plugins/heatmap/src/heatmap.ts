@@ -22,20 +22,6 @@ export const DEFAULT_SETTINGS: HeatmapSettings = {
 
 const store = MMA.storage("heatmap");
 
-// One-time migration off the old standalone key into the namespaced plugin store.
-const oldKey = "mma_heatmap_settings";
-const old = localStorage.getItem(oldKey);
-if (old) {
-	if (store.get("settings") === undefined) {
-		try {
-			store.set("settings", JSON.parse(old));
-		} catch {
-			// ignored
-		}
-	}
-	localStorage.removeItem(oldKey);
-}
-
 function loadSettings(): HeatmapSettings {
 	return { ...DEFAULT_SETTINGS, ...(store.get<Partial<HeatmapSettings>>("settings") ?? {}) };
 }

@@ -2730,6 +2730,9 @@ pub fn store_extra_field_values(webview: tauri::Webview, state: tauri::State<'_,
 pub struct SelectionInput {
     pub props: SelectionProps,
     pub color: [u8; 3],
+    /// Counted, but kept out of the overlay and the selected set.
+    #[serde(default)]
+    pub ghosted: bool,
 }
 
 /// Result of `store_sync_selections`: per-selection counts and the inline bitmask bytes.
@@ -2763,16 +2766,18 @@ pub async fn store_sync_selections(
             .collect();
         drop(view);
 
-        let mut all_selected = RoaringBitmap::new();
-        for s in &sel_sets { all_selected |= s; }
-
+        // Count all; overlay/union/stored state use the non-ghosted subset only.
         let counts: Vec<usize> = sel_sets.iter().map(|s| s.len() as usize).collect();
+        let live: Vec<usize> = (0..sels.len()).filter(|&i| !sels[i].ghosted).collect();
+
+        let mut all_selected = RoaringBitmap::new();
+        for &i in &live { all_selected |= &sel_sets[i]; }
         let selected_count = all_selected.len() as usize;
 
         // 3. Route selections to per-cell indices (O(selected), not O(S*N)), then
         //    serialize the per-cell bitmask binary. Cells are independent → parallel.
-        let routed: Vec<[Vec<u32>; 32]> = sel_sets.par_iter()
-            .map(|set| selection_cell_indices(&store.render, set, None))
+        let routed: Vec<[Vec<u32>; 32]> = live.par_iter()
+            .map(|&i| selection_cell_indices(&store.render, &sel_sets[i], None))
             .collect();
         let segments: Vec<Vec<u8>> = store.render.cells.par_iter().enumerate()
             .filter_map(|(ci, opt)| {
@@ -2782,18 +2787,21 @@ pub async fn store_sync_selections(
             .collect();
         let num_cells = segments.len();
 
-        let buf = assemble_selection_bitmask(sels.iter().map(|s| &s.color), &segments);
+        let buf = assemble_selection_bitmask(live.iter().map(|&i| &sels[i].color), &segments);
 
         store.selections.ids = all_selected;
-        store.selections.all = sels.iter().enumerate().map(|(i, sel)| {
+        store.selections.all = live.iter().map(|&i| {
             selections::Selection {
                 key: format!("sync:{i}"),
-                color: sel.color,
-                props: sel.props.clone(),
+                color: sels[i].color,
+                props: sels[i].props.clone(),
                 count: None,
             }
         }).collect();
-        store.selections.loc_sets = sel_sets;
+        store.selections.loc_sets = sel_sets.into_iter().enumerate()
+            .filter(|(i, _)| !sels[*i].ghosted)
+            .map(|(_, s)| s)
+            .collect();
         store.selections.version += 1;
 
         let render_total: usize = store.render.cells.iter().filter_map(|o| o.as_ref()).map(|cr| cr.id_order.len()).sum();

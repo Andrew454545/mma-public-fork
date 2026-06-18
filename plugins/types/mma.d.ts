@@ -626,6 +626,7 @@ export type SelectionInput = {
 		number,
 		number
 	];
+	ghosted: boolean;
 };
 /**
  *  Discriminated union of all selection types. Serialized with `{ "type": "..." }` tag

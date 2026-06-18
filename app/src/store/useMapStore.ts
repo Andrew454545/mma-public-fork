@@ -459,7 +459,7 @@ export function getSelectedLocationIds() {
  *  the raw selected IDs. App code should use getSelectedLocationIds() instead —
  *  mutations already sync selections via MutationResult. */
 export async function syncSelections(): Promise<{ ids: number[] }> {
-	const sels = selections.map((s) => ({ props: s.props, color: s.color }));
+	const sels = buildSyncInputs();
 	if (sels.length === 0) return { ids: [] };
 	await cmd.storeSyncSelections(sels);
 	const ids = await cmd.storeGetSelectedIdsList();
@@ -882,20 +882,23 @@ function selectionSyncColor(s: Selection): [number, number, number] {
 	return s.color;
 }
 
-/** Inputs sent to Rust, excluding ghosted selections. Order matches the non-ghosted
- *  subsequence of `selections`, which is how Rust returns counts. */
+/** All selections, each flagged ghosted or not. Rust counts every one, renders/selects only non-ghosted. */
 function buildSyncInputs() {
-	return selections
-		.filter((s) => !ghostedSelections.has(s.key))
-		.map((s) => ({ props: s.props, color: selectionSyncColor(s) }));
+	return selections.map((s) => ({
+		props: s.props,
+		color: selectionSyncColor(s),
+		ghosted: ghostedSelections.has(s.key),
+	}));
 }
 
-/** Map a Rust counts array (non-ghosted order) back onto `selections`, preserving
- *  the prior count for ghosted entries so the UI can still show what they'd select. */
-function assignCounts(counts: number[]) {
+/** Map Rust counts onto `selections`. `full` = one per selection in order; otherwise counts
+ *  cover only the non-ghosted subset, and ghosted entries keep their last count. */
+function assignCounts(counts: number[], full = false) {
 	let j = 0;
 	for (let i = 0; i < selections.length; i++) {
-		if (ghostedSelections.has(selections[i].key)) {
+		if (full) {
+			selections[i] = { ...selections[i], count: counts[i] ?? 0 };
+		} else if (ghostedSelections.has(selections[i].key)) {
 			selections[i] = { ...selections[i], count: selections[i].count ?? 0 };
 		} else {
 			selections[i] = { ...selections[i], count: counts[j++] ?? 0 };
@@ -918,7 +921,7 @@ async function applySelectionUpdate(updater: (sels: Selection[]) => Selection[])
 		return;
 	}
 	t.step("ipc");
-	assignCounts(result.counts);
+	assignCounts(result.counts, true);
 	if (result.bitmask) emitBitmask(result.bitmask);
 	t.step("apply");
 	t.end({ selected: result.selectedCount });

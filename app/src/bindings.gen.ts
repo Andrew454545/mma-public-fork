@@ -1070,6 +1070,7 @@ export type Selection = {
 export type SelectionInput = {
 	props: SelectionProps,
 	color: [number, number, number],
+	ghosted: boolean,
 };
 
 /**

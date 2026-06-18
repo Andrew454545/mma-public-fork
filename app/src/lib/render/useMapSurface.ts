@@ -6,7 +6,7 @@ import { google } from "@/lib/sv/opensv";
 import { buildSceneLayers, type PolyGeom } from "@/lib/render/buildSceneLayers";
 import { getScene, useScene } from "@/lib/render/sceneStore";
 import { usePanoDots } from "@/lib/render/usePanoDots";
-import { useSetting } from "@/store/settings";
+import { useSetting, getSettings } from "@/store/settings";
 import { useScoreMaxError, useLatLngAnchor } from "@/lib/sv/measure";
 import { handleMapClick, handleMapHover } from "@/lib/map/mapClick";
 import {
@@ -16,7 +16,13 @@ import {
 	useSelections,
 	useImportMarkerVersion,
 	useDiffMarkerVersion,
+	getActiveLocation,
 } from "@/store/useMapStore";
+import { subscribe } from "@/lib/events";
+import { getReviewSession } from "@/lib/review/review";
+import { useHotkey } from "@/lib/hooks/useHotkey";
+import { useBinding } from "@/lib/util/hotkeys";
+import { useMapKeyboardNav } from "@/lib/hooks/useMapKeyboardNav";
 import { useTrailVersion } from "@/lib/sv/svTrail";
 import type { MarkerStyle } from "@/components/editor/map/mapSettingsTypes";
 
@@ -35,6 +41,12 @@ export interface MapSurfaceOpts {
 	// In-progress freehand selection path, read live on every rebuild (the editor map only).
 	freehandPathRef?: RefObject<number[][] | null>;
 	onError?: (e: unknown) => void;
+	// Camera behaviors. Pan this map to the active location while reviewing.
+	followActive?: boolean;
+	// Bind the panToLocation hotkey to this map.
+	panToActiveHotkey?: boolean;
+	// Held-key pan/zoom on this map. Keyboard-driven; opt in on one surface only.
+	keyboardNav?: boolean;
 }
 
 // The one map surface, shared by the editor map and the minimap: creates the deck overlay, builds
@@ -149,6 +161,24 @@ export function useMapSurface(
 		diffMarkerVersion,
 		latLngAnchor,
 	]);
+
+	// Follow the active location into view while reviewing.
+	useEffect(() => {
+		if (!map || !opts.followActive) return;
+		return subscribe("active:change", (id) => {
+			if (id == null || !getReviewSession() || !getSettings().followActiveInReview) return;
+			const loc = getActiveLocation();
+			if (loc && loc.id === id) map.panTo({ lat: loc.lat, lng: loc.lng });
+		});
+	}, [map, opts.followActive]);
+
+	useHotkey(useBinding("panToLocation"), () => {
+		if (!map || !opts.panToActiveHotkey) return;
+		const loc = getActiveLocation();
+		if (loc) map.panTo({ lat: loc.lat, lng: loc.lng });
+	});
+
+	useMapKeyboardNav(opts.keyboardNav ? map : null);
 
 	return { requestUpdate: rebuild };
 }

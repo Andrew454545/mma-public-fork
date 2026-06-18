@@ -53,6 +53,7 @@ export function FullscreenMiniMap({
 		svPanoramas: prefs.svPanoramas,
 		showPerfectScoreCircle: prefs.showPerfectScoreCircle,
 		selectOnly: prefs.selectOnly,
+		followActive: true,
 	});
 
 	const setScale = (next: number) => {

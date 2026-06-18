@@ -27,7 +27,6 @@ import { MapTypeDropdown, MapSettingsDropdown } from "@/components/editor/map/Ma
 import { buildMapStack, mapStackOptsFromPrefs, type MapStackOpts } from "@/lib/geo/mapStack";
 import { type MapEmbedPrefs, DEFAULT_PREFS } from "@/components/editor/map/mapEmbedPrefs";
 import { FpsCounter } from "@/components/editor/map/FpsCounter";
-import { useMapKeyboardNav } from "@/lib/hooks/useMapKeyboardNav";
 
 export function MapEmbed({ onAddLocation }: { onAddLocation: (parsed: ParsedLocation) => void | Promise<void> }) {
 	const map = useCurrentMap();
@@ -98,6 +97,9 @@ export function MapEmbed({ onAddLocation }: { onAddLocation: (parsed: ParsedLoca
 		onContextMenu: dispatchContextMenu,
 		freehandPathRef,
 		onError: (e: unknown) => log.error("[deck.gl overlay error]", e),
+		followActive: true,
+		panToActiveHotkey: true,
+		keyboardNav: true,
 	});
 
 	const svLayerRef = useRef<google.maps.ImageMapType>(null);
@@ -289,8 +291,6 @@ export function MapEmbed({ onAddLocation }: { onAddLocation: (parsed: ParsedLoca
 	}, []);
 
 	const showFps = useSetting("showFps");
-
-	useMapKeyboardNav();
 
 	useHotkey(useBinding("mapZoomReset"), () => {
 		const gm = gMapRef.current;

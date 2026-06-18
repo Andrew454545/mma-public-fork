@@ -22,8 +22,6 @@ import { goToList } from "@/store/router";
 import { activatePlugins, deactivatePlugins } from "@/plugins/registry";
 import { getGoogleMap as getGoogleMapInstance, waitForGoogleMap, fitMapToBounds } from "@/lib/map/mapState";
 import { pluginsReady } from "@/plugins";
-import { subscribe } from "@/lib/events";
-import { getReviewSession } from "@/lib/review/review";
 import { MapEmbed } from "@/components/editor/map/MapEmbed";
 import { MapMetaBar } from "@/components/editor/map/MapMetaBar";
 import { MapOverview } from "@/components/editor/map/MapOverview";
@@ -255,21 +253,6 @@ export function MapEditor() {
 		const ids = getSelectedLocationIds();
 		if (ids.size > 0) removeLocations(ids);
 	}, { bubble: true });
-	useHotkey(useBinding("panToLocation"), () => {
-		const loc = getActiveLocation();
-		const map = getGoogleMapInstance();
-		if (loc && map) map.panTo({ lat: loc.lat, lng: loc.lng });
-	});
-
-	useEffect(() => {
-		return subscribe("active:change", (id) => {
-			if (id == null || !getReviewSession() || !getSettings().followActiveInReview) return;
-			const loc = getActiveLocation();
-			const map = getGoogleMapInstance();
-			if (loc && map && loc.id === id) map.panTo({ lat: loc.lat, lng: loc.lng });
-		});
-	}, []);
-
 	const [showMapCursor, setShowMapCursor] = useState(false);
 	const showMapCursorRef = useRef(false);
 

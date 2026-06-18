@@ -1,3 +1,29 @@
+## v0.6.1 — 2026-06-18
+
+- Minimap now mirrors the editor map
+- "What's new" panel in the map list, with per-version history
+- Added search-coverage overlay while generating
+- Color a subset of locations by gradient, bucketed within that subset
+- Allow deleting a map from inside the editor
+- Toggle a selection's ghost state from its row
+- Hold-and-click hotkey to delete the polygon under the cursor
+- Copy-link modifiers: hold Shift to copy without tags, Alt for the long URL
+- Allow pasting a location into the search box
+- Text-match dropdown when bulk-adding a tag
+- Arrow-key navigation through autocomplete suggestions
+- Window title now shows the open map
+- Tag order is kept when exporting and re-importing JSON
+- Autocomplete and quicktags follow your tag sort order
+- Optimized request concurrency/throughput
+- Map generator can search within descriptions and filter by number of links
+- Map generator gained a fixed output zoom and a speed setting
+- Map generator applies settings changes mid-run
+- Fixed the map generator losing its session when switching views
+- Fixed edits to a selection to become an existing selection replacing it instead of merging into it
+- Fixed inaccurate counts on ghosted selections
+- Fixed the fullscreen minimap and tag bar ignoring the hide-UI hotkey
+- Fixed a rendering issue on Linux
+
 ## v0.6.0 — 2026-06-12
 
 - Per-map hotkeys: assign keys to tags and to copying the active location to other maps

@@ -11,9 +11,10 @@ import {
 	activatePlugin,
 	deactivatePlugin,
 	unregisterPlugin,
+	isPluginUpdatable,
 } from "@/plugins/registry";
 import type { Plugin, PluginManifest } from "@/plugins/registry";
-import { loadAndActivatePlugin } from "@/plugins/index";
+import { loadAndActivatePlugin, loadUserPlugin } from "@/plugins/index";
 import { cmd } from "@/lib/commands";
 import { log } from "@/lib/util/log";
 
@@ -120,10 +121,13 @@ function AdditionalCard({
 	icon,
 	installed,
 	enabled,
+	updatable,
+	latestVersion,
 	onInstall,
 	onEnable,
 	onDisable,
 	onUninstall,
+	onUpdate,
 }: {
 	id: string;
 	name: string;
@@ -131,10 +135,13 @@ function AdditionalCard({
 	icon: string;
 	installed: boolean;
 	enabled: boolean;
+	updatable: boolean;
+	latestVersion?: string;
 	onInstall: (id: string) => void;
 	onEnable: (id: string) => void;
 	onDisable: (id: string) => void;
 	onUninstall: (id: string) => void;
+	onUpdate: (id: string) => void;
 }) {
 	const [busy, setBusy] = useState(false);
 
@@ -144,6 +151,15 @@ function AdditionalCard({
 			if (!installed) await onInstall(id);
 			else if (enabled) await onDisable(id);
 			else await onEnable(id);
+		} finally {
+			setBusy(false);
+		}
+	};
+
+	const handleUpdate = async () => {
+		setBusy(true);
+		try {
+			await onUpdate(id);
 		} finally {
 			setBusy(false);
 		}
@@ -168,6 +184,16 @@ function AdditionalCard({
 				{description && <div className="plugin-card__desc">{description}</div>}
 			</div>
 			<div className="plugin-card__actions">
+				{installed && updatable && (
+					<button
+						className="button plugin-card__toggle button--primary"
+						onClick={handleUpdate}
+						disabled={busy}
+						title={latestVersion ? `Update to v${latestVersion}` : "Update"}
+					>
+						{busy ? "..." : "Update"}
+					</button>
+				)}
 				<button
 					className={`button plugin-card__toggle ${primaryClass}`}
 					onClick={handlePrimary}
@@ -198,6 +224,8 @@ interface AdditionalEntry {
 	icon: string;
 	installed: boolean;
 	enabled: boolean;
+	updatable: boolean;
+	latestVersion?: string;
 }
 
 export function PluginMarketplace({
@@ -242,20 +270,26 @@ export function PluginMarketplace({
 	}, [open, tab, registry, fetchRegistry]);
 
 	const additionalEntries: AdditionalEntry[] = (() => {
-		const installedIds = new Set(installedManifests.map((m) => m.id));
+		const installedById = new Map(installedManifests.map((m) => [m.id, m]));
 		const seen = new Set<string>();
 		const entries: AdditionalEntry[] = [];
 
 		if (registry) {
 			for (const r of registry) {
 				seen.add(r.id);
+				const installedManifest = installedById.get(r.id);
+				const installed = !!installedManifest;
+				const updatable =
+					installed && isPluginUpdatable(installedManifest.version, r.version);
 				entries.push({
 					id: r.id,
 					name: r.name,
 					description: r.description,
 					icon: r.icon,
-					installed: installedIds.has(r.id),
+					installed,
 					enabled: isPluginEnabled(r.id),
+					updatable,
+					latestVersion: r.version,
 				});
 			}
 		}
@@ -269,6 +303,7 @@ export function PluginMarketplace({
 				icon: m.icon,
 				installed: true,
 				enabled: isPluginEnabled(m.id),
+				updatable: false,
 			});
 		}
 
@@ -310,6 +345,23 @@ export function PluginMarketplace({
 		}
 		refreshInstalled();
 		rerender((n) => n + 1);
+	}, [refreshInstalled]);
+
+	const handleUpdate = useCallback(async (id: string) => {
+		const wasEnabled = isPluginEnabled(id);
+		try {
+			// Tear down the running plugin, re-download (install overwrites the files),
+			// then re-register the fresh code — preserving enabled/disabled state.
+			if (wasEnabled) deactivatePlugin(id);
+			unregisterPlugin(id);
+			const manifest = await cmd.installPlugin(id);
+			await loadUserPlugin(manifest);
+			if (wasEnabled) activatePlugin(id);
+			refreshInstalled();
+			rerender((n) => n + 1);
+		} catch (e) {
+			log.error(`[marketplace] update failed for "${id}":`, e);
+		}
 	}, [refreshInstalled]);
 
 	return (
@@ -367,6 +419,7 @@ export function PluginMarketplace({
 										onEnable={handleEnable}
 										onDisable={handleDisable}
 										onUninstall={handleUninstall}
+										onUpdate={handleUpdate}
 									/>
 								))}
 							</div>

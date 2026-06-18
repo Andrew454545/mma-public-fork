@@ -19,7 +19,7 @@ async function loadCorePlugins() {
 	for (const p of getPlugins()) p.core = true;
 }
 
-async function loadUserPlugin(m: PluginManifest) {
+export async function loadUserPlugin(m: PluginManifest) {
 	// Lazy externals (deck.gl/luma.gl) must be resolved before the plugin's
 	// synchronous __mma_require calls run at import time. Idempotent.
 	await preloadModules(getAvailableExternals());

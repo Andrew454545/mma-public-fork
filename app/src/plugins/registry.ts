@@ -29,11 +29,22 @@ export interface PluginManifest {
 	description: string;
 	icon: string;
 	main: string;
+	version: string;
 }
 
 export type PluginBehavior = Partial<Plugin> & {
 	activate(): void | (() => void);
 };
+
+// An installed plugin is updatable when both its installed version and the registry's
+// version are known and differ. The registry only moves forward, so any mismatch means
+// a newer build is published. Empty/unknown versions never prompt an update.
+export function isPluginUpdatable(
+	installedVersion: string | undefined,
+	latestVersion: string | undefined,
+): boolean {
+	return !!installedVersion && !!latestVersion && installedVersion !== latestVersion;
+}
 
 // --- Registry ---
 

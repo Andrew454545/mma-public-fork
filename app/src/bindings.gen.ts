@@ -865,6 +865,7 @@ export type PluginManifest = {
 	description: string,
 	icon: string,
 	main: string,
+	version: string,
 };
 
 /**

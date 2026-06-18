@@ -88,6 +88,7 @@ struct PluginManifest {
     description: String,
     icon: String,
     main: String,
+    version: String,
 }
 
 /// Scan the `plugins/` directory under app data and return manifests for all installed plugins.
@@ -121,7 +122,9 @@ fn list_user_plugins() -> Vec<PluginManifest> {
                     .unwrap_or("").to_string();
                 let main = val.get("main").and_then(|v| v.as_str())
                     .unwrap_or("index.js").to_string();
-                plugins.push(PluginManifest { id, name, description, icon, main });
+                let version = val.get("version").and_then(|v| v.as_str())
+                    .unwrap_or("").to_string();
+                plugins.push(PluginManifest { id, name, description, icon, main, version });
             }
         }
     }
@@ -175,8 +178,10 @@ fn install_plugin(id: String) -> AppResult<PluginManifest> {
         .unwrap_or("").to_string();
     let icon = val.get("icon").and_then(|v| v.as_str())
         .unwrap_or("").to_string();
+    let version = val.get("version").and_then(|v| v.as_str())
+        .unwrap_or("").to_string();
 
-    Ok(PluginManifest { id, name, description, icon, main: main.to_string() })
+    Ok(PluginManifest { id, name, description, icon, main: main.to_string(), version })
 }
 
 /// Remove a plugin by deleting its directory from the local plugins folder.

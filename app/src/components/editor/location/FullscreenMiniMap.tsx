@@ -48,11 +48,7 @@ export function FullscreenMiniMap({
 	const [mapInstance, setMapInstance] = useState<google.maps.Map | null>(null);
 
 	useMapSurface(mapInstance, {
-		markerStyle: prefs.markerStyle,
-		markerOpacity: prefs.markerOpacity,
-		svPanoramas: prefs.svPanoramas,
-		showPerfectScoreCircle: prefs.showPerfectScoreCircle,
-		selectOnly: prefs.selectOnly,
+		...prefs,
 		followActive: true,
 	});
 

@@ -87,11 +87,7 @@ export function MapEmbed({ onAddLocation }: { onAddLocation: (parsed: ParsedLoca
 
 	// The editor map is a consumer of the shared surface, with the full capability set.
 	const { requestUpdate } = useMapSurface(mapReady ? gMapRef.current : null, {
-		markerStyle,
-		markerOpacity,
-		svPanoramas,
-		showPerfectScoreCircle,
-		selectOnly,
+		...prefs,
 		measuring: isMeasuring,
 		container: containerRef.current,
 		onContextMenu: dispatchContextMenu,

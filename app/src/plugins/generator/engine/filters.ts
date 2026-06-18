@@ -1,5 +1,66 @@
 import type { GeneratorSettings } from "./types";
 
+function normalizeText(text: string): string {
+	return text
+		.toLowerCase()
+		.normalize("NFD")
+		.replace(/[\u0300-\u036f]/g, "")
+		.replace(/[^\w\s-]/g, "")
+		.trim();
+}
+
+function tokenize(text: string): string[] {
+	return text.split(/[\s_,.;!?()'"“”«»]+/).filter(Boolean);
+}
+
+function sectionMatch(text: string, target: string): boolean {
+	const term = normalizeText(target);
+	const normalized = text
+		.toLowerCase()
+		.normalize("NFD")
+		.replace(/[\u0300-\u036f]/g, "");
+	const pattern = new RegExp(`(^${term}$|^${term},|,\\s*${term}$|,\\s*${term},)`, "i");
+	return pattern.test(normalized);
+}
+
+/** Match a found pano's description against the user's search terms. Mirrors the
+ *  reference generator's "search in panorama description" filter. */
+export function passesDescriptionSearch(
+	loc: google.maps.StreetViewLocation,
+	s: GeneratorSettings,
+): boolean {
+	if (!s.searchInDescription || !s.searchTerms.trim()) return true;
+
+	const searchTerms = s.searchTerms
+		.split(",")
+		.map((term) => normalizeText(term.trim()))
+		.filter(Boolean);
+	if (searchTerms.length === 0) return true;
+
+	const description = loc.description ?? "";
+	const shortDescription = loc.shortDescription ?? "";
+	const combined = `${description} ${shortDescription}`;
+	const normalizedText = normalizeText(combined);
+	const words = tokenize(combined).map(normalizeText);
+
+	const hasMatch = searchTerms.some((term) => {
+		switch (s.searchMode) {
+			case "contains":
+				return normalizedText.includes(term);
+			case "fullword":
+				return new RegExp(`\\b${term}\\b`, "i").test(words.join(" "));
+			case "startswith":
+				return words.some((word) => word.startsWith(term));
+			case "endswith":
+				return words.some((word) => word.endsWith(term));
+			case "sectionmatch":
+				return sectionMatch(description, term) || sectionMatch(shortDescription, term);
+		}
+	});
+
+	return s.searchFilterType === "exclude" ? !hasMatch : hasMatch;
+}
+
 export function getCameraGeneration(
 	pano: google.maps.StreetViewResolvedPanoramaData,
 ): 0 | 1 | 23 | 4 {
@@ -103,8 +164,15 @@ export function isPanoGood(
 	pano: google.maps.StreetViewResolvedPanoramaData,
 	s: GeneratorSettings,
 ): boolean {
+	if (!passesDescriptionSearch(pano.location, s)) return false;
+
 	if (s.rejectUnofficial && !s.rejectOfficial) {
 		if (pano.location.pano.length !== 22) return false;
+		if (
+			s.filterByLinks &&
+			(pano.links.length < s.minLinks || pano.links.length > s.maxLinks)
+		)
+			return false;
 		if (
 			s.rejectNoDescription &&
 			!s.rejectDescription &&

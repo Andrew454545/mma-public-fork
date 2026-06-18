@@ -254,6 +254,22 @@ export function SettingsPanel({
 							/>
 						)}
 						<Check
+							label="Adjust zoom"
+							checked={settings.adjustZoom}
+							onChange={(v) => set("adjustZoom", v)}
+						/>
+						{settings.adjustZoom && (
+							<NumberInput
+								label="Zoom level"
+								value={settings.zoomLevel}
+								onChange={(v) => set("zoomLevel", v)}
+								min={0}
+								max={5}
+								step={1}
+								indent
+							/>
+						)}
+						<Check
 							label="Choose random date in time range"
 							checked={settings.randomInTimeline}
 							onChange={(v) => set("randomInTimeline", v)}
@@ -276,6 +292,13 @@ export function SettingsPanel({
 					onChange={(v) => set("numGenerators", v)}
 					min={1}
 					max={10}
+				/>
+				<NumberInput
+					label="Speed"
+					value={settings.speed}
+					onChange={(v) => set("speed", v)}
+					min={1}
+					max={1000}
 				/>
 				<Check
 					label="Only check one country/polygon at a time"
@@ -379,6 +402,67 @@ export function SettingsPanel({
 					onChange={(v) => set("checkAllDates", v)}
 				/>
 			</Section>
+			<Section title="Advanced filters" defaultOpen={false}>
+				<Check
+					label="Search in panorama description"
+					checked={settings.searchInDescription}
+					onChange={(v) => set("searchInDescription", v)}
+				/>
+				{settings.searchInDescription && (
+					<div className="generator-settings__indent">
+						<SegmentedControl
+							value={settings.searchFilterType}
+							onChange={(v) => set("searchFilterType", v as "include" | "exclude")}
+							options={[
+								{ value: "include", label: "Include" },
+								{ value: "exclude", label: "Exclude" },
+							]}
+						/>
+						<input
+							className="input"
+							type="text"
+							placeholder="Comma-separated terms"
+							value={settings.searchTerms}
+							onChange={(e) => set("searchTerms", e.target.value)}
+						/>
+						<select
+							className="input"
+							value={settings.searchMode}
+							onChange={(e) => set("searchMode", e.target.value as GeneratorSettings["searchMode"])}
+						>
+							<option value="contains">Contains</option>
+							<option value="fullword">Full word</option>
+							<option value="startswith">Starts with</option>
+							<option value="endswith">Ends with</option>
+							<option value="sectionmatch">Section match</option>
+						</select>
+					</div>
+				)}
+				<Check
+					label="Filter by number of links"
+					checked={settings.filterByLinks}
+					onChange={(v) => set("filterByLinks", v)}
+				/>
+				{settings.filterByLinks && (
+					<div className="generator-settings__indent generator-settings__date-range">
+						<NumberInput
+							label="Min"
+							value={settings.minLinks}
+							onChange={(v) => set("minLinks", v)}
+							min={0}
+							max={10}
+						/>
+						<NumberInput
+							label="Max"
+							value={settings.maxLinks}
+							onChange={(v) => set("maxLinks", v)}
+							min={0}
+							max={10}
+						/>
+					</div>
+				)}
+			</Section>
+
 			<Section title="Visualization" defaultOpen={false}>
 				<Check
 					label="Show search coverage"

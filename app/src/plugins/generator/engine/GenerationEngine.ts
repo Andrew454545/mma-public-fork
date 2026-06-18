@@ -146,7 +146,7 @@ export class GenerationEngine {
 			if (!this.running) return;
 
 			region.isProcessing = true;
-			const n = Math.min(region.target * 100, 1000);
+			const n = Math.min(region.target * 100, this.settings.speed);
 			const randomCoords: { lat: number; lng: number }[] = [];
 			// Cap attempts so a degenerate/near-zero-area polygon can never spin forever.
 			// The bbox reject in pointInGeoJsonGeometry keeps each attempt cheap.
@@ -332,6 +332,7 @@ export class GenerationEngine {
 			lng: pano.location.latLng.lng(),
 			heading: computeHeading(pano, s),
 			pitch: s.adjustPitch ? s.pitchDeviation : 0,
+			zoom: s.adjustZoom ? s.zoomLevel : 0,
 			imageDate: pano.imageDate ?? null,
 		};
 

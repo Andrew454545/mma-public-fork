@@ -34,7 +34,19 @@ export interface GeneratorSettings {
 	regionRadius: number;
 	randomInTimeline: boolean;
 	showSearchOverlay: boolean;
+	searchInDescription: boolean;
+	searchTerms: string;
+	searchMode: SearchMode;
+	searchFilterType: "include" | "exclude";
+	filterByLinks: boolean;
+	minLinks: number;
+	maxLinks: number;
+	adjustZoom: boolean;
+	zoomLevel: number;
+	speed: number;
 }
+
+export type SearchMode = "contains" | "fullword" | "startswith" | "endswith" | "sectionmatch";
 
 const now = new Date();
 const pad = (n: number) => (n < 10 ? "0" : "") + n;
@@ -75,6 +87,16 @@ export const DEFAULT_SETTINGS: GeneratorSettings = {
 	regionRadius: 100,
 	randomInTimeline: false,
 	showSearchOverlay: false,
+	searchInDescription: false,
+	searchTerms: "",
+	searchMode: "contains",
+	searchFilterType: "include",
+	filterByLinks: false,
+	minLinks: 1,
+	maxLinks: 5,
+	adjustZoom: false,
+	zoomLevel: 0,
+	speed: 1000,
 };
 
 export interface GeneratorRegionMeta {
@@ -101,6 +123,7 @@ export interface GeneratedLocation {
 	lng: number;
 	heading: number;
 	pitch: number;
+	zoom: number;
 	imageDate: string | null;
 }
 

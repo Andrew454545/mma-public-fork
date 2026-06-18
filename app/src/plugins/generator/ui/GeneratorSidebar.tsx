@@ -40,6 +40,7 @@ function generatedToLocation(loc: GeneratedLocation, tagId: number | null) {
 		lng: loc.lng,
 		heading: loc.heading,
 		pitch: loc.pitch,
+		zoom: loc.zoom,
 		panoId: loc.panoId,
 		flags: LocationFlag.LoadAsPanoId,
 		...(tagId != null ? { tags: [tagId] } : {}),

@@ -91,10 +91,30 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'push' && github.ref_name || inputs.tag }}
+
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
           merge-multiple: true
+
+      - name: Extract release notes from CHANGELOG.md
+        env:
+          TAG: ${{ github.event_name == 'push' && github.ref_name || inputs.tag }}
+        run: |
+          awk -v tag="$TAG" '
+            $0 ~ "^## " tag "([[:space:]]|$)" { grab=1; next }
+            grab && /^## / { exit }
+            grab { print }
+          ' CHANGELOG.md > notes.md
+          if ! grep -q '[^[:space:]]' notes.md; then
+            echo "::error::No CHANGELOG.md section found for $TAG -- add a '## $TAG' section before tagging."
+            exit 1
+          fi
+          echo "Release notes for $TAG:"
+          cat notes.md
 
       - name: Normalize filenames (spaces to dots, matching GitHub asset naming)
         run: |
@@ -152,4 +172,4 @@ jobs:
           mapfile -t files < <(find artifacts -type f \( -name "*.exe" -o -name "*.msi" -o -name "*.dmg" -o -name "*.AppImage" -o -name "*.deb" -o -name "*.app.tar.gz" \) ! -name "*.sig")
           files+=(latest.json)
           printf 'Uploading: %s\n' "${files[@]}"
-          gh release create "$TAG" --repo ccmdi/mma --title "$TAG" --draft "${files[@]}"
+          gh release create "$TAG" --repo ccmdi/mma --title "$TAG" --draft --notes-file notes.md "${files[@]}"

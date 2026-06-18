@@ -43,42 +43,170 @@ import { toast } from "@/lib/util/toast";
 
 // --- What's new (latest release notes) ---
 
-interface ReleaseNotes {
+interface ChangelogSection {
 	tag: string;
-	notes: string[];
+	heading: string;
+	body: string;
 }
 
-let releaseNotesPromise: Promise<ReleaseNotes | null> | null = null;
+// Split the changelog into per-version sections. A version starts at a `## vX...`
+// heading; headings inside a body (e.g. `## What's new`) are left untouched.
+function parseChangelog(md: string): ChangelogSection[] {
+	const sections: ChangelogSection[] = [];
+	let cur: ChangelogSection | null = null;
+	for (const line of md.split(/\r?\n/)) {
+		const m = /^##\s+(v\d\S*)\s*(.*)$/.exec(line);
+		if (m) {
+			if (cur) sections.push(cur);
+			cur = { tag: m[1], heading: line.replace(/^##\s+/, "").trim(), body: "" };
+		} else if (cur) {
+			cur.body += line + "\n";
+		}
+	}
+	if (cur) sections.push(cur);
+	return sections;
+}
 
-function fetchLatestReleaseNotes(): Promise<ReleaseNotes | null> {
-	if (!releaseNotesPromise) {
-		releaseNotesPromise = fetch("https://api.github.com/repos/ccmdi/mma/releases/latest")
-			.then((r) => (r.ok ? r.json() : null))
-			.then((data) => {
-				if (!data?.body) return null;
-				const notes = (data.body as string)
-					.split(/\r?\n/)
-					.filter((l) => l.startsWith("- "))
-					.map((l) => l.slice(2).trim());
-				return notes.length ? { tag: data.tag_name as string, notes } : null;
+// Inline markdown: **bold**, *italic*, `code`, [text](url).
+function renderInline(text: string, kb: string): React.ReactNode[] {
+	const nodes: React.ReactNode[] = [];
+	const re = /\*\*([^*]+)\*\*|\*([^*]+)\*|`([^`]+)`|\[([^\]]+)\]\(([^)]+)\)/g;
+	let last = 0;
+	let i = 0;
+	let m: RegExpExecArray | null;
+	while ((m = re.exec(text))) {
+		if (m.index > last) nodes.push(text.slice(last, m.index));
+		const k = `${kb}-${i++}`;
+		if (m[1]) nodes.push(<strong key={k}>{m[1]}</strong>);
+		else if (m[2]) nodes.push(<em key={k}>{m[2]}</em>);
+		else if (m[3]) nodes.push(<code key={k}>{m[3]}</code>);
+		else
+			nodes.push(
+				<a key={k} href={m[5]} target="_blank" rel="noopener noreferrer">
+					{m[4]}
+				</a>,
+			);
+		last = re.lastIndex;
+	}
+	if (last < text.length) nodes.push(text.slice(last));
+	return nodes;
+}
+
+// Block-level markdown for changelog bodies: headings, bullet lists, paragraphs.
+function renderMarkdown(md: string): React.ReactNode[] {
+	const out: React.ReactNode[] = [];
+	let list: React.ReactNode[] | null = null;
+	let para: string[] = [];
+	let key = 0;
+	const flushPara = () => {
+		if (para.length) {
+			out.push(<p key={`b${key++}`}>{renderInline(para.join(" "), `b${key}`)}</p>);
+			para = [];
+		}
+	};
+	const flushList = () => {
+		if (list) {
+			out.push(<ul key={`b${key++}`}>{list}</ul>);
+			list = null;
+		}
+	};
+	for (const raw of md.split(/\r?\n/)) {
+		const line = raw.trimEnd();
+		const heading = /^#{1,6}\s+(.*)$/.exec(line);
+		const bullet = /^[-*]\s+(.*)$/.exec(line);
+		if (heading) {
+			flushPara();
+			flushList();
+			out.push(<h4 key={`b${key++}`}>{renderInline(heading[1], `b${key}`)}</h4>);
+		} else if (bullet) {
+			flushPara();
+			(list ??= []).push(<li key={`b${key++}`}>{renderInline(bullet[1], `b${key}`)}</li>);
+		} else if (line === "") {
+			flushPara();
+			flushList();
+		} else {
+			flushList();
+			para.push(line);
+		}
+	}
+	flushPara();
+	flushList();
+	return out;
+}
+
+let changelogPromise: Promise<ChangelogSection[] | null> | null = null;
+
+function fetchChangelog(): Promise<ChangelogSection[] | null> {
+	if (!changelogPromise) {
+		changelogPromise = fetch("https://raw.githubusercontent.com/ccmdi/mma/master/CHANGELOG.md")
+			.then((r) => (r.ok ? r.text() : null))
+			.then((md) => {
+				if (!md) return null;
+				const sections = parseChangelog(md);
+				return sections.length ? sections : null;
 			})
 			.catch((e) => {
-				log.warn("Failed to fetch release notes", e);
+				log.warn("Failed to fetch changelog", e);
 				return null;
 			});
 	}
-	return releaseNotesPromise;
+	return changelogPromise;
+}
+
+// One character cell of the version readout. When its character changes it rolls
+// the old one out and the new one in, like a safe dial. Digits roll by value
+// (higher rolls up, lower rolls down); other characters default to rolling up.
+function RollChar({ ch }: { ch: string }) {
+	const prevRef = useRef(ch);
+	const [state, setState] = useState<{ cur: string; out: string | null; dir: "up" | "down" }>({
+		cur: ch,
+		out: null,
+		dir: "up",
+	});
+
+	useEffect(() => {
+		const from = prevRef.current;
+		if (ch === from) return;
+		prevRef.current = ch;
+		const dir =
+			/\d/.test(ch) && /\d/.test(from) ? (Number(ch) > Number(from) ? "up" : "down") : "up";
+		setState({ cur: ch, out: from, dir });
+		const t = setTimeout(() => setState((s) => ({ ...s, out: null })), 280);
+		return () => clearTimeout(t);
+	}, [ch]);
+
+	const rolling = state.out !== null;
+	return (
+		<span className="roll-cell">
+			<span
+				key={`in-${state.cur}`}
+				className={clsx("roll-char", rolling && `roll-enter-${state.dir}`)}
+			>
+				{state.cur}
+			</span>
+			{rolling && (
+				<span
+					key={`out-${state.out}`}
+					className={clsx("roll-char roll-char--out", `roll-exit-${state.dir}`)}
+				>
+					{state.out}
+				</span>
+			)}
+		</span>
+	);
 }
 
 function WhatsNew() {
-	const [release, setRelease] = useState<ReleaseNotes | null>(null);
+	const [versions, setVersions] = useState<ChangelogSection[] | null>(null);
 	const [failed, setFailed] = useState(false);
+	const [activeTag, setActiveTag] = useState<string | null>(null);
+	const historyRef = useRef<HTMLDivElement>(null);
 
 	useEffect(() => {
 		let alive = true;
-		fetchLatestReleaseNotes().then((r) => {
+		fetchChangelog().then((v) => {
 			if (!alive) return;
-			if (r) setRelease(r);
+			if (v) setVersions(v);
 			else setFailed(true);
 		});
 		return () => {
@@ -86,24 +214,54 @@ function WhatsNew() {
 		};
 	}, []);
 
+	// Track which release is at the top of the scroll viewport.
+	const onScroll = () => {
+		const container = historyRef.current;
+		if (!container) return;
+		const cTop = container.getBoundingClientRect().top;
+		let current: string | null = null;
+		for (const r of container.querySelectorAll<HTMLElement>(".updates__release")) {
+			if (r.getBoundingClientRect().top - cTop <= 8) current = r.dataset.tag ?? null;
+			else break;
+		}
+		setActiveTag(current);
+	};
+
 	if (failed) return null;
+
+	const displayTag = activeTag ?? versions?.[0]?.tag ?? null;
 
 	return (
 		<li className="updates__item updates__item--new">
 			<span className="updates__circle" />
-			<time className="updates__time">What's new{release ? ` · ${release.tag}` : ""}</time>
-			<div className={clsx("updates__skeleton", release && "updates__skeleton--hidden")}>
+			<time className="updates__time">
+				What's new
+				{displayTag && (
+					<>
+						<span className="updates__version-sep">·</span>
+						<span className="updates__version-roll">
+							{[...displayTag].map((c, i) => (
+								<RollChar key={i} ch={c} />
+							))}
+						</span>
+					</>
+				)}
+			</time>
+			<div className={clsx("updates__skeleton", versions && "updates__skeleton--hidden")}>
 				<span />
 				<span />
 				<span />
 			</div>
-			<div className={clsx("updates__notes", release && "updates__notes--open")}>
+			<div className={clsx("updates__notes", versions && "updates__notes--open")}>
 				<div>
-					<ul>
-						{release?.notes.map((n, i) => (
-							<li key={i}>{n}</li>
+					<div className="updates__history" ref={historyRef} onScroll={onScroll}>
+						{versions?.map((v, vi) => (
+							<div key={v.tag} className="updates__release" data-tag={v.tag}>
+								{vi > 0 && <time className="updates__release-tag">{v.heading}</time>}
+								<div className="updates__release-body">{renderMarkdown(v.body)}</div>
+							</div>
 						))}
-					</ul>
+					</div>
 				</div>
 			</div>
 		</li>

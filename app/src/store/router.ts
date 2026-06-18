@@ -11,7 +11,8 @@
 // render, before any async map load). The store (currentMap) is the data;
 // applyRoute reconciles the store to the URL.
 import { useSyncExternalStore } from "react";
-import { openMap, closeMap, getCurrentMapId } from "@/store/useMapStore";
+import { openMap, closeMap, getCurrentMapId, getCurrentMap, subscribeStore } from "@/store/useMapStore";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 
 interface Route {
 	mapId: string | null;
@@ -81,8 +82,21 @@ export const openManual = (chapter = "") => navigate({ ...route, manual: chapter
 export const gotoManualChapter = (chapter: string) => navigate({ ...route, manual: chapter });
 export const closeManual = () => navigate({ ...route, manual: null });
 
+// The window/tab title follows the open map's name. The URL carries the id, not
+// the name (which loads async and changes on rename), so derive it from the store.
+// web-serve mirrors setTitle to the browser tab.
+let lastTitle = "";
+function syncTitle() {
+	const map = getCurrentMap();
+	const title = map ? `${map.meta.name} · Map Making App` : "Map Making App";
+	if (title === lastTitle) return;
+	lastTitle = title;
+	void getCurrentWindow().setTitle(title);
+}
+
 export function initRouter() {
 	window.addEventListener("popstate", applyRoute);
 	window.addEventListener("hashchange", applyRoute);
+	subscribeStore(syncTitle);
 	applyRoute();
 }

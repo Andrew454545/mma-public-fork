@@ -82,6 +82,9 @@ const storeBus = createBus<() => void>();
 const subscribe = storeBus.on;
 const notify = storeBus.emit;
 
+/** Subscribe to any store mutation (map open/close, rename, edits, ...). */
+export const subscribeStore = subscribe;
+
 /** Build a reactive store hook: subscribe to the bus, return the latest value. */
 function makeStoreHook<T>(getValue: () => T, snapshot: () => number = getMapSnapshot): () => T {
 	return function useStoreValue(): T {

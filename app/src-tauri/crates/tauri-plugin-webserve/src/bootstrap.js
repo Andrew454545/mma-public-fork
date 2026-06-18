@@ -106,6 +106,10 @@
 				return Promise.resolve(null);
 			}
 			case "window":
+				if (name === "set_title") {
+					document.title = (args && args.value) || ""; // mirror the window title to the tab
+					return Promise.resolve(null);
+				}
 				if (name.includes("get_all")) return Promise.resolve([]); // get_all_windows -> array
 				if (name === "is_visible") return Promise.resolve(true);
 				if (name.startsWith("is_")) return Promise.resolve(false); // minimized/maximized/fullscreen

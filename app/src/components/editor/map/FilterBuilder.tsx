@@ -32,10 +32,14 @@ export interface FieldEntry {
 	fieldDef?: ExtraFieldDef;
 }
 
+/* Non-extra fields the filter builder should acknowledge. */
 const VIRTUAL_FIELDS: FieldEntry[] = [
 	{ key: "createdAt", label: "Created", fieldType: "date" },
 	{ key: "modifiedAt", label: "Modified", fieldType: "date" },
 	{ key: "tagCount", label: "Tag count", fieldType: "number" },
+	{ key: "heading", label: "Heading", fieldType: "number" },
+	{ key: "pitch", label: "Pitch", fieldType: "number" },
+	{ key: "zoom", label: "Zoom", fieldType: "number" },
 ];
 
 export function useExtraFieldKeys(): FieldEntry[] {

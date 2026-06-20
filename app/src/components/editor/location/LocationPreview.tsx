@@ -284,8 +284,6 @@ function PanoOption({ pano }: { pano: PanoReference }) {
 
 
 let singletonPano: google.maps.StreetViewPanorama | null = null;
-// eslint-disable-next-line @typescript-eslint/no-explicit-any -- debug helper
-(window as any).__mma_pano = () => singletonPano;
 
 export async function loadSeenPano(entry: SeenEntry) {
 	seenSkipNext(entry.panoId);
@@ -315,10 +313,9 @@ export async function loadSeenPano(entry: SeenEntry) {
 	}
 
 	if (!singletonPano) return;
-	const pano = singletonPano;
-	pano.setPano(entry.panoId);
-	pano.setPov({ heading: entry.heading, pitch: entry.pitch });
-	pano.setZoom(entry.zoom);
+	singletonPano.setPano(entry.panoId);
+	singletonPano.setPov({ heading: entry.heading, pitch: entry.pitch });
+	singletonPano.setZoom(entry.zoom);
 }
 const singletonDiv = (() => {
 	const el = document.createElement("div");
@@ -468,9 +465,7 @@ function LocationPreviewInner() {
 	}, [appSettings.showCrosshair]);
 
 	// Mount/unmount: move the persistent div in/out of the container.
-	// useLayoutEffect so setVisible(false) + appendChild run before paint,
-	// matches the og mount() which calls setOptions({visible:false})
-	// before appending the div.
+	// useLayoutEffect so setVisible(false) + appendChild run before paint.
 	useLayoutEffect(() => {
 		const container = panoContainerRef.current;
 		if (!container) return;

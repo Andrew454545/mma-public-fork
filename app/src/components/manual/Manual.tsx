@@ -1,8 +1,8 @@
 import { useEffect, useRef, createContext, useContext, isValidElement, type ReactNode } from "react";
 import { Icon } from "@/components/primitives/Icon";
 import { mdiClose, mdiChevronLeft, mdiChevronRight } from "@mdi/js";
-import { MANUAL_IMG_DIMS } from "@/components/dialogs/manual-img-dims.gen";
-import "@/components/dialogs/manual.css";
+import { MANUAL_IMG_DIMS } from "@/components/manual/manual-img-dims.gen";
+import "@/components/manual/manual.css";
 
 // --- Reusable content primitives ---
 

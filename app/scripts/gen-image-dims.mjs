@@ -11,7 +11,7 @@ import { imageSize } from "image-size";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const imgDir = join(here, "..", "..", "img", "manual");
-const outFile = join(here, "..", "src", "components", "dialogs", "manual-img-dims.gen.ts");
+const outFile = join(here, "..", "src", "components", "manual", "manual-img-dims.gen.ts");
 
 const dims = {};
 if (existsSync(imgDir)) {

@@ -83,7 +83,10 @@ export function FullscreenTagBar({
 							key={t.id}
 							className="tag is-small fullscreen-tagbar__palette-tag"
 							style={{ backgroundColor: t.color, color: textColorFor(t.color) }}
-							onMouseDown={() => toggleTag(t)}
+							onMouseDown={(e) => {
+								e.preventDefault(); // keep the input focused so the palette stays open
+								toggleTag(t);
+							}}
 							type="button"
 						>
 							<span className="tag__text">{t.name}</span>

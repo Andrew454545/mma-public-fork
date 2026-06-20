@@ -38,6 +38,7 @@ import clsx from "clsx";
 import type { SortMode } from "@/types";
 import type { MapMeta } from "@/bindings.gen";
 import { fmt, relativeTime, shortDateFmt } from "@/lib/util/format";
+import { useLocalStorage } from "@/lib/hooks/useLocalStorage";
 import { useSetting, type MapListField } from "@/store/settings";
 import { toast } from "@/lib/util/toast";
 
@@ -839,12 +840,6 @@ function sortMaps(maps: MapMeta[], mode: SortMode): MapMeta[] {
 	}
 }
 
-function loadSortMode(): SortMode {
-	const v = localStorage.getItem("mapListSort");
-	if (v === "name" || v === "opened" || v === "created" || v === "amount") return v;
-	return "name";
-}
-
 // --- Main ---
 
 function applyFilter(listEl: HTMLElement | null, query: string) {
@@ -869,7 +864,7 @@ function applyFilter(listEl: HTMLElement | null, query: string) {
 
 export function MapList() {
 	const maps = useMapList();
-	const [sortMode, setSortMode] = useState<SortMode>(loadSortMode);
+	const [sortMode, setSortMode] = useLocalStorage<SortMode>("mapListSort", "name");
 	const [syntheticFolders, setSyntheticFolders] = useState<string[]>([]);
 	const [dragItem, setDragItem] = useState<DragItem | null>(null);
 	const previewRef = useRef<HTMLDivElement>(null);
@@ -1060,11 +1055,7 @@ export function MapList() {
 					<select
 						className="nselect map-list__sort"
 						value={sortMode}
-						onChange={(e) => {
-							const v = e.target.value as SortMode;
-							setSortMode(v);
-							localStorage.setItem("mapListSort", v);
-						}}
+						onChange={(e) => setSortMode(e.target.value as SortMode)}
 					>
 						{SORT_OPTIONS.map((o) => (
 							<option key={o.value} value={o.value}>

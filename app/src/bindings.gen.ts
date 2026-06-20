@@ -202,6 +202,14 @@ export const commands = {
 	 */
 	storeResolveSelection: (props: SelectionProps) => typedError<number[], string>(__TAURI_INVOKE("store_resolve_selection", { props })),
 	/**
+	 *  Partition the (optionally scoped) location set into groups by a derived key, returning
+	 *  compact `{ key, ids, bin }` per group — no hydrated locations. `scope` None partitions
+	 *  the whole map; Some resolves that selection and restricts to it. Powers the gradient
+	 *  (groups -> colored selections) and apply-as-tags (groups -> tags) surfaces without
+	 *  materializing location data into JS.
+	 */
+	storePartition: (field: string, key: KeySpec, scope: Scope) => typedError<PartitionBucket[], string>(__TAURI_INVOKE("store_partition", { field, key, scope })).then((v) => ((v.status === "ok" ? { ...v, data: v.data.map(i=>({...i,bin:i.bin==null?i.bin:i.bin.map(i=>i)})) } : v) as typeof v)),
+	/**
 	 *  Transitive spatial duplicate groups (connected components, size >= 2) within `distance`
 	 *  metres. Read-only; used to preview a merge. Returns groups of location IDs.
 	 */
@@ -448,6 +456,9 @@ export type CopyToMapResult = {
 	targetName: string,
 };
 
+/**  A calendar component to group dates by. */
+export type DatePart = "year" | "yearMonth" | "day" | "monthOfYear" | "hourOfDay";
+
 /**  Aggregate database statistics for the debug panel. */
 export type DbStats = {
 	maps: number,
@@ -600,6 +611,15 @@ export type ImportedMapInfo = {
 	locationCount: number,
 	tagCount: number,
 };
+
+/**  How a field value becomes a group key. Wire-mirrors the JS `KeySpec`. */
+export type KeySpec = 
+/**  String value of the field (enum/string/month "YYYY-MM"/number). */
+{ kind: "value" } | 
+/**  Equal-width numeric bins. */
+{ kind: "numericBin"; binning: NumericBinning } | 
+/**  Calendar component of a date (epoch seconds) or month ("YYYY-MM") field. */
+{ kind: "datePart"; part: DatePart; tzLocal: boolean };
 
 /**
  *  A single Street View location on a map.
@@ -858,6 +878,19 @@ export type MutationResult_Serialize = {
 	tags: { [key in number]: Tag } | null,
 } & StoreStatus;
 
+/**  Equal-width bin sizing. `count` derives the width from the data range; `width` fixes it. */
+export type NumericBinning = { by: "count"; n: number } | { by: "width"; w: number };
+
+/**
+ *  One partition group: a stable key, the ids it holds, and (numeric bins only) the
+ *  `[lo, hi]` bounds so JS can rebuild a live Filter for whole-map gradients.
+ */
+export type PartitionBucket = {
+	key: string,
+	ids: number[],
+	bin: [number, number] | null,
+};
+
 /**  Metadata for a user-installed plugin, read from `plugins/{id}/manifest.json`. */
 export type PluginManifest = {
 	id: string,
@@ -993,6 +1026,12 @@ export type ReviewUpdate = {
 export type SaveResult = {
 	savedChunks: number,
 };
+
+/**
+ *  Which locations to operate on: the whole map or the current selection. Resolved in Rust
+ *  against the maintained selection set.
+ */
+export type Scope = { kind: "all" } | { kind: "selected" };
 
 /**
  *  Score bounding box: either `"auto"` (computed from locations) or an

@@ -1,14 +1,16 @@
 import { useState, useMemo } from "react";
-import type { ExtraFieldDef } from "@/bindings.gen";
-import { cmd } from "@/lib/commands";
+import type { ExtraFieldDef, KeySpec, DatePart } from "@/bindings.gen";
 import { getFieldDef } from "@/lib/data/fieldDefRegistry";
-import { groupByField, projectionsForType } from "@/lib/data/fieldOps";
+import { projectionsForType, partitionKeyOptions, RANGE_ID } from "@/lib/data/fieldOps";
 import {
 	useKnownFieldKeys,
 	fetchLocationsByIds,
+	partition,
+	useScope,
 	createTags,
 	batchUpdateLocations,
 } from "@/store/useMapStore";
+import { ScopeSelector } from "@/components/primitives/ScopeSelector";
 import { Dialog, DialogContent } from "@/components/primitives/Dialog";
 
 export function ApplyFieldAsTagsDialog({
@@ -22,6 +24,7 @@ export function ApplyFieldAsTagsDialog({
 	const [projectionId, setProjectionId] = useState("");
 	const [width, setWidth] = useState("");
 	const [tzLocal, setTzLocal] = useState(false);
+	const scopeCtl = useScope();
 	const keys = useKnownFieldKeys();
 	const fields = useMemo(() => {
 		const entries: { key: string; label: string; type: ExtraFieldDef["type"] }[] = [];
@@ -33,10 +36,11 @@ export function ApplyFieldAsTagsDialog({
 	}, [keys]);
 
 	const fieldType = fields.find((f) => f.key === field)?.type ?? "string";
-	const projections = projectionsForType(fieldType);
-	const projection = projections.find((p) => p.id === projectionId) ?? projections[0];
-	const showTz = projection?.needsTz === true && fieldType === "date";
-	const showWidth = projection?.needsWidth === true;
+	const projOptions = partitionKeyOptions(fieldType, false);
+	const isRange = projectionId === RANGE_ID;
+	const selectedProj = projectionsForType(fieldType).find((p) => p.id === projectionId);
+	const showTz = !isRange && selectedProj?.needsTz === true && fieldType === "date";
+	const showWidth = isRange;
 	const widthValid = !showWidth || Number(width) > 0;
 
 	const handleFieldChange = (key: string) => {
@@ -48,22 +52,27 @@ export function ApplyFieldAsTagsDialog({
 	};
 
 	const handleApply = async () => {
-		if (!field || !projection || !widthValid) return;
-		const ids = await cmd.storeResolveSelection({ type: "Everything" });
-		if (ids.length === 0) return;
-		const locs = await fetchLocationsByIds(ids);
-		const groups = groupByField(locs, field, (v, loc) =>
-			projection.key(v, { fieldType, loc, tzLocal, width: Number(width) }),
-		);
-		if (groups.size === 0) return;
-		const created = await createTags([...groups.keys()]);
+		if (!field || !widthValid) return;
+
+		const key: KeySpec = isRange
+			? { kind: "numericBin", binning: { by: "width", w: Number(width) } }
+			: projectionId === "value"
+				? { kind: "value" }
+				: { kind: "datePart", part: projectionId as DatePart, tzLocal };
+
+		// Grouping runs in Rust; only the matched subset is fetched (once) to append tags.
+		const groups = await partition(field, key, scopeCtl.scope);
+		if (groups.length === 0) return;
+
+		const created = await createTags(groups.map((g) => g.key));
 		const tagIdByName = new Map(created.map((t) => [t.name.toLowerCase(), t.id]));
+		const locs = await fetchLocationsByIds(groups.flatMap((g) => g.ids));
 		const locById = new Map(locs.map((l) => [l.id, l]));
 		const updates: { id: number; patch: { tags: number[] } }[] = [];
-		for (const [name, locIds] of groups) {
-			const tagId = tagIdByName.get(name.toLowerCase());
+		for (const g of groups) {
+			const tagId = tagIdByName.get(g.key.toLowerCase());
 			if (tagId == null) continue;
-			for (const id of locIds) {
+			for (const id of g.ids) {
 				const l = locById.get(id);
 				if (l && !l.tags.includes(tagId)) updates.push({ id, patch: { tags: [...l.tags, tagId] } });
 			}
@@ -93,6 +102,7 @@ export function ApplyFieldAsTagsDialog({
 					}}
 					style={{ display: "flex", flexDirection: "column", gap: "0.75rem", marginTop: 4 }}
 				>
+					<ScopeSelector ctl={scopeCtl} />
 					<select
 						className="input"
 						value={field}
@@ -106,13 +116,13 @@ export function ApplyFieldAsTagsDialog({
 							</option>
 						))}
 					</select>
-					{field && projections.length > 1 && (
+					{field && projOptions.length > 1 && (
 						<select
 							className="input"
-							value={projection?.id ?? ""}
+							value={projectionId}
 							onChange={(e) => setProjectionId(e.target.value)}
 						>
-							{projections.map((p) => (
+							{projOptions.map((p) => (
 								<option key={p.id} value={p.id}>
 									{p.label}
 								</option>

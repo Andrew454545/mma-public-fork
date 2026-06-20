@@ -2838,6 +2838,30 @@ pub fn store_resolve_selection(webview: tauri::Webview, state: tauri::State<'_, 
     })
 }
 
+/// Partition the (optionally scoped) location set into groups by a derived key, returning
+/// compact `{ key, ids, bin }` per group — no hydrated locations. `scope` None partitions
+/// the whole map; Some resolves that selection and restricts to it. Powers the gradient
+/// (groups -> colored selections) and apply-as-tags (groups -> tags) surfaces without
+/// materializing location data into JS.
+#[tauri::command]
+#[specta::specta]
+pub fn store_partition(
+    webview: tauri::Webview,
+    state: tauri::State<'_, StoreState>,
+    field: String,
+    key: selections::KeySpec,
+    scope: selections::Scope,
+) -> AppResult<Vec<selections::PartitionBucket>> {
+    with_store!(webview, state, |store| {
+        let view = store.loc_view();
+        let scope_set = match scope {
+            selections::Scope::All => None,
+            selections::Scope::Selected => Some(&store.selections.ids),
+        };
+        Ok(selections::partition(&view, &field, &key, scope_set))
+    })
+}
+
 /// Transitive spatial duplicate groups (connected components, size >= 2) within `distance`
 /// metres. Read-only; used to preview a merge. Returns groups of location IDs.
 #[tauri::command]

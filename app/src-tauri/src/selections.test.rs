@@ -970,3 +970,134 @@ fn filter_tz_local_ignored_for_nothas() {
     });
     assert_eq!(ids, vec![2]);
 }
+
+// -----------------------------------------------------------------------
+// Partition: group-by aggregation (parity with JS fieldOps/binNumeric)
+// -----------------------------------------------------------------------
+
+fn loc_extra(id: u32, extra: serde_json::Value) -> Location {
+    Location { extra: extra.as_object().cloned(), ..loc(id, 0.0, 0.0) }
+}
+
+fn partition_view<'a>(adds: &'a [Location], dead: &'a HashSet<u32>, patches: &'a HashMap<u32, Location>) -> LocView<'a> {
+    make_view(None, dead, patches, adds)
+}
+
+#[test]
+fn partition_numeric_count_matches_js() {
+    let adds = vec![
+        loc_extra(1, serde_json::json!({"alt": 0})),
+        loc_extra(2, serde_json::json!({"alt": 50})),
+        loc_extra(3, serde_json::json!({"alt": 100})),
+    ];
+    let (dead, patches) = (HashSet::new(), HashMap::new());
+    let view = partition_view(&adds, &dead, &patches);
+    let groups = partition(&view, "alt", &KeySpec::NumericBin { binning: NumericBinning::Count { n: 2 } }, None);
+    assert_eq!(groups.len(), 2);
+    assert_eq!(groups[0].key, "0–50");
+    assert_eq!(groups[0].bin, Some([0.0, 50.0]));
+    assert_eq!(groups[1].key, "50–100");
+    assert_eq!(groups[1].bin, Some([50.0, 100.0]));
+    let mut all: Vec<u32> = groups.iter().flat_map(|g| g.ids.clone()).collect();
+    all.sort();
+    assert_eq!(all, vec![1, 2, 3]);
+}
+
+#[test]
+fn partition_numeric_width_anchors_at_multiples() {
+    let adds = vec![
+        loc_extra(1, serde_json::json!({"n": 84})),
+        loc_extra(2, serde_json::json!({"n": 1237})),
+        loc_extra(3, serde_json::json!({"n": 1300})),
+    ];
+    let (dead, patches) = (HashSet::new(), HashMap::new());
+    let view = partition_view(&adds, &dead, &patches);
+    let groups = partition(&view, "n", &KeySpec::NumericBin { binning: NumericBinning::Width { w: 500.0 } }, None);
+    let g0 = groups.iter().find(|g| g.key == "0–500").unwrap();
+    assert_eq!(g0.ids, vec![1]);
+    let g2 = groups.iter().find(|g| g.key == "1000–1500").unwrap();
+    let mut ids = g2.ids.clone();
+    ids.sort();
+    assert_eq!(ids, vec![2, 3]);
+    // the empty "500–1000" bin is dropped
+    assert!(groups.iter().all(|g| g.key != "500–1000"));
+}
+
+#[test]
+fn partition_value_groups_by_distinct() {
+    let adds = vec![
+        loc_extra(1, serde_json::json!({"c": "FR"})),
+        loc_extra(2, serde_json::json!({"c": "DE"})),
+        loc_extra(3, serde_json::json!({"c": "FR"})),
+    ];
+    let (dead, patches) = (HashSet::new(), HashMap::new());
+    let view = partition_view(&adds, &dead, &patches);
+    let groups = partition(&view, "c", &KeySpec::Value, None);
+    assert_eq!(groups.len(), 2);
+    assert!(groups.iter().all(|g| g.bin.is_none()));
+    assert_eq!(groups.iter().find(|g| g.key == "FR").unwrap().ids, vec![1, 3]);
+}
+
+#[test]
+fn partition_date_tz_local_matches_js_golden() {
+    // 2019-12-31T20:00:00Z is 2020-01-01 05:00 in Tokyo (UTC+9, no DST) — same vectors as
+    // the JS fieldOps tzLocal test.
+    let ts = Utc.with_ymd_and_hms(2019, 12, 31, 20, 0, 0).unwrap().timestamp();
+    let adds = vec![loc_extra(1, serde_json::json!({"t": ts, "timezone": "Asia/Tokyo"}))];
+    let (dead, patches) = (HashSet::new(), HashMap::new());
+    let view = partition_view(&adds, &dead, &patches);
+    let part = |p: DatePart| partition(&view, "t", &KeySpec::DatePart { part: p, tz_local: true }, None)[0].key.clone();
+    assert_eq!(part(DatePart::Year), "2020");
+    assert_eq!(part(DatePart::Day), "2020-01-01");
+    assert_eq!(part(DatePart::HourOfDay), "05:00");
+}
+
+#[test]
+fn partition_date_local_frame_roundtrip() {
+    // Construct from local wall-clock digits and read them back — machine-tz agnostic.
+    let ts = Local.with_ymd_and_hms(2021, 3, 14, 9, 0, 0).single().unwrap().timestamp();
+    let adds = vec![loc_extra(1, serde_json::json!({"t": ts}))];
+    let (dead, patches) = (HashSet::new(), HashMap::new());
+    let view = partition_view(&adds, &dead, &patches);
+    let day = partition(&view, "t", &KeySpec::DatePart { part: DatePart::Day, tz_local: false }, None);
+    assert_eq!(day[0].key, "2021-03-14");
+    let hour = partition(&view, "t", &KeySpec::DatePart { part: DatePart::HourOfDay, tz_local: false }, None);
+    assert_eq!(hour[0].key, "09:00");
+}
+
+#[test]
+fn partition_month_field_year_and_month_of_year() {
+    let adds = vec![
+        loc_extra(1, serde_json::json!({"m": "2019-07"})),
+        loc_extra(2, serde_json::json!({"m": "2019-07"})),
+    ];
+    let (dead, patches) = (HashSet::new(), HashMap::new());
+    let view = partition_view(&adds, &dead, &patches);
+    let y = partition(&view, "m", &KeySpec::DatePart { part: DatePart::Year, tz_local: false }, None);
+    assert_eq!(y[0].key, "2019");
+    assert_eq!(y[0].ids, vec![1, 2]);
+    let mo = partition(&view, "m", &KeySpec::DatePart { part: DatePart::MonthOfYear, tz_local: false }, None);
+    assert_eq!(mo[0].key, "July");
+}
+
+#[test]
+fn partition_respects_scope() {
+    let adds = vec![
+        loc_extra(1, serde_json::json!({"c": "FR"})),
+        loc_extra(2, serde_json::json!({"c": "DE"})),
+        loc_extra(3, serde_json::json!({"c": "FR"})),
+    ];
+    let (dead, patches) = (HashSet::new(), HashMap::new());
+    let view = partition_view(&adds, &dead, &patches);
+    let scope = resolve_set(&view, &SelectionProps::Locations { locations: vec![1, 2], name: None });
+    let groups = partition(&view, "c", &KeySpec::Value, Some(&scope));
+    assert_eq!(groups.iter().find(|g| g.key == "FR").unwrap().ids, vec![1]);
+    assert_eq!(groups.iter().find(|g| g.key == "DE").unwrap().ids, vec![2]);
+}
+
+#[test]
+fn bound_label_matches_js_fmt() {
+    assert_eq!(bound_label(0.0, 50.0), "0–50");
+    assert_eq!(bound_label(42.567, 43.0), "42.57–43");
+    assert_eq!(bound_label(-500.0, 0.0), "-500–0");
+}

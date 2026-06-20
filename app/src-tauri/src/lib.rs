@@ -400,6 +400,7 @@ pub fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             location_store::store_sync_selections,
             location_store::store_get_selected_ids_list,
             location_store::store_resolve_selection,
+            location_store::store_partition,
             location_store::store_duplicate_groups,
             location_store::store_merge_duplicates,
             location_store::store_prune_duplicates,

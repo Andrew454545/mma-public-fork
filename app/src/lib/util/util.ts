@@ -37,10 +37,16 @@ export interface NumericBuckets {
 	bucketIndex(value: number): number;
 }
 
-// Split a numeric range into `count` equal-width buckets (a histogram axis).
-// Non-finite values are ignored; returns null if there's no spread to bucket.
-export function bucketize(values: number[], count: number): NumericBuckets | null {
-	if (count < 1) return null;
+// How to size equal-width numeric bins: `count` derives the width from the data range
+// (adaptive, always ~N bins); `width` fixes the width with bins anchored at multiples of
+// it (stable, comparable labels across datasets). One algorithm, two parameterizations.
+export type NumericBinning = { by: "count"; n: number } | { by: "width"; w: number };
+
+const fmtBound = (n: number) => (Number.isInteger(n) ? String(n) : String(Math.round(n * 100) / 100));
+
+// Split numeric values into equal-width bins. Non-finite values are ignored. Returns null
+// when there's nothing to bin (no finite values, or — count mode — no spread).
+export function binNumeric(values: number[], binning: NumericBinning): NumericBuckets | null {
 	let min = Infinity;
 	let max = -Infinity;
 	let any = false;
@@ -50,16 +56,44 @@ export function bucketize(values: number[], count: number): NumericBuckets | nul
 		if (n < min) min = n;
 		if (n > max) max = n;
 	}
-	if (!any || min === max) return null;
-	const step = (max - min) / count;
-	const fmt = (n: number) => (Number.isInteger(n) ? String(n) : String(Math.round(n * 100) / 100));
+	if (!any) return null;
+
 	const bounds: [number, number][] = [];
 	const labels: string[] = [];
+
+	if (binning.by === "count") {
+		const count = binning.n;
+		if (count < 1 || min === max) return null;
+		const step = (max - min) / count;
+		for (let i = 0; i < count; i++) {
+			const lo = min + step * i;
+			const hi = i === count - 1 ? max : min + step * (i + 1);
+			bounds.push([lo, hi]);
+			labels.push(`${fmtBound(lo)}–${fmtBound(hi)}`);
+		}
+		return {
+			count,
+			min,
+			max,
+			bounds,
+			labels,
+			bucketIndex(value: number): number {
+				if (value <= min) return 0;
+				if (value >= max) return count - 1;
+				const idx = Math.floor((value - min) / step);
+				return idx < 0 ? 0 : idx >= count ? count - 1 : idx;
+			},
+		};
+	}
+
+	const w = binning.w;
+	if (!(w > 0)) return null;
+	const lo0 = Math.floor(min / w) * w;
+	const count = Math.max(1, Math.floor((max - lo0) / w) + 1);
 	for (let i = 0; i < count; i++) {
-		const lo = min + step * i;
-		const hi = i === count - 1 ? max : min + step * (i + 1);
-		bounds.push([lo, hi]);
-		labels.push(`${fmt(lo)}–${fmt(hi)}`);
+		const lo = lo0 + w * i;
+		bounds.push([lo, lo + w]);
+		labels.push(`${fmtBound(lo)}–${fmtBound(lo + w)}`);
 	}
 	return {
 		count,
@@ -68,12 +102,15 @@ export function bucketize(values: number[], count: number): NumericBuckets | nul
 		bounds,
 		labels,
 		bucketIndex(value: number): number {
-			if (value <= min) return 0;
-			if (value >= max) return count - 1;
-			const idx = Math.floor((value - min) / step);
+			const idx = Math.floor((value - lo0) / w);
 			return idx < 0 ? 0 : idx >= count ? count - 1 : idx;
 		},
 	};
+}
+
+// Split a numeric range into `count` equal-width buckets (a histogram axis).
+export function bucketize(values: number[], count: number): NumericBuckets | null {
+	return binNumeric(values, { by: "count", n: count });
 }
 
 export function sortTagsByMode(tags: Tag[], mode: TagSortMode, counts: Record<number, number>): Tag[] {

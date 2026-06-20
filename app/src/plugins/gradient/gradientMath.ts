@@ -1,5 +1,5 @@
 import type { ExtraFieldDef, SelectionProps } from "@/bindings.gen";
-import { bucketize, compareNatural } from "@/lib/util/util";
+import type { PartitionGroup } from "@/lib/data/fieldOps";
 
 export function lerp(
 	a: [number, number, number],
@@ -44,74 +44,66 @@ export interface GradientSelection {
 	color: [number, number, number];
 }
 
-// Turn field values into colored selections. Unscoped → live Filter buckets that match the
-// whole map. Scoped → static Locations buckets holding only the given ids, so both the bucket
-// bounds and the coloring come from the subset. `key` mirrors the engine's key (for
-// setSelectionColors): Filter keys by predicate, Locations by its id list.
-export function buildGradientSelections(
-	values: { id: number; raw: unknown }[],
+// Color a partition's groups along the ramp and turn each into a selection — the
+// gradient sink over the shared `partition()` kernel.
+//
+// Coloring: numeric range bins color by ordinal position (`ordinal`). Categorical groups
+// color proportionally when every key has a numeric scale (e.g. months, numeric strings),
+// else by even spacing.
+//
+// Selection shape (`key` mirrors the engine's key, for setSelectionColors):
+//   - unscoped numeric bin  -> live Filter `between` (re-evaluates against the whole map)
+//   - unscoped value group  -> live Filter `eq`
+//   - everything else       -> static Locations (projections can't be expressed as a Filter;
+//                              scoped groups are inherently a fixed id subset)
+export function colorPartition(
+	groups: PartitionGroup[],
 	opts: {
-		numeric: boolean;
 		fieldKey: string;
 		fieldType: string | undefined;
 		stops: [number, number, number][];
-		bucketCount: number;
 		scoped: boolean;
+		ordinal: boolean;
+		eqFilter: boolean;
 	},
 ): GradientSelection[] {
-	const { numeric, fieldKey, fieldType, stops, bucketCount, scoped } = opts;
-	if (values.length === 0) return [];
-	const out: GradientSelection[] = [];
+	if (groups.length === 0) return [];
+	const { fieldKey, fieldType, stops, scoped, ordinal, eqFilter } = opts;
+	const n = groups.length;
+	const evenSpaced = (i: number) => (n === 1 ? 0.5 : i / (n - 1));
 
-	if (numeric) {
-		const nums = values.map((v) => ({ id: v.id, n: Number(v.raw) }));
-		const buckets = bucketize(nums.map((v) => v.n), bucketCount);
-		if (!buckets) return [];
-		const last = buckets.bounds.length - 1;
-		buckets.bounds.forEach(([lo, hi], i) => {
-			const color = gradientColor(stops, i / (bucketCount - 1));
-			if (scoped) {
-				// Half-open bins [lo,hi) except the last [lo,hi], so each id lands in exactly one.
-				const ids = nums
-					.filter((v) => v.n >= lo && (i === last ? v.n <= hi : v.n < hi))
-					.map((v) => v.id);
-				if (ids.length === 0) return;
-				out.push({ props: { type: "Locations", locations: ids, name: null }, key: ids.join(","), color });
-			} else {
-				out.push({
-					props: { type: "Filter", field: fieldKey, op: "between", value: lo, value2: hi },
-					key: `filter:${fieldKey}:between:${lo}:${hi}`,
-					color,
-				});
-			}
-		});
-		return out;
+	let ts: number[];
+	if (ordinal) {
+		ts = groups.map((_, i) => evenSpaced(i));
+	} else {
+		const scales = groups.map((g) => fieldScale(g.key, fieldType));
+		const proportional = n > 1 && scales.every((s) => s !== null);
+		if (proportional) {
+			const lo = Math.min(...(scales as number[]));
+			const hi = Math.max(...(scales as number[]));
+			ts = scales.map((s, i) => (hi > lo ? ((s as number) - lo) / (hi - lo) : evenSpaced(i)));
+		} else {
+			ts = groups.map((_, i) => evenSpaced(i));
+		}
 	}
 
-	const distinct = [...new Set(values.map((v) => String(v.raw)))].sort(compareNatural);
-	const scales = distinct.map((v) => fieldScale(v, fieldType));
-	const proportional = distinct.length > 1 && scales.every((s) => s !== null);
-	const lo = proportional ? Math.min(...(scales as number[])) : 0;
-	const hi = proportional ? Math.max(...(scales as number[])) : 0;
-	distinct.forEach((v, i) => {
-		const t =
-			proportional && hi > lo
-				? ((scales[i] as number) - lo) / (hi - lo)
-				: distinct.length === 1
-					? 0.5
-					: i / (distinct.length - 1);
-		const color = gradientColor(stops, t);
-		if (scoped) {
-			const ids = values.filter((x) => String(x.raw) === v).map((x) => x.id);
-			if (ids.length === 0) return;
-			out.push({ props: { type: "Locations", locations: ids, name: null }, key: ids.join(","), color });
-		} else {
-			out.push({
-				props: { type: "Filter", field: fieldKey, op: "eq", value: v, value2: null },
-				key: `filter:${fieldKey}:eq:${v}`,
+	return groups.map((g, i) => {
+		const color = gradientColor(stops, ts[i]);
+		if (!scoped && g.bin) {
+			const [lo, hi] = g.bin;
+			return {
+				props: { type: "Filter", field: fieldKey, op: "between", value: lo, value2: hi },
+				key: `filter:${fieldKey}:between:${lo}:${hi}`,
 				color,
-			});
+			};
 		}
+		if (!scoped && eqFilter) {
+			return {
+				props: { type: "Filter", field: fieldKey, op: "eq", value: g.key, value2: null },
+				key: `filter:${fieldKey}:eq:${g.key}`,
+				color,
+			};
+		}
+		return { props: { type: "Locations", locations: g.ids, name: g.key }, key: g.ids.join(","), color };
 	});
-	return out;
 }

@@ -1,7 +1,7 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
 import type { Location, WorkArea, ImportPreview } from "@/types";
 import { isVirtualLocation, stagedIndexToVirtualId, virtualIdToStagedIndex } from "@/types";
-import type { MapData, MapMeta, Tag, ExtraFieldDef, FilterOp } from "@/bindings.gen";
+import type { MapData, MapMeta, Tag, ExtraFieldDef, FilterOp, KeySpec, Scope } from "@/bindings.gen";
 import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
 import { emit as tauriEmit, listen } from "@tauri-apps/api/event";
 import { cmd } from "@/lib/commands";
@@ -16,7 +16,7 @@ import { emit as emitEvent } from "@/lib/events";
 import { log } from "@/lib/util/log";
 import { trace } from "@/lib/util/debug";
 import { nowUnix } from "@/lib/util/format";
-import { mmaBufUrl } from "@/lib/util/util";
+import { mmaBufUrl, compareNatural } from "@/lib/util/util";
 import { fitMapToBounds } from "@/lib/map/mapState";
 import { getSettings, setSetting } from "@/store/settings";
 import { getTriggeredProviders } from "@/lib/data/fieldDefs";
@@ -26,6 +26,7 @@ import {
 	planFieldDelete,
 	rewriteSelectionFields,
 	type MergeWinner,
+	type PartitionGroup,
 } from "@/lib/data/fieldOps";
 import { getSavedSelections, rewriteSavedSelectionFields } from "./savedSelections";
 import { SelectedIds, decodeSelectionBitmask, type ReadonlyIdSet, type RenderDelta, type SelCellEntry } from "@/lib/render/CellManager";
@@ -465,14 +466,6 @@ export async function syncSelections(): Promise<{ ids: number[] }> {
 	const ids = await cmd.storeGetSelectedIdsList();
 	return { ids };
 }
-
-// --- Scope: a subset specification over a pool of locations. ---
-// A Scope says *how* to narrow a pool down to a subset, independent of what the pool is
-// (the whole map, a plugin's materialized LocationStore, an import preview, ...). Consumers
-// hold their own pool and apply the scope to it. "Specific named selection" is intentionally
-// deferred — it would need a Rust resolve-by-key primitive.
-export type Scope = { kind: "all" } | { kind: "selected" };
-
 export interface ScopeController {
 	scope: Scope;
 	setScope: (s: Scope) => void;
@@ -480,12 +473,19 @@ export interface ScopeController {
 	selectionCount: number;
 }
 
-/** Narrow a pool of id-bearing records to the subset the scope specifies. Pure w.r.t. the
- *  pool; the "selected" scope reads the live selection set. */
+/** Narrow a materialized pool of id-bearing records to the scope's subset (JS-side). */
 export function applyScope<T extends { id: number }>(scope: Scope, pool: T[]): T[] {
 	if (scope.kind === "all") return pool;
 	const ids = getSelectedLocationIds();
 	return pool.filter((item) => ids.has(item.id));
+}
+
+/** Group the scoped location set by a derived key — entirely in Rust, no locations fetched.
+ *  Numeric bins arrive in bound order; projection keys are sorted naturally for display. */
+export async function partition(field: string, key: KeySpec, scope: Scope): Promise<PartitionGroup[]> {
+	const groups = await cmd.storePartition(field, key, scope);
+	if (key.kind !== "numericBin") groups.sort((a, b) => compareNatural(a.key, b.key));
+	return groups;
 }
 
 function defaultScope(): Scope {

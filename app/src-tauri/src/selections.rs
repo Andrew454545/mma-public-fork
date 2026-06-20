@@ -12,6 +12,7 @@ use arrow::array::{RecordBatch, StringArray, Float64Array, UInt32Array, ListArra
 use roaring::RoaringBitmap;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
+use chrono::{DateTime, Datelike, Timelike, Utc, Local, TimeZone};
 use crate::types::{Location, LocationFlags};
 use crate::util::{unix_to_month_day, unix_to_hour_min, tz_offset_seconds};
 
@@ -1101,6 +1102,280 @@ fn val_to_str(v: &serde_json::Value) -> String {
 /// Try to extract an f64 from a JSON value: native number or parseable string.
 fn as_f64(v: &serde_json::Value) -> Option<f64> {
     v.as_f64().or_else(|| v.as_str().and_then(|s| s.parse().ok()))
+}
+
+// ---------------------------------------------------------------------------
+// Partition: group-by aggregation
+// ---------------------------------------------------------------------------
+//
+// `partition` splits the (scoped) location set into groups by a derived key, returning
+// compact `{ key, ids, bin }` per group.
+//
+
+/// How a field value becomes a group key. Wire-mirrors the JS `KeySpec`.
+#[derive(Clone, Deserialize, specta::Type)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum KeySpec {
+    /// String value of the field (enum/string/month "YYYY-MM"/number).
+    Value,
+    /// Equal-width numeric bins.
+    NumericBin { binning: NumericBinning },
+    /// Calendar component of a date (epoch seconds) or month ("YYYY-MM") field.
+    DatePart { part: DatePart, #[serde(rename = "tzLocal")] tz_local: bool },
+}
+
+/// Equal-width bin sizing. `count` derives the width from the data range; `width` fixes it.
+#[derive(Clone, Deserialize, specta::Type)]
+#[serde(tag = "by", rename_all = "camelCase")]
+pub enum NumericBinning {
+    Count { n: u32 },
+    Width { w: f64 },
+}
+
+/// Which locations to operate on: the whole map or the current selection. Resolved in Rust
+/// against the maintained selection set.
+#[derive(Clone, Deserialize, specta::Type)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum Scope {
+    All,
+    Selected,
+}
+
+/// A calendar component to group dates by.
+#[derive(Clone, Copy, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub enum DatePart {
+    Year,
+    YearMonth,
+    Day,
+    MonthOfYear,
+    HourOfDay,
+}
+
+/// One partition group: a stable key, the ids it holds, and (numeric bins only) the
+/// `[lo, hi]` bounds so JS can rebuild a live Filter for whole-map gradients.
+#[derive(Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct PartitionBucket {
+    pub key: String,
+    pub ids: Vec<u32>,
+    pub bin: Option<[f64; 2]>,
+}
+
+const MONTH_NAMES: [&str; 12] = [
+    "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December",
+];
+
+/// Partition `view` into groups by `field`. `scope` (when Some) restricts to that id set.
+/// Returns groups in a deterministic but unsorted order (numeric: bin order; projection:
+/// first-seen) — the JS caller sorts for display.
+pub fn partition(view: &LocView, field: &str, spec: &KeySpec, scope: Option<&RoaringBitmap>) -> Vec<PartitionBucket> {
+    match spec {
+        KeySpec::NumericBin { binning } => partition_numeric(view, field, binning, scope),
+        _ => partition_keyed(view, field, spec, scope),
+    }
+}
+
+#[inline]
+fn out_of_scope(scope: Option<&RoaringBitmap>, id: u32) -> bool {
+    scope.is_some_and(|s| !s.contains(id))
+}
+
+fn partition_numeric(view: &LocView, field: &str, binning: &NumericBinning, scope: Option<&RoaringBitmap>) -> Vec<PartitionBucket> {
+    let mut vals: Vec<(u32, f64)> = Vec::new();
+    view.for_each(|row| {
+        let id = row.id();
+        if out_of_scope(scope, id) { return; }
+        if let Some(n) = row.resolve_field(field).as_ref().and_then(as_f64) {
+            vals.push((id, n));
+        }
+    });
+    let nums: Vec<f64> = vals.iter().map(|(_, n)| *n).collect();
+    let buckets = match bin_numeric(&nums, binning) {
+        Some(b) => b,
+        None => return Vec::new(),
+    };
+    let mut groups: Vec<PartitionBucket> = buckets.bounds.iter()
+        .map(|&(lo, hi)| PartitionBucket { key: bound_label(lo, hi), ids: Vec::new(), bin: Some([lo, hi]) })
+        .collect();
+    for (id, n) in vals {
+        groups[buckets.index_of(n)].ids.push(id);
+    }
+    groups.retain(|g| !g.ids.is_empty());
+    groups
+}
+
+fn partition_keyed(view: &LocView, field: &str, spec: &KeySpec, scope: Option<&RoaringBitmap>) -> Vec<PartitionBucket> {
+    let mut index: HashMap<String, usize> = HashMap::new();
+    let mut groups: Vec<PartitionBucket> = Vec::new();
+    view.for_each(|row| {
+        let id = row.id();
+        if out_of_scope(scope, id) { return; }
+        let key = match spec {
+            KeySpec::Value => row.resolve_field(field).and_then(|v| value_key(&v)),
+            KeySpec::DatePart { part, tz_local } => {
+                if *tz_local {
+                    let (fv, tz) = row.resolve_field_and_tz(field);
+                    date_part_key(fv.as_ref(), *part, true, tz.as_deref())
+                } else {
+                    date_part_key(row.resolve_field(field).as_ref(), *part, false, None)
+                }
+            }
+            KeySpec::NumericBin { .. } => None,
+        };
+        if let Some(k) = key {
+            if k.is_empty() { return; }
+            match index.get(&k) {
+                Some(&i) => groups[i].ids.push(id),
+                None => {
+                    index.insert(k.clone(), groups.len());
+                    groups.push(PartitionBucket { key: k, ids: vec![id], bin: None });
+                }
+            }
+        }
+    });
+    groups
+}
+
+/// JS `String(value)` for the key: strings verbatim (empty -> skip), numbers without a
+/// trailing ".0", bools as "true"/"false". Null/other -> skip.
+fn value_key(v: &serde_json::Value) -> Option<String> {
+    match v {
+        serde_json::Value::String(s) => if s.is_empty() { None } else { Some(s.clone()) },
+        serde_json::Value::Number(n) => Some(
+            n.as_i64().map(|i| i.to_string())
+                .or_else(|| n.as_f64().map(js_number_string))
+                .unwrap_or_else(|| n.to_string()),
+        ),
+        serde_json::Value::Bool(b) => Some(b.to_string()),
+        _ => None,
+    }
+}
+
+/// Calendar component of a date/month field value, matching JS `calendarParts`. Month
+/// strings ("YYYY-MM") read y/mo with day=1, hour=0; everything else is epoch seconds,
+/// read in the pano's timezone (`tz_local`) or the viewer's local frame.
+fn date_part_key(v: Option<&serde_json::Value>, part: DatePart, tz_local: bool, tz: Option<&str>) -> Option<String> {
+    let v = v?;
+    if let Some(s) = v.as_str() {
+        if let Some((y, mo)) = parse_year_month(s) {
+            return Some(parts_to_key(y, mo, 1, 0, part));
+        }
+    }
+    let ts = as_f64(v)?;
+    let (y, mo, d, h) = if tz_local {
+        let off = tz_offset_seconds(tz?, ts)?;
+        utc_parts(ts + off as f64)
+    } else {
+        local_parts(ts)
+    };
+    Some(parts_to_key(y, mo, d, h, part))
+}
+
+fn parts_to_key(y: i32, mo: u32, d: u32, h: u32, part: DatePart) -> String {
+    match part {
+        DatePart::Year => format!("{}", y),
+        DatePart::YearMonth => format!("{}-{:02}", y, mo),
+        DatePart::Day => format!("{}-{:02}-{:02}", y, mo, d),
+        DatePart::MonthOfYear => MONTH_NAMES[(mo.clamp(1, 12) - 1) as usize].to_string(),
+        DatePart::HourOfDay => format!("{:02}:00", h),
+    }
+}
+
+/// Parse a strict "YYYY-MM" string into (year, month). `None` for any other shape (e.g. a
+/// numeric date string), which the caller then treats as epoch seconds.
+fn parse_year_month(s: &str) -> Option<(i32, u32)> {
+    let b = s.as_bytes();
+    if s.len() != 7 || b[4] != b'-' { return None; }
+    Some((s[0..4].parse().ok()?, s[5..7].parse().ok()?))
+}
+
+fn utc_parts(ts: f64) -> (i32, u32, u32, u32) {
+    let dt = DateTime::<Utc>::from_timestamp(ts as i64, 0).unwrap_or_default();
+    (dt.year(), dt.month(), dt.day(), dt.hour())
+}
+
+fn local_parts(ts: f64) -> (i32, u32, u32, u32) {
+    match Local.timestamp_opt(ts as i64, 0).single() {
+        Some(dt) => (dt.year(), dt.month(), dt.day(), dt.hour()),
+        None => (1970, 1, 1, 0),
+    }
+}
+
+/// JS `String(number)`: integer-valued floats print without a decimal.
+fn js_number_string(f: f64) -> String {
+    if f.is_finite() && f.fract() == 0.0 { format!("{}", f as i64) } else { format!("{}", f) }
+}
+
+/// Equal-width numeric bins, mirroring JS `binNumeric`.
+struct NumBuckets {
+    bounds: Vec<(f64, f64)>,
+    mode: BinMode,
+}
+
+enum BinMode {
+    Count { min: f64, max: f64, step: f64, count: usize },
+    Width { lo0: f64, w: f64, count: usize },
+}
+
+impl NumBuckets {
+    fn index_of(&self, v: f64) -> usize {
+        match self.mode {
+            BinMode::Count { min, max, step, count } => {
+                if v <= min { return 0; }
+                if v >= max { return count - 1; }
+                (((v - min) / step).floor() as isize).clamp(0, count as isize - 1) as usize
+            }
+            BinMode::Width { lo0, w, count } => {
+                (((v - lo0) / w).floor() as isize).clamp(0, count as isize - 1) as usize
+            }
+        }
+    }
+}
+
+fn bin_numeric(values: &[f64], binning: &NumericBinning) -> Option<NumBuckets> {
+    let (mut min, mut max, mut any) = (f64::INFINITY, f64::NEG_INFINITY, false);
+    for &n in values {
+        if n.is_finite() {
+            any = true;
+            if n < min { min = n; }
+            if n > max { max = n; }
+        }
+    }
+    if !any { return None; }
+
+    match *binning {
+        NumericBinning::Count { n } => {
+            let count = n as usize;
+            if count < 1 || min == max { return None; }
+            let step = (max - min) / count as f64;
+            let bounds = (0..count)
+                .map(|i| {
+                    let lo = min + step * i as f64;
+                    let hi = if i == count - 1 { max } else { min + step * (i + 1) as f64 };
+                    (lo, hi)
+                })
+                .collect();
+            Some(NumBuckets { bounds, mode: BinMode::Count { min, max, step, count } })
+        }
+        NumericBinning::Width { w } => {
+            if !(w > 0.0) { return None; }
+            let lo0 = (min / w).floor() * w;
+            let count = (((max - lo0) / w).floor() as usize + 1).max(1);
+            let bounds = (0..count).map(|i| (lo0 + w * i as f64, lo0 + w * (i + 1) as f64)).collect();
+            Some(NumBuckets { bounds, mode: BinMode::Width { lo0, w, count } })
+        }
+    }
+}
+
+/// Numeric bin label, matching JS `fmtBound` ("lo–hi", integers without decimals).
+fn bound_label(lo: f64, hi: f64) -> String {
+    format!("{}–{}", fmt_bound(lo), fmt_bound(hi))
+}
+
+fn fmt_bound(n: f64) -> String {
+    if n.fract() == 0.0 { format!("{}", n as i64) } else { format!("{}", (n * 100.0).round() / 100.0) }
 }
 
 #[cfg(test)]

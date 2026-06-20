@@ -1,10 +1,11 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { Sidebar, Field, EmptyState, SegmentedControl } from "@/components/primitives/Sidebar";
 import { ScopeSelector } from "@/components/primitives/ScopeSelector";
-import type { ExtraFieldDef } from "@/bindings.gen";
+import type { ExtraFieldDef, ExtraFieldType, KeySpec, DatePart } from "@/bindings.gen";
 import { getFieldDef } from "@/lib/data/fieldDefRegistry";
-import { isNumericField, buildGradientSelections } from "./gradientMath";
-import { fetchAllLocations, applyScope, useScope } from "@/store/useMapStore";
+import { partitionKeyOptions, RANGE_ID } from "@/lib/data/fieldOps";
+import { isNumericField, colorPartition } from "./gradientMath";
+import { partition, useScope } from "@/store/useMapStore";
 import "./gradient.css";
 
 interface GradientPreset {
@@ -64,8 +65,15 @@ interface FieldOption {
 	numeric: boolean;
 }
 
+// Gradient offers Range for numbers and dates (count bins); numeric defaults to Range.
+const gradientOptions = (type: ExtraFieldType) => partitionKeyOptions(type, true);
+function defaultProjection(type: ExtraFieldType): string {
+	return type === "number" || type === "date" ? RANGE_ID : gradientOptions(type)[0]?.id ?? "value";
+}
+
 export function GradientSidebar({ onClose }: { onClose: () => void }) {
 	const [fieldKey, setFieldKey] = useState("");
+	const [projectionId, setProjectionId] = useState(RANGE_ID);
 	const [presetIdx, setPresetIdx] = useState(0);
 	const [bucketCount, setBucketCount] = useState(10);
 	const [applying, setApplying] = useState(false);
@@ -94,26 +102,38 @@ export function GradientSidebar({ onClose }: { onClose: () => void }) {
 
 	const preset = PRESETS[presetIdx];
 	const fieldOpt = fields.find((f) => f.key === fieldKey);
+	const fieldType = (fieldOpt?.def?.type ?? "string") as ExtraFieldType;
+	const projOptions = useMemo(() => gradientOptions(fieldType), [fieldType]);
+
+	// Keep the projection valid for the selected field's type.
+	useEffect(() => {
+		if (!fieldOpt) return;
+		if (!projOptions.some((p) => p.id === projectionId)) {
+			setProjectionId(defaultProjection(fieldType));
+		}
+	}, [fieldOpt, projOptions, projectionId, fieldType]);
 
 	const applyGradient = useCallback(async () => {
 		if (!fieldOpt || !map) return;
 		setApplying(true);
 		try {
-			// Read the pool before resetSelections — scope "selected" reads the live selection.
-			const pool = applyScope(scopeCtl.scope, await fetchAllLocations());
-			const values: { id: number; raw: unknown }[] = [];
-			for (const loc of pool) {
-				const v = loc.extra?.[fieldKey];
-				if (v != null) values.push({ id: loc.id, raw: v });
-			}
+			const key: KeySpec =
+				projectionId === RANGE_ID
+					? { kind: "numericBin", binning: { by: "count", n: bucketCount } }
+					: projectionId === "value"
+						? { kind: "value" }
+						: { kind: "datePart", part: projectionId as DatePart, tzLocal: false };
 
-			const sels = buildGradientSelections(values, {
-				numeric: fieldOpt.numeric,
+			const groups = await partition(fieldKey, key, scopeCtl.scope);
+			if (groups.length === 0) return;
+
+			const sels = colorPartition(groups, {
 				fieldKey,
-				fieldType: fieldOpt.def?.type,
+				fieldType,
 				stops: preset.stops,
-				bucketCount,
 				scoped: scopeCtl.scope.kind === "selected",
+				ordinal: projectionId === RANGE_ID,
+				eqFilter: projectionId === "value",
 			});
 			if (sels.length === 0) return;
 
@@ -123,7 +143,7 @@ export function GradientSidebar({ onClose }: { onClose: () => void }) {
 		} finally {
 			setApplying(false);
 		}
-	}, [fieldKey, fieldOpt, map, bucketCount, preset, scopeCtl.scope]);
+	}, [fieldKey, fieldOpt, fieldType, projectionId, map, bucketCount, preset, scopeCtl.scope]);
 
 	return (
 		<Sidebar title="Gradient" onBack={onClose} className="gradient-sidebar">
@@ -149,6 +169,24 @@ export function GradientSidebar({ onClose }: { onClose: () => void }) {
 							))}
 						</select>
 					</Field>
+
+					{projOptions.length > 1 && (
+						<Field label="Group by">
+							<select
+								className="nselect"
+								value={projectionId}
+								onChange={(e) => {
+									setProjectionId(e.target.value);
+								}}
+							>
+								{projOptions.map((p) => (
+									<option key={p.id} value={p.id}>
+										{p.label}
+									</option>
+								))}
+							</select>
+						</Field>
+					)}
 
 					<Field label="Gradient">
 						<div className="gradient-sidebar__presets">
@@ -177,7 +215,7 @@ export function GradientSidebar({ onClose }: { onClose: () => void }) {
 						</div>
 					</Field>
 
-					{fieldOpt?.numeric && (
+					{projectionId === RANGE_ID && (
 						<Field label="Buckets">
 							<SegmentedControl
 								value={bucketCount}

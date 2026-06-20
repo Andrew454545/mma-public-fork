@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { isFiniteNumber, fovToZoom, compareNatural, bucketize, sortTagsByMode } from "@/lib/util/util";
+import { isFiniteNumber, fovToZoom, compareNatural, bucketize, binNumeric, sortTagsByMode } from "@/lib/util/util";
 import { relativeTime } from "@/lib/util/format";
 import type { Tag } from "@/bindings.gen";
 
@@ -113,6 +113,28 @@ describe("bucketize", () => {
 		expect(bucketize([5, 5, 5], 4)).toBeNull();
 		expect(bucketize([], 4)).toBeNull();
 		expect(bucketize([1, 2, 3], 0)).toBeNull();
+	});
+});
+
+describe("binNumeric (width mode)", () => {
+	it("anchors bins at multiples of the width and assigns values", () => {
+		const b = binNumeric([84, 1237, 1300], { by: "width", w: 500 })!;
+		expect(b.bounds[0]).toEqual([0, 500]);
+		expect(b.labels).toContain("1000–1500");
+		expect(b.bucketIndex(84)).toBe(0);
+		expect(b.bucketIndex(1237)).toBe(b.labels.indexOf("1000–1500"));
+	});
+
+	it("handles negatives and a single value (one bin)", () => {
+		expect(binNumeric([-10], { by: "width", w: 500 })!.bounds[0]).toEqual([-500, 0]);
+		const one = binNumeric([42, 42], { by: "width", w: 100 })!;
+		expect(one.count).toBe(1);
+		expect(one.bounds[0]).toEqual([0, 100]);
+	});
+
+	it("returns null for no finite values or non-positive width", () => {
+		expect(binNumeric([NaN, Infinity], { by: "width", w: 10 })).toBeNull();
+		expect(binNumeric([1, 2], { by: "width", w: 0 })).toBeNull();
 	});
 });
 

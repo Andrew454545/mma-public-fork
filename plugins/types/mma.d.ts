@@ -100,6 +100,8 @@ export type CopyToMapResult = {
 	skipped: number;
 	targetName: string;
 };
+/**  A calendar component to group dates by. */
+export type DatePart = "year" | "yearMonth" | "day" | "monthOfYear" | "hourOfDay";
 /**  Aggregate database statistics for the debug panel. */
 export type DbStats = {
 	maps: number;
@@ -230,6 +232,23 @@ export type ImportedMapInfo = {
 	name: string;
 	locationCount: number;
 	tagCount: number;
+};
+/**  How a field value becomes a group key. Wire-mirrors the JS `KeySpec`. */
+export type KeySpec = 
+/**  String value of the field (enum/string/month "YYYY-MM"/number). */
+{
+	kind: "value";
+} | 
+/**  Equal-width numeric bins. */
+{
+	kind: "numericBin";
+	binning: NumericBinning;
+} | 
+/**  Calendar component of a date (epoch seconds) or month ("YYYY-MM") field. */
+{
+	kind: "datePart";
+	part: DatePart;
+	tzLocal: boolean;
 };
 /**
  *  Partial location update from JS. `None` fields are unchanged; `Some(None)` on
@@ -435,6 +454,26 @@ export type MutationResult_Serialize = {
 		[key in number]: Tag;
 	} | null;
 } & StoreStatus;
+/**  Equal-width bin sizing. `count` derives the width from the data range; `width` fixes it. */
+export type NumericBinning = {
+	by: "count";
+	n: number;
+} | {
+	by: "width";
+	w: number;
+};
+/**
+ *  One partition group: a stable key, the ids it holds, and (numeric bins only) the
+ *  `[lo, hi]` bounds so JS can rebuild a live Filter for whole-map gradients.
+ */
+export type PartitionBucket = {
+	key: string;
+	ids: number[];
+	bin: [
+		number,
+		number
+	] | null;
+};
 /**  Metadata for a user-installed plugin, read from `plugins/{id}/manifest.json`. */
 export type PluginManifest = {
 	id: string;
@@ -546,6 +585,15 @@ export type ReviewUpdate = {
 /**  Result of `store_save_dirty`: how many bytes were written to the delta file. */
 export type SaveResult = {
 	savedChunks: number;
+};
+/**
+ *  Which locations to operate on: the whole map or the current selection. Resolved in Rust
+ *  against the maintained selection set.
+ */
+export type Scope = {
+	kind: "all";
+} | {
+	kind: "selected";
 };
 /**
  *  Score bounding box: either `"auto"` (computed from locations) or an
@@ -765,6 +813,8 @@ export type TagSortMode = "default" | "name" | "amount";
 export type WorkArea = "overview" | "location" | "duplicates" | "import" | "plugin" | "diff";
 /** When a move target already holds a value, which field's value survives. */
 export type MergeWinner = "from" | "to";
+/** A group from Rust: key, its ids, and (numeric bins only) the `[lo, hi]` bounds. */
+export type PartitionGroup = PartitionBucket;
 export type RenderDelta = RenderDelta_Serialize;
 /** Per-cell, per-selection membership: a dense bitmask or a sparse selected-index list. */
 export type SelEntry = {
@@ -835,11 +885,6 @@ export interface CommitDiffPreview {
 	removed: Float32Array;
 	modified: Float32Array;
 }
-export type Scope = {
-	kind: "all";
-} | {
-	kind: "selected";
-};
 export interface ScopeController {
 	scope: Scope;
 	setScope: (s: Scope) => void;
@@ -1479,6 +1524,12 @@ declare const DEFAULTS: {
 		g: number;
 		b: number;
 	};
+	panoDotColor: {
+		r: number;
+		g: number;
+		b: number;
+	};
+	panoDotScaled: boolean;
 	tagViewMode: TagViewMode;
 	tagSortMode: TagSortMode;
 	borderDetail: BorderDetail;
@@ -1584,6 +1635,7 @@ declare const mma: {
 		storeSyncSelections: (sels: SelectionInput[]) => Promise<SyncSelectionsResult>;
 		storeGetSelectedIdsList: () => Promise<number[]>;
 		storeResolveSelection: (props: SelectionProps) => Promise<number[]>;
+		storePartition: (field: string, key: KeySpec, scope: Scope) => Promise<PartitionBucket[]>;
 		storeDuplicateGroups: (distance: number) => Promise<number[][]>;
 		storeMergeDuplicates: (distance: number) => Promise<MutationResult_Serialize>;
 		storePruneDuplicates: (ids: number[], distance: number, keepTagIds: number[]) => Promise<MutationResult_Serialize>;
@@ -1698,6 +1750,12 @@ declare const mma: {
 			g: number;
 			b: number;
 		};
+		panoDotColor: {
+			r: number;
+			g: number;
+			b: number;
+		};
+		panoDotScaled: boolean;
 		tagViewMode: TagViewMode;
 		tagSortMode: TagSortMode;
 		borderDetail: BorderDetail;
@@ -1778,6 +1836,7 @@ declare const mma: {
 	applyScope<T extends {
 		id: number;
 	}>(scope: Scope, pool: T[]): T[];
+	partition(field: string, key: KeySpec, scope: Scope): Promise<PartitionGroup[]>;
 	useScope(initial?: Scope): ScopeController;
 	createScope(initial?: Scope): ScopeHandle;
 	createMap(name: string, folder?: string | null): Promise<MapMeta>;

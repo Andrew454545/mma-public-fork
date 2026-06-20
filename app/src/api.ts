@@ -10,6 +10,7 @@
 
 import * as store from "@/store/useMapStore";
 import * as review from "@/lib/review/review";
+import { type Scope } from "@/bindings.gen"
 import { cmd as commands } from "@/lib/commands";
 import { goToMap, goToList } from "@/store/router";
 import { createLocation } from "@/types";
@@ -38,7 +39,7 @@ import { mmaBufUrl } from "@/lib/util/util";
 export interface LocationStore {
 	locations: Map<number, Location>;
 	/** The materialized locations narrowed to a scope (defaults to all). */
-	get(scope?: store.Scope): Location[];
+	get(scope?: Scope): Location[];
 	onChange(cb: () => void): () => void;
 	destroy(): void;
 }

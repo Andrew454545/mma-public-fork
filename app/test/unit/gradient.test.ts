@@ -4,8 +4,9 @@ import {
 	gradientColor,
 	isNumericField,
 	fieldScale,
-	buildGradientSelections,
+	colorPartition,
 } from "@/plugins/gradient/gradientMath";
+import type { PartitionGroup } from "@/lib/data/fieldOps";
 
 describe("lerp", () => {
 	it("t=0 returns first color", () => {
@@ -149,75 +150,91 @@ describe("fieldScale", () => {
 	});
 });
 
-describe("buildGradientSelections", () => {
+describe("colorPartition", () => {
 	const stops: [number, number, number][] = [
 		[0, 0, 0],
 		[255, 255, 255],
 	];
-	const numericValues = [
-		{ id: 1, raw: 0 },
-		{ id: 2, raw: 50 },
-		{ id: 3, raw: 100 },
+	const numericBins: PartitionGroup[] = [
+		{ key: "0–50", ids: [1, 2], bin: [0, 50] },
+		{ key: "50–100", ids: [3], bin: [50, 100] },
 	];
 
-	it("unscoped numeric emits live Filter buckets that match the whole map", () => {
-		const sels = buildGradientSelections(numericValues, {
-			numeric: true,
+	it("unscoped numeric bins emit live Filter `between` selections", () => {
+		const sels = colorPartition(numericBins, {
 			fieldKey: "altitude",
 			fieldType: "number",
 			stops,
-			bucketCount: 2,
 			scoped: false,
+			ordinal: true,
+			eqFilter: false,
 		});
 		expect(sels.every((s) => s.props.type === "Filter")).toBe(true);
 		expect(sels.every((s) => s.key.startsWith("filter:altitude:between:"))).toBe(true);
 	});
 
-	it("scoped numeric emits Locations buckets restricted to the subset's ids, each id in one bucket", () => {
-		const sels = buildGradientSelections(numericValues, {
-			numeric: true,
+	it("scoped numeric bins emit static Locations selections keyed by their id list", () => {
+		const sels = colorPartition(numericBins, {
 			fieldKey: "altitude",
 			fieldType: "number",
 			stops,
-			bucketCount: 2,
 			scoped: true,
+			ordinal: true,
+			eqFilter: false,
 		});
 		expect(sels.every((s) => s.props.type === "Locations")).toBe(true);
-		// every input id appears exactly once across all buckets
-		const ids = sels.flatMap((s) =>
-			s.props.type === "Locations" ? s.props.locations : [],
-		);
+		const ids = sels.flatMap((s) => (s.props.type === "Locations" ? s.props.locations : []));
 		expect(ids.sort()).toEqual([1, 2, 3]);
-		// key mirrors the engine's Locations key (its id list)
 		const first = sels[0];
 		if (first.props.type === "Locations") {
 			expect(first.key).toBe(first.props.locations.join(","));
+			// carries the group key as its name, so it isn't a generic "Selection"
+			expect(first.props.name).toBe("0–50");
 		}
 	});
 
-	it("scoped enum groups the subset's ids by distinct value", () => {
-		const sels = buildGradientSelections(
-			[
-				{ id: 1, raw: "a" },
-				{ id: 2, raw: "b" },
-				{ id: 3, raw: "a" },
-			],
-			{ numeric: false, fieldKey: "tag", fieldType: "string", stops, bucketCount: 0, scoped: true },
-		);
-		expect(sels.every((s) => s.props.type === "Locations")).toBe(true);
-		const aBucket = sels.find((s) => s.props.type === "Locations" && s.props.locations.includes(1));
-		expect(aBucket?.props.type === "Locations" && aBucket.props.locations.sort()).toEqual([1, 3]);
+	it("unscoped value groups emit live Filter `eq` selections", () => {
+		const groups: PartitionGroup[] = [
+			{ key: "a", ids: [1, 3], bin: null },
+			{ key: "b", ids: [2], bin: null },
+		];
+		const sels = colorPartition(groups, {
+			fieldKey: "tag",
+			fieldType: "string",
+			stops,
+			scoped: false,
+			ordinal: false,
+			eqFilter: true,
+		});
+		expect(sels.every((s) => s.props.type === "Filter")).toBe(true);
+		expect(sels.map((s) => s.key)).toEqual(["filter:tag:eq:a", "filter:tag:eq:b"]);
 	});
 
-	it("empty values yield no selections", () => {
+	it("unscoped projection groups (no eqFilter, no bin) fall back to static Locations", () => {
+		const groups: PartitionGroup[] = [
+			{ key: "2020-01-01", ids: [1, 2], bin: null },
+			{ key: "2020-01-02", ids: [3], bin: null },
+		];
+		const sels = colorPartition(groups, {
+			fieldKey: "datetime",
+			fieldType: "date",
+			stops,
+			scoped: false,
+			ordinal: false,
+			eqFilter: false,
+		});
+		expect(sels.every((s) => s.props.type === "Locations")).toBe(true);
+	});
+
+	it("empty groups yield no selections", () => {
 		expect(
-			buildGradientSelections([], {
-				numeric: true,
+			colorPartition([], {
 				fieldKey: "x",
 				fieldType: "number",
 				stops,
-				bucketCount: 5,
 				scoped: true,
+				ordinal: true,
+				eqFilter: false,
 			}),
 		).toEqual([]);
 	});

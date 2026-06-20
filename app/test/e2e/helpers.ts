@@ -52,11 +52,20 @@ export async function clearInput(selector: string) {
 }
 
 export async function createAndOpenMap(name: string): Promise<string> {
-	return withApi(async (api, n) => {
+	const id = await withApi(async (api, n) => {
 		const map = await api.cmd.storeCreateMap(n, null);
 		await api._test.openMap(map.meta.id);
 		return map.meta.id;
 	}, name);
+	// The editor mounts asynchronously after open and runs init effects (render fill,
+	// plugin activation). Seeding/selecting before that settles is racy, so gate here
+	// centrally: wait for the editor DOM, then a short settle for its post-mount effects.
+	// (helpers.ts is exempt from the no-fixed-sleep rule; this is the one sanctioned spot.)
+	await browser
+		.$(".page-map-editor")
+		.waitForExist({ timeout: 10000, timeoutMsg: "map editor never mounted after open" });
+	await browser.pause(300);
+	return id;
 }
 
 export async function openMap(id: string) {
@@ -154,4 +163,58 @@ export async function createTag(
 	name: string,
 ): Promise<{ id: number; name: string; color: string }> {
 	return withApi(async (api, n) => (await api.createTags([n]))[0], name);
+}
+
+// --- Deterministic waits (replace fixed browser.pause sleeps) ---
+// Each polls the real post-condition via the MMA API or DOM, so it finishes as soon as
+// the condition holds and fails loud (not silently) if it never does.
+
+const WAIT = { timeout: 5000, interval: 50 } as const;
+
+/** Wait until the active location id equals `id` (null = back to overview). */
+export async function waitForActive(id: number | null) {
+	await browser.waitUntil(
+		() => withApi((api, target) => (api.getActiveLocation()?.id ?? null) === target, id),
+		{ ...WAIT, timeoutMsg: `active location never became ${id}` },
+	);
+}
+
+/** Wait until the store's work area matches (e.g. "overview" | "location"). */
+export async function waitForWorkArea(area: string) {
+	await browser.waitUntil(() => withApi((api, a) => api.getWorkArea() === a, area), {
+		...WAIT,
+		timeoutMsg: `workArea never became ${area}`,
+	});
+}
+
+/** Wait until the live location count equals `n`. */
+export async function waitForLocCount(n: number) {
+	await browser.waitUntil(async () => (await getLocCount()) === n, {
+		...WAIT,
+		timeoutMsg: `location count never reached ${n}`,
+	});
+}
+
+/** Wait until location `id` exists (post-save), optionally satisfying `predicate`. */
+export async function waitForSave(id: number, predicate?: (l: Location) => boolean) {
+	await browser.waitUntil(
+		async () => {
+			const l = await getLocOrNull(id);
+			return l != null && (predicate ? predicate(l) : true);
+		},
+		{ ...WAIT, timeoutMsg: `location ${id} never satisfied the save predicate` },
+	);
+}
+
+/** Wait until location `id` has (or lacks) a flag bit. */
+export async function waitForFlag(id: number, flag: number, set = true) {
+	await waitForSave(id, (l) => ((l.flags & flag) !== 0) === set);
+}
+
+/** Wait until at least `min` elements match `selector` (dropdowns, lists, dialogs). */
+export async function waitForOptions(selector: string, min = 1) {
+	await browser.waitUntil(async () => (await browser.$$(selector)).length >= min, {
+		...WAIT,
+		timeoutMsg: `selector ${selector} never had >= ${min} elements`,
+	});
 }

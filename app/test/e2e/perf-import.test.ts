@@ -85,6 +85,7 @@ describe("Perf - import 1M", () => {
 		);
 
 		// Let the (fire-and-forget) render effect finish and flush its trace to mma.log.
+		// eslint-disable-next-line no-restricted-syntax -- no observable post-condition; waits on a log-trace side effect
 		await browser.pause(5000);
 
 		console.log(`  [PERF] ${JSON.stringify(result)}`);

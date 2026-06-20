@@ -32,7 +32,13 @@ describe("UI: Map list", () => {
 
 		const newMapBtn = await browser.$('.page-map-list [aria-label="New map"]');
 		await newMapBtn.click();
-		await browser.pause(500);
+		await browser.waitUntil(
+			() =>
+				withApi(async (api) =>
+					(await api.cmd.storeListMaps()).some((m: { name: string }) => m.name === "UI Test Map"),
+				),
+			{ timeout: 5000, timeoutMsg: "New map never appeared in the list" },
+		);
 
 		const id = await withApi(async (api) => {
 			const maps = await api.cmd.storeListMaps();
@@ -99,9 +105,9 @@ describe("UI: Map list - rename and delete", () => {
 		await input.setValue("Renamed Via UI");
 
 		await browser.$(".edit-map-modal .button--primary").click();
-		await browser.pause(500);
 
 		const link = await browser.$(".map-link=Renamed Via UI");
+		await link.waitForExist({ timeout: 5000, timeoutMsg: "Renamed map link never appeared" });
 		expect(await link.isExisting()).toBe(true);
 	});
 
@@ -115,9 +121,9 @@ describe("UI: Map list - rename and delete", () => {
 		const confirmBtn = await browser.$(".edit-map-modal .button--danger");
 		await confirmBtn.waitForDisplayed({ timeout: 3000 });
 		await confirmBtn.click();
-		await browser.pause(500);
 
 		const link = await browser.$(".map-link=Renamed Via UI");
+		await link.waitForExist({ reverse: true, timeout: 5000, timeoutMsg: "Deleted map link never disappeared" });
 		expect(await link.isExisting()).toBe(false);
 	});
 });

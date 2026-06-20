@@ -243,6 +243,7 @@ describe("Enrichment — respects enrichFields setting", () => {
 		await openLocation(fieldsSelectiveId);
 		await waitForPreview();
 		await waitForEnrichment(fieldsSelectiveId, "countryCode");
+		// eslint-disable-next-line no-restricted-syntax -- negative assertion: give disabled fields a bounded window to (not) appear
 		await browser.pause(2000);
 
 		const l = await readLocation(fieldsSelectiveId);
@@ -266,6 +267,7 @@ describe("Enrichment — respects enrichFields setting", () => {
 
 		await openLocation(fieldsSelectiveId);
 		await waitForPreview();
+		// eslint-disable-next-line no-restricted-syntax -- negative assertion: confirm enrichment never populates with metadata disabled
 		await browser.pause(5000);
 
 		const l = await readLocation(fieldsSelectiveId);

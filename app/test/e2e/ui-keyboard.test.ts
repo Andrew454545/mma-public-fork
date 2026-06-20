@@ -6,6 +6,8 @@ import {
 	addLocs,
 	createLocation,
 	getLocCount,
+	waitForLocCount,
+	waitForActive,
 	withApi,
 } from "./helpers";
 
@@ -30,7 +32,7 @@ describe("UI: Keyboard shortcuts", () => {
 		expect(before).toBe(1);
 
 		await browser.keys(["Control", "z"]);
-		await browser.pause(300);
+		await waitForLocCount(0);
 
 		const after = await getLocCount();
 		expect(after).toBe(0);
@@ -47,11 +49,11 @@ describe("UI: Keyboard shortcuts", () => {
 	it("Ctrl+Y also triggers redo", async () => {
 		// Undo first
 		await browser.keys(["Control", "z"]);
-		await browser.pause(200);
+		await waitForLocCount(0);
 
 		// Redo with Ctrl+Y
 		await browser.keys(["Control", "y"]);
-		await browser.pause(300);
+		await waitForLocCount(1);
 
 		const after = await getLocCount();
 		expect(after).toBe(1);
@@ -94,14 +96,14 @@ describe("UI: Review keyboard navigation", () => {
 
 		// Ctrl+Right = next
 		await browser.keys(["Control", "ArrowRight"]);
-		await browser.pause(200);
+		await waitForActive(locIds[1]);
 
 		const secondId = await withApi(async (api) => api.getActiveLocation()?.id);
 		expect(secondId).toBe(locIds[1]);
 
 		// Ctrl+Left = prev
 		await browser.keys(["Control", "ArrowLeft"]);
-		await browser.pause(200);
+		await waitForActive(locIds[0]);
 
 		const backId = await withApi(async (api) => api.getActiveLocation()?.id);
 		expect(backId).toBe(locIds[0]);

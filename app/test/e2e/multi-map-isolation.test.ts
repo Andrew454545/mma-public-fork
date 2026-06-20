@@ -113,7 +113,6 @@ describe("Dirty state isolation across maps", () => {
 	it("modifying A does not make B dirty", async () => {
 		await openMap(mapAId);
 		await addLocs([createLocation({ lat: 99, lng: 99 })]);
-		await browser.pause(300);
 		await closeMap();
 
 		await openMap(mapBId);

@@ -17,7 +17,6 @@ describe("SameLocation — duplicate picker", () => {
 	before(async () => {
 		await waitForReady();
 		mapId = await createAndOpenMap("E2E SameLocation");
-		await browser.pause(500);
 	});
 
 	after(async () => {
@@ -67,7 +66,6 @@ describe("Close map persistence", () => {
 	before(async () => {
 		await waitForReady();
 		mapId = await createAndOpenMap("E2E CloseMap");
-		await browser.pause(500);
 	});
 
 	after(async () => {

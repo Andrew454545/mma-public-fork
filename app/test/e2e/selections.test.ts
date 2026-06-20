@@ -21,7 +21,6 @@ describe("Selections - basic types", () => {
 	before(async () => {
 		await waitForReady();
 		mapId = await createAndOpenMap("E2E Selections");
-		await browser.pause(500);
 
 		const tagRed = await createTag("tag-red");
 		tagRedId = tagRed.id;
@@ -319,7 +318,6 @@ describe("Selection correctness after mutations", () => {
 	before(async () => {
 		await waitForReady();
 		mapId = await createAndOpenMap("E2E Sel Mutations");
-		await browser.pause(500);
 	});
 
 	after(async () => {
@@ -436,7 +434,6 @@ describe("Selection with Filter", () => {
 	before(async () => {
 		await waitForReady();
 		mapId = await createAndOpenMap("E2E Filter");
-		await browser.pause(500);
 
 		const locs: Location[] = [];
 		for (let i = 0; i < 50; i++) {

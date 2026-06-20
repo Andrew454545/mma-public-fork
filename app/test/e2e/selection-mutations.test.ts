@@ -26,7 +26,6 @@ describe("Live selection correctness after add/remove", () => {
 	before(async () => {
 		await waitForReady();
 		mapId = await createAndOpenMap("E2E SelMut AddRemove");
-		await browser.pause(500);
 
 		const tagRed = await createTag("t-red");
 		tagRedId = tagRed.id;
@@ -166,7 +165,6 @@ describe("Live selection correctness after update", () => {
 	before(async () => {
 		await waitForReady();
 		mapId = await createAndOpenMap("E2E SelMut Update");
-		await browser.pause(500);
 
 		const tagAlpha = await createTag("t-alpha");
 		tagAlphaId = tagAlpha.id;
@@ -299,7 +297,6 @@ describe("Review mode delete with active selections", () => {
 	before(async () => {
 		await waitForReady();
 		mapId = await createAndOpenMap("E2E SelMut Review");
-		await browser.pause(500);
 
 		const tagRv = await createTag("t-rv");
 		tagRvId = tagRv.id;
@@ -406,7 +403,6 @@ describe("Selection correctness after undo/redo", () => {
 	before(async () => {
 		await waitForReady();
 		mapId = await createAndOpenMap("E2E SelMut Undo");
-		await browser.pause(500);
 
 		const tagUndo = await createTag("t-undo");
 		tagUndoId = tagUndo.id;
@@ -568,7 +564,6 @@ describe("Composite selection correctness after mutations", () => {
 	before(async () => {
 		await waitForReady();
 		mapId = await createAndOpenMap("E2E SelMut Composite");
-		await browser.pause(500);
 
 		const tagCompA = await createTag("t-comp-a");
 		tagCompAId = tagCompA.id;
@@ -702,7 +697,6 @@ describe("Bulk operations with active selections", () => {
 	before(async () => {
 		await waitForReady();
 		mapId = await createAndOpenMap("E2E SelMut Bulk");
-		await browser.pause(500);
 
 		const tagBulk = await createTag("t-bulk");
 		tagBulkId = tagBulk.id;
@@ -811,7 +805,6 @@ describe("Selection survives save/load cycle", () => {
 	before(async () => {
 		await waitForReady();
 		mapId = await createAndOpenMap("E2E SelMut Persist");
-		await browser.pause(500);
 
 		const tagPersist = await createTag("t-persist");
 		tagPersistId = tagPersist.id;
@@ -931,7 +924,6 @@ describe("Slot reuse correctness", () => {
 	before(async () => {
 		await waitForReady();
 		mapId = await createAndOpenMap("E2E SelMut Slots");
-		await browser.pause(500);
 
 		const tagSlot = await createTag("t-slot");
 		tagSlotId = tagSlot.id;

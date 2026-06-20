@@ -9,6 +9,9 @@ import {
 	createTag,
 	withApi,
 	clearInput,
+	waitForWorkArea,
+	waitForLocCount,
+	waitForOptions,
 } from "./helpers";
 
 describe("UI: Tag manager", () => {
@@ -90,7 +93,10 @@ describe("UI: Tag manager", () => {
 			}
 		}
 
-		await browser.pause(300);
+		await browser.waitUntil(() => withApi((api) => api.getSelections().length >= 1), {
+			timeout: 5000,
+			timeoutMsg: "selection never registered",
+		});
 		const selCount = await withApi(async (api) => api.getSelections().length);
 		expect(selCount).toBeGreaterThanOrEqual(1);
 	});
@@ -104,7 +110,7 @@ describe("UI: Tag manager", () => {
 		const input = await browser.$(".tag-manager .input");
 		await input.setValue("Coast");
 
-		await browser.pause(300);
+		// The tag filter applies synchronously on input; the assertion only needs Coastal present.
 		const visibleTags = await browser.$$(".tag-list .tag");
 		// Should show only Coastal
 		let coastalFound = false;
@@ -118,7 +124,6 @@ describe("UI: Tag manager", () => {
 
 		// Clear filter
 		await clearInput(".tag-manager .input");
-		await browser.pause(100);
 	});
 
 	it("tag edit button opens edit dialog", async () => {
@@ -146,7 +151,9 @@ describe("UI: Tag manager", () => {
 		// Close dialog
 		const saveBtn = await browser.$('[data-qa="tag-save"]');
 		await saveBtn.click();
-		await browser.pause(300);
+		await browser
+			.$(".edit-tag-modal")
+			.waitForExist({ reverse: true, timeout: 5000, timeoutMsg: "edit dialog never closed" });
 	});
 });
 
@@ -179,7 +186,10 @@ describe("UI: Selection manager", () => {
 
 	it("selection manager shows selected count", async () => {
 		await withApi(async (api) => api.selectEverything());
-		await browser.pause(300);
+		await browser.waitUntil(() => withApi((api) => api.getSelections().length >= 1), {
+			timeout: 5000,
+			timeoutMsg: "selection never registered",
+		});
 
 		const selMgr = await browser.$(".selection-manager");
 		const text = await selMgr.getText();
@@ -188,7 +198,7 @@ describe("UI: Selection manager", () => {
 
 	it("selection rows appear for each selection", async () => {
 		await withApi(async (api) => api.selectPanoIds());
-		await browser.pause(300);
+		await waitForOptions(".selection-row", 2);
 
 		const rows = await browser.$$(".selection-row");
 		expect(rows.length).toBeGreaterThanOrEqual(2);
@@ -220,7 +230,10 @@ describe("UI: Selection manager", () => {
 			}
 		}
 
-		await browser.pause(300);
+		await browser.waitUntil(() => withApi((api) => api.getSelections().length === 0), {
+			timeout: 5000,
+			timeoutMsg: "selections never cleared",
+		});
 		const count = await withApi(async (api) => api.getSelections().length);
 		expect(count).toBe(0);
 	});
@@ -228,12 +241,15 @@ describe("UI: Selection manager", () => {
 	it("review button starts review mode", async () => {
 		// Need a selection first
 		await withApi(async (api) => api.selectEverything());
-		await browser.pause(300);
+		await browser.waitUntil(() => withApi((api) => api.getSelections().length >= 1), {
+			timeout: 5000,
+			timeoutMsg: "selection never registered",
+		});
 
 		const reviewBtn = await browser.$('[data-qa="selection-review"]');
 		await reviewBtn.click();
 
-		await browser.pause(500);
+		await waitForWorkArea("location");
 
 		const workArea = await withApi(async (api) => api.getWorkArea());
 		expect(workArea).toBe("location");
@@ -251,7 +267,10 @@ describe("UI: Selection manager", () => {
 
 		const nextBtn = await browser.$('[data-qa="review-next"]');
 		await nextBtn.click();
-		await browser.pause(200);
+		await browser.waitUntil(
+			() => withApi((api, fid) => (api.getActiveLocation()?.id ?? null) !== fid, firstId),
+			{ timeout: 5000, timeoutMsg: "review-next did not advance the active location" },
+		);
 
 		const secondId = await withApi(async (api) => api.getActiveLocation()?.id);
 		expect(secondId).not.toBe(firstId);
@@ -262,7 +281,10 @@ describe("UI: Selection manager", () => {
 
 		const prevBtn = await browser.$('[data-qa="review-prev"]');
 		await prevBtn.click();
-		await browser.pause(200);
+		await browser.waitUntil(
+			() => withApi((api, cid) => (api.getActiveLocation()?.id ?? null) !== cid, currentId),
+			{ timeout: 5000, timeoutMsg: "review-prev did not change the active location" },
+		);
 
 		const prevId = await withApi(async (api) => api.getActiveLocation()?.id);
 		expect(prevId).not.toBe(currentId);
@@ -271,7 +293,7 @@ describe("UI: Selection manager", () => {
 	it("abort review returns to overview", async () => {
 		const cancelBtn = await browser.$('[data-qa="review-cancel"]');
 		await cancelBtn.click();
-		await browser.pause(300);
+		await waitForWorkArea("overview");
 
 		const workArea = await withApi(async (api) => api.getWorkArea());
 		expect(workArea).toBe("overview");
@@ -335,7 +357,7 @@ describe("UI: Location editor", () => {
 	it("close button returns to overview", async () => {
 		const closeBtn = await browser.$('[data-qa="location-close"]');
 		await closeBtn.click();
-		await browser.pause(300);
+		await waitForWorkArea("overview");
 
 		const workArea = await withApi(async (api) => api.getWorkArea());
 		expect(workArea).toBe("overview");
@@ -348,7 +370,7 @@ describe("UI: Location editor", () => {
 
 		const deleteBtn = await browser.$('[data-qa="location-delete"]');
 		await deleteBtn.click();
-		await browser.pause(300);
+		await waitForLocCount(0);
 
 		const count = await getLocCount();
 		expect(count).toBe(0);

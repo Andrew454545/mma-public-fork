@@ -57,6 +57,11 @@ export default defineConfig([
 					selector: "MemberExpression[property.name='__TEST_API__']",
 					message: "Use withApi() from helpers instead of raw __TEST_API__",
 				},
+				{
+					selector: "CallExpression[callee.object.name='browser'][callee.property.name='pause']",
+					message:
+						"No fixed sleeps in e2e — use a waitFor* helper (waitForActive/waitForWorkArea/waitForLocCount/waitForSave/waitForFlag/waitForOptions, or browser.waitUntil) that polls the real post-condition. For a genuine 'wait for X to NOT happen' settle, add an inline eslint-disable with a reason.",
+				},
 			],
 		},
 	},

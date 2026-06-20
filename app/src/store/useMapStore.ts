@@ -13,7 +13,8 @@ import type {
 	CommitInfo
 } from "@/bindings.gen";
 import { emit as emitEvent } from "@/lib/events";
-import { log } from "@/lib/util/log";
+import { log, fireAndForget } from "@/lib/util/log";
+import { hexToRgb } from "@/lib/util/color";
 import { trace } from "@/lib/util/debug";
 import { nowUnix } from "@/lib/util/format";
 import { mmaBufUrl, compareNatural } from "@/lib/util/util";
@@ -723,11 +724,7 @@ export async function duplicateLocation(locId: number): Promise<number | null> {
 
 export function updateLocationNoUndo(id: number, patch: Partial<Location>) {
 	if (isVirtualLocation({ id })) return Promise.resolve(null);
-	const p: Record<string, unknown> = {};
-	for (const [k, v] of Object.entries(patch)) {
-		if (k !== "id") p[k] = v;
-	}
-	return cmd.storeUpdateLocations([[id, p as LocationPatch]], false);
+	return cmd.storeUpdateLocations(buildUpdates([{ id, patch }]) as [number, LocationPatch][], false);
 }
 
 export async function removeLocations(ids: ReadonlyIdSet) {
@@ -872,13 +869,7 @@ export const useSelections = makeStoreHook(() => selections);
 function selectionSyncColor(s: Selection): [number, number, number] {
 	if (s.props.type === "Tag" && currentMap) {
 		const tag = currentMap.meta.tags[s.props.tagId];
-		if (tag) {
-			return [
-				parseInt(tag.color.slice(1, 3), 16),
-				parseInt(tag.color.slice(3, 5), 16),
-				parseInt(tag.color.slice(5, 7), 16),
-			];
-		}
+		if (tag) return hexToRgb(tag.color);
 	}
 	return s.color;
 }
@@ -1185,7 +1176,7 @@ export async function openStagedLocation(index: number) {
 	const loc = await cmd.storeImportStagedLocation(index);
 	activeLocationId = null;
 	// Rust's active_id must not stay pinned to the previous real location.
-	cmd.storeSetActive(null).catch((e) => log.error("[stagedOpen] store_set_active failed:", e));
+	fireAndForget(cmd.storeSetActive(null), "stagedOpen:setActive");
 	cachedActiveLocation = { ...loc, id: stagedIndexToVirtualId(index) };
 	workArea = "location";
 	importMarkerVersion++;
@@ -1207,7 +1198,7 @@ export async function setActiveLocation(id: number | null, checkDuplicates = tru
 		}
 	}
 	activeLocationId = id;
-	cmd.storeSetActive(id).catch((e) => log.error("[setActive] store_set_active failed:", e));
+	fireAndForget(cmd.storeSetActive(id), "setActive");
 	if (id) {
 		const loc = await cmd.storeGetLocation(id);
 		t.step("ipc");
@@ -1240,7 +1231,7 @@ export function openDuplicateLocation(loc: Location) {
 	activeLocationId = loc.id;
 	cachedActiveLocation = loc;
 	workArea = "location";
-	cmd.storeSetActive(loc.id).catch((e) => log.error("[setActive] store_set_active failed:", e));
+	fireAndForget(cmd.storeSetActive(loc.id), "setActive");
 	bump();
 }
 

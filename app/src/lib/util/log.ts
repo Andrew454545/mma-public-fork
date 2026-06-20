@@ -53,6 +53,11 @@ export const log = {
 };
 /* eslint-enable no-console */
 
+/** Run a promise fire-and-forget, logging any rejection under `label` */
+export function fireAndForget(p: Promise<unknown>, label: string): void {
+	p.catch((e) => log.error(`[${label}] failed:`, e));
+}
+
 export async function initLogging() {
 	window.addEventListener("error", (e) => {
 		log.error("[uncaught]", e.error ?? e.message);

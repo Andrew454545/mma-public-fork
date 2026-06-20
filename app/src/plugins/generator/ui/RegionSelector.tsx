@@ -1,4 +1,5 @@
-import { useEffect, useRef } from "react";
+import { useEffect } from "react";
+import { useLatestRef } from "@/lib/hooks/useLatestRef";
 import { useSelections } from "@/store/useMapStore";
 import type { Selection } from "@/bindings.gen";
 import type { GeneratorRegionMeta } from "../engine/types";
@@ -27,8 +28,7 @@ export function RegionSelector({
 	const selections = useSelections();
 	const polygonSelections = selections.filter((s) => s.props.type === "Polygon");
 
-	const metaRef = useRef(meta);
-	metaRef.current = meta;
+	const metaRef = useLatestRef(meta);
 
 	// Initialize metadata for new polygon selections
 	useEffect(() => {

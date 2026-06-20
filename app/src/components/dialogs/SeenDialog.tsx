@@ -1,4 +1,5 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback } from "react";
+import { useDebouncedCallback } from "@/lib/hooks/useDebouncedCallback";
 import { Dialog, DialogContent } from "@/components/primitives/Dialog";
 import {
 	getSeenEntries,
@@ -76,8 +77,6 @@ export function SeenDialog({
 	const [filterMap, setFilterMap] = useState<string>("");
 	const [filterSearch, setFilterSearch] = useState<string>("");
 
-	const searchTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
-
 	const buildFilter = useCallback((): SeenFilter | undefined => {
 		const f: SeenFilter = {};
 		if (filterCountry) f.country = filterCountry;
@@ -117,12 +116,13 @@ export function SeenDialog({
 		load(0, buildFilter());
 	}, [filterCountry, filterMap]);
 
+	const debouncedSearch = useDebouncedCallback((value: string) => {
+		load(0, { ...buildFilter(), search: value || undefined });
+	}, 250);
+
 	const handleSearchInput = (value: string) => {
 		setFilterSearch(value);
-		clearTimeout(searchTimer.current);
-		searchTimer.current = setTimeout(() => {
-			load(0, { ...buildFilter(), search: value || undefined });
-		}, 250);
+		debouncedSearch(value);
 	};
 
 	const handleLoad = (entry: SeenEntry) => {

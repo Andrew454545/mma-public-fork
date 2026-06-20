@@ -1,16 +1,23 @@
+/** Parse "#rrggbb" to an [r, g, b] byte tuple. Single source for hex parsing. */
+export function hexToRgb(hex: string): [number, number, number] {
+	const h = hex.replace("#", "");
+	return [
+		parseInt(h.substring(0, 2), 16),
+		parseInt(h.substring(2, 4), 16),
+		parseInt(h.substring(4, 6), 16),
+	];
+}
+
 export function textColorFor(bg: string): string {
-	const h = bg.replace("#", "");
-	const r = parseInt(h.substring(0, 2), 16);
-	const g = parseInt(h.substring(2, 4), 16);
-	const b = parseInt(h.substring(4, 6), 16);
+	const [r, g, b] = hexToRgb(bg);
 	return r * 0.299 + g * 0.587 + b * 0.114 > 150 ? "#000" : "#fff";
 }
 
 export function hexToHsl(hex: string): { h: number; s: number; l: number } {
-	const h = hex.replace("#", "");
-	const r = parseInt(h.substring(0, 2), 16) / 255;
-	const g = parseInt(h.substring(2, 4), 16) / 255;
-	const b = parseInt(h.substring(4, 6), 16) / 255;
+	const [r8, g8, b8] = hexToRgb(hex);
+	const r = r8 / 255;
+	const g = g8 / 255;
+	const b = b8 / 255;
 	const max = Math.max(r, g, b),
 		min = Math.min(r, g, b);
 	let hue = 0,
@@ -69,13 +76,7 @@ export function colorForName(name: string): string {
 }
 
 export function hexToRgba(hex: string): [number, number, number, number] {
-	const h = hex.replace("#", "");
-	return [
-		parseInt(h.substring(0, 2), 16),
-		parseInt(h.substring(2, 4), 16),
-		parseInt(h.substring(4, 6), 16),
-		200,
-	];
+	return [...hexToRgb(hex), 200];
 }
 
 export function rgbCss([r, g, b]: [number, number, number]): string {

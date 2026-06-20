@@ -39,6 +39,7 @@ import {
 import { loadOpenSV, google } from "@/lib/sv/opensv";
 import { fetchSvMetadata } from "@/lib/sv/svMeta";
 import { useHotkey, parseHotkey, matchesKey, isEditableElement } from "@/lib/hooks/useHotkey";
+import { useLatestRef } from "@/lib/hooks/useLatestRef";
 import { registerMapKeyActionHandler } from "@/lib/map/mapKeyBindings";
 import { cmd } from "@/lib/commands";
 import { log } from "@/lib/util/log";
@@ -422,8 +423,7 @@ function LocationPreviewInner() {
 	const tagSortMode = useSetting("tagSortMode");
 	const geoResult = useReverseGeocode(location?.lat ?? 0, location?.lng ?? 0);
 	const cancelTweenRef = useRef<(() => void) | null>(null);
-	const geoRef = useRef(geoResult);
-	geoRef.current = geoResult;
+	const geoRef = useLatestRef(geoResult);
 	useEffect(() => {
 		setPendingTags(idsToNames(location?.tags ?? []));
 	}, [location?.id]);
@@ -871,8 +871,7 @@ function LocationPreviewInner() {
 		if (singletonPano) toggleViewportLock(singletonPano);
 	});
 
-	const pendingTagsRef = useRef(pendingTags);
-	pendingTagsRef.current = pendingTags;
+	const pendingTagsRef = useLatestRef(pendingTags);
 	// Quicktag slots 1-9: toggle the Nth tag in the current sort order. Bindings
 	// are rebindable (registered as quicktag1..9 hotkey actions), defaulting to 1-9.
 	const quicktagSlot = (idx: number) => {
@@ -940,8 +939,7 @@ function LocationPreviewInner() {
 	useHotkey(useBinding("quicktag9"), () => quicktagSlot(8));
 
 	const panoNavRef = useRef({ held: new Set<string>(), rafId: 0, alt: false, lastTime: 0 });
-	const appSettingsRef = useRef(appSettings);
-	appSettingsRef.current = appSettings;
+	const appSettingsRef = useLatestRef(appSettings);
 
 	useEffect(() => {
 		const nav = panoNavRef.current;

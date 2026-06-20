@@ -5,6 +5,7 @@ import type { PickingInfo } from "@deck.gl/core";
 import { google } from "@/lib/sv/opensv";
 import { buildSceneLayers, type PolyGeom } from "@/lib/render/buildSceneLayers";
 import { getScene, useScene } from "@/lib/render/sceneStore";
+import { useLatestRef } from "@/lib/hooks/useLatestRef";
 import { usePanoDots } from "@/lib/render/usePanoDots";
 import { useSetting, getSettings } from "@/store/settings";
 import { useScoreMaxError, useLatLngAnchor } from "@/lib/sv/measure";
@@ -122,8 +123,7 @@ export function useMapSurface(
 	]);
 
 	// Latest rebuild, so the rAF-delayed creation paints the first frame with current values.
-	const rebuildRef = useRef(rebuild);
-	rebuildRef.current = rebuild;
+	const rebuildRef = useLatestRef(rebuild);
 
 	useEffect(() => {
 		if (!map || !google?.maps) return;
@@ -143,7 +143,7 @@ export function useMapSurface(
 			overlayRef.current?.finalize();
 			overlayRef.current = null;
 		};
-	}, [map]);
+	}, [map, rebuildRef]);
 
 	useEffect(() => {
 		rebuild();

@@ -1,5 +1,6 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import type { Selection, SelectionProps } from "@/bindings.gen";
+import { useDebouncedCallback } from "@/lib/hooks/useDebouncedCallback";
 import { selectionDisplayName } from "@/store/selections";
 import {
 	savedToSelectionProps,
@@ -226,18 +227,13 @@ export function PivotSidebar({ onClose }: { onClose: () => void }) {
 		}
 	}, [rowSource, fieldKey, fields, bucketCount]);
 
-	const timerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
-	const debouncedRecompute = useCallback(() => {
-		clearTimeout(timerRef.current);
-		timerRef.current = setTimeout(recompute, 150);
-	}, [recompute]);
+	const debouncedRecompute = useDebouncedCallback(recompute, 150);
 
 	useEffect(() => {
 		recompute();
 		const unsubStore = locStore?.onChange(debouncedRecompute);
 		const unsubSel = MMA.on("selection:change", debouncedRecompute);
 		return () => {
-			clearTimeout(timerRef.current);
 			unsubStore?.();
 			unsubSel();
 			locStore?.destroy();

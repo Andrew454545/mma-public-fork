@@ -442,6 +442,7 @@ export type PluginManifest = {
 	description: string;
 	icon: string;
 	main: string;
+	version: string;
 };
 /**
  *  GeoJSON-like polygon geometry. `coordinates` is the primary polygon (outer ring +
@@ -626,7 +627,8 @@ export type SelectionInput = {
 		number,
 		number
 	];
-	ghosted: boolean;
+	/**  Counted, but kept out of the overlay and the selected set. */
+	ghosted?: boolean;
 };
 /**
  *  Discriminated union of all selection types. Serialized with `{ "type": "..." }` tag

@@ -113,7 +113,11 @@ export function getFieldDef(key: string): ExtraFieldDef | undefined {
 /** Merged view of all field definitions across all layers. */
 export function getAllFieldDefs(): Record<string, ExtraFieldDef> {
 	const out: Record<string, ExtraFieldDef> = {};
-	for (const key of new Set([...Object.keys(pluginDefs), ...Object.keys(userDefs)]))
-		out[key] = mergeDef(userDefs[key], pluginDefs[key])!;
+	for (const key of new Set([...Object.keys(pluginDefs), ...Object.keys(userDefs)])) {
+		const merged = mergeDef(userDefs[key], pluginDefs[key]);
+		if (merged) {
+			out[key] = merged;
+		}
+	}
 	return out;
 }

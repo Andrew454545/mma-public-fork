@@ -1540,6 +1540,7 @@ declare const DEFAULTS: {
 	borderDetail: BorderDetail;
 	subdivisionDetail: SubdivisionDetail;
 	previewAspectRatio: PreviewAspectRatio;
+	tagSuggestionLimit: number;
 	savedSelections: SavedSelection[];
 };
 export type AppSettings = typeof DEFAULTS;
@@ -1767,6 +1768,7 @@ declare const mma: {
 		borderDetail: BorderDetail;
 		subdivisionDetail: SubdivisionDetail;
 		previewAspectRatio: PreviewAspectRatio;
+		tagSuggestionLimit: number;
 		savedSelections: SavedSelection[];
 	};
 	on<E extends EditorEvent>(event: E, handler: EventHandler<E>): () => void;

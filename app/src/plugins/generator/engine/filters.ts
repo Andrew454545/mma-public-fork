@@ -35,7 +35,6 @@ export function passesDescriptionSearch(
 		.split(",")
 		.map((term) => normalizeText(term.trim()))
 		.filter(Boolean);
-	if (searchTerms.length === 0) return true;
 
 	const description = loc.description ?? "";
 	const shortDescription = loc.shortDescription ?? "";

@@ -68,7 +68,7 @@ function useEnumValues(
 ): string[] {
 	const [values, setValues] = useState<string[]>([]);
 	useEffect(() => {
-		if (fieldType !== "enum" && fieldType !== undefined) {
+		if (fieldType !== "enum") {
 			setValues([]);
 			return;
 		}

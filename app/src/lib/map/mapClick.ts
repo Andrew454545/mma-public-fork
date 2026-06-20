@@ -82,8 +82,7 @@ export async function createLocationAtLatLng(
 // consumer. The editor map passes the full set; the minimap passes a reduced one.
 export interface MapClickCtx {
 	cm: CellManager;
-	zoom: number;
-	container?: HTMLElement | null;
+	map: google.maps.Map | null;
 	selectOnly?: boolean;
 	measuring?: boolean;
 	// Dispatch the surface's context menu at the given client coords. Absent => the
@@ -143,12 +142,13 @@ export async function handleMapClick(
 	if (ctx.measuring) return;
 
 	if (info.coordinate) {
+		const container = ctx.map?.getDiv() ?? null;
 		if (ctx.selectOnly) {
-			if (ctx.container) showToast(ctx.container, "Select-only mode is on.");
+			if (container) showToast(container, "Select-only mode is on.");
 			return;
 		}
-		await createLocationAtLatLng(info.coordinate[1], info.coordinate[0], ctx.zoom, {
-			container: ctx.container,
+		await createLocationAtLatLng(info.coordinate[1], info.coordinate[0], ctx.map?.getZoom() ?? 2, {
+			container,
 		});
 	}
 }

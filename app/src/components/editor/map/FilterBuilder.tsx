@@ -434,7 +434,7 @@ export function FilterForm({
 		: undefined;
 
 	return (
-		<div className="extra-filter-builder">
+		<form className="extra-filter-builder" onSubmit={(e) => { e.preventDefault(); handleAdd(); }}>
 			<label>Filter by metadata:</label>
 			<select className="nselect" value={field} onChange={(e) => handleFieldChange(e.target.value)}>
 				{fields.length === 0 && <option value="">No metadata yet</option>}
@@ -503,7 +503,7 @@ export function FilterForm({
 					tzLocal={tzLocal}
 				/>
 			)}
-			<button className="button" type="button" onClick={handleAdd}>
+			<button className="button" type="submit">
 				{submitLabel}
 			</button>
 			{onClose && (
@@ -511,7 +511,7 @@ export function FilterForm({
 					Cancel
 				</button>
 			)}
-		</div>
+		</form>
 	);
 }
 

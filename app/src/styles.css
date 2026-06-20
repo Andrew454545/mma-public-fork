@@ -5365,6 +5365,41 @@ body {
 	grid-template-columns: 1fr 1fr;
 	gap: 0.5rem;
 }
+/* Loading placeholders: keep the grid shape so loaded cards fill in place
+   instead of the dialog jumping from a centered spinner to the grid. */
+.plugin-card--skeleton {
+	pointer-events: none;
+}
+.plugin-skeleton__line,
+.plugin-skeleton__btn {
+	background: linear-gradient(90deg, #eee 25%, #f5f5f5 37%, #eee 63%);
+	background-size: 400% 100%;
+	border-radius: 4px;
+	animation: plugin-skeleton-shimmer 1.2s ease-in-out infinite;
+}
+.plugin-skeleton__line {
+	height: 0.7rem;
+	margin: 0.35rem 0;
+	width: 80%;
+}
+.plugin-skeleton__line--title {
+	height: 0.9rem;
+	width: 45%;
+}
+.plugin-skeleton__btn {
+	flex-shrink: 0;
+	width: 64px;
+	height: 30px;
+	border-radius: 6px;
+}
+@keyframes plugin-skeleton-shimmer {
+	from {
+		background-position: 100% 0;
+	}
+	to {
+		background-position: 0 0;
+	}
+}
 .plugin-card {
 	display: flex;
 	align-items: center;

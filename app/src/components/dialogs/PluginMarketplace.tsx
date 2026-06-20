@@ -393,8 +393,17 @@ export function PluginMarketplace({
 				{tab === "additional" && (
 					<>
 						{!registry && !fetchError && (
-							<div className="plugin-marketplace__loading">
-								<div className="plugin-marketplace__spinner" />
+							<div className="plugin-marketplace__grid">
+								{Array.from({ length: 4 }, (_, i) => (
+									<div key={i} className="plugin-card plugin-card--skeleton" aria-hidden="true">
+										<div className="plugin-card__icon" />
+										<div className="plugin-card__info">
+											<div className="plugin-skeleton__line plugin-skeleton__line--title" />
+											<div className="plugin-skeleton__line" />
+										</div>
+										<div className="plugin-skeleton__btn" />
+									</div>
+								))}
 							</div>
 						)}
 						{fetchError && (

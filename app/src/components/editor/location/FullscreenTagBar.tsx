@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { Tag } from "@/bindings.gen";
-import { createTags, getTagCounts } from "@/store/useMapStore";
-import { sortTagsByMode } from "@/lib/util/util";
+import { getTagCounts } from "@/store/useMapStore";
+import { sortTagsByMode, tagChipStyle, appendTagName } from "@/lib/util/util";
 import { textColorFor } from "@/lib/util/color";
 import { useSetting } from "@/store/settings";
 
@@ -10,37 +10,35 @@ export function FullscreenTagBar({
 	onChangeTags,
 	tags,
 }: {
-	pendingTags: number[];
-	onChangeTags: (tags: number[]) => void;
+	pendingTags: string[];
+	onChangeTags: (tags: string[]) => void;
 	tags: Tag[];
 }) {
 	const [input, setInput] = useState("");
 	const [focused, setFocused] = useState(false);
 	const tagSortMode = useSetting("tagSortMode");
 
-	const handleAdd = async (e: React.FormEvent) => {
+	const handleAdd = (e: React.FormEvent) => {
 		e.preventDefault();
 		const name = input.trim();
 		if (!name) return;
-		const [resolved] = await createTags([name]);
-		if (!pendingTags.includes(resolved.id)) {
-			onChangeTags([...pendingTags, resolved.id]);
-		}
+		onChangeTags(appendTagName(pendingTags, name, tags));
 		setInput("");
 	};
 
 	const toggleTag = (t: Tag) => {
-		if (pendingTags.includes(t.id)) {
-			onChangeTags(pendingTags.filter((id) => id !== t.id));
+		const lower = t.name.toLowerCase();
+		if (pendingTags.some((n) => n.toLowerCase() === lower)) {
+			onChangeTags(pendingTags.filter((n) => n.toLowerCase() !== lower));
 		} else {
-			onChangeTags([...pendingTags, t.id]);
+			onChangeTags([...pendingTags, t.name]);
 		}
 		setInput("");
 	};
 
-	const locTags = pendingTags.map((id) => tags.find((t) => t.id === id)).filter(Boolean) as Tag[];
+	const pendingLower = new Set(pendingTags.map((n) => n.toLowerCase()));
 	const sorted = sortTagsByMode(tags, tagSortMode, getTagCounts());
-	const available = sorted.filter((t) => !pendingTags.includes(t.id));
+	const available = sorted.filter((t) => !pendingLower.has(t.name.toLowerCase()));
 	const filtered = input.trim()
 		? available.filter((t) => t.name.toLowerCase().includes(input.toLowerCase()))
 		: available;
@@ -48,22 +46,18 @@ export function FullscreenTagBar({
 	return (
 		<div className="fullscreen-tagbar">
 			<ul className="tag-list">
-				{locTags.map((t) => (
-					<li
-						key={t.id}
-						className="tag is-small has-button"
-						style={{ backgroundColor: t.color, color: textColorFor(t.color) }}
-					>
+				{pendingTags.map((name) => (
+					<li key={name} className="tag is-small has-button" style={tagChipStyle(name, tags)}>
 						<button
 							className="button tag__button tag__button--delete"
-							onClick={() => onChangeTags(pendingTags.filter((id) => id !== t.id))}
+							onClick={() => onChangeTags(pendingTags.filter((n) => n !== name))}
 							type="button"
 						>
 							<svg height="16" width="16" viewBox="0 0 24 24" fill="currentColor">
 								<path d="M19,6.41L17.59,5L12,10.59L6.41,5L5,6.41L10.59,12L5,17.59L6.41,19L12,13.41L17.59,19L19,17.59L13.41,12L19,6.41Z" />
 							</svg>
 						</button>
-						<span className="tag__text">{t.name}</span>
+						<span className="tag__text">{name}</span>
 					</li>
 				))}
 			</ul>

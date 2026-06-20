@@ -53,6 +53,21 @@ export function hslToRgb(h: number, s: number, l: number): [number, number, numb
 	return [f(0), f(8), f(4)];
 }
 
+/** 
+ * Deterministic tag color from a name. 
+*/
+export function colorForName(name: string): string {
+	let h = 0;
+	for (const b of new TextEncoder().encode(name)) {
+		h = (h + ((b + (h << 5)) | 0)) | 0;
+	}
+	h = (Math.imul(h, 214013) + 2531011) | 0;
+	const hue = Math.abs(h) % 360;
+	const [r, g, b] = hslToRgb(hue, 0.5, 0.5);
+	const hex = (n: number) => n.toString(16).padStart(2, "0");
+	return `#${hex(r)}${hex(g)}${hex(b)}`;
+}
+
 export function hexToRgba(hex: string): [number, number, number, number] {
 	const h = hex.replace("#", "");
 	return [

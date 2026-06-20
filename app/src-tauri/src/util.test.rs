@@ -73,6 +73,21 @@ fn color_for_name_varies() {
     assert_ne!(color_for_name("alpha"), color_for_name("beta"));
 }
 
+// Ground-truth fixtures shared with the JS port (app/test/unit/colorForName.test.ts).
+// If either side drifts, one of the two suites goes red. Keep both lists identical.
+#[test]
+fn color_for_name_parity_fixtures() {
+    assert_eq!(color_for_name("red"), "#bf9940");
+    assert_eq!(color_for_name("blue"), "#6c40bf");
+    assert_eq!(color_for_name("urban"), "#40acbf");
+    assert_eq!(color_for_name("test"), "#40bfbd");
+    assert_eq!(color_for_name("hello"), "#4fbf40");
+    assert_eq!(color_for_name("Tag 1"), "#bf40ae");
+    assert_eq!(color_for_name("café"), "#9340bf");
+    assert_eq!(color_for_name("東京"), "#bf4071");
+    assert_eq!(color_for_name(""), "#407dbf");
+}
+
 #[test]
 fn hex_to_rgb_with_hash() {
     assert_eq!(hex_to_rgb("#ff8800"), Some([255, 136, 0]));

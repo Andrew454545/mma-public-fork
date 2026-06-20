@@ -1,5 +1,6 @@
 import type { Tag } from "@/bindings.gen";
 import type { TagSortMode } from "@/types";
+import { colorForName, textColorFor } from "@/lib/util/color";
 
 /** Base URL for a Tauri custom URI scheme. Windows WebView2 uses http://<scheme>.localhost/. */
 export function schemeBase(scheme: string): string {
@@ -118,6 +119,22 @@ export function sortTagsByMode(tags: Tag[], mode: TagSortMode, counts: Record<nu
 	if (mode === "name") return sorted.sort((a, b) => a.name.localeCompare(b.name));
 	if (mode === "amount") return sorted.sort((a, b) => (counts[b.id] ?? 0) - (counts[a.id] ?? 0));
 	return sorted.sort((a, b) => (a.order ?? 0) - (b.order ?? 0) || a.name.localeCompare(b.name));
+}
+
+/** Style for a staged tag chip. An existing tag uses its stored color. */
+export function tagChipStyle(name: string, tags: Tag[]): { backgroundColor: string; color: string } {
+	const existing = tags.find((t) => t.name.toLowerCase() === name.toLowerCase());
+	const color = existing?.color ?? colorForName(name);
+	return { backgroundColor: color, color: textColorFor(color) };
+}
+
+/** Add a name to a staged list: dedup case-insensitively, normalizing to an existing tag's
+ *  canonical casing. Returns the original array unchanged if already present. */
+export function appendTagName(pending: string[], name: string, tags: Tag[]): string[] {
+	const lower = name.toLowerCase();
+	if (pending.some((n) => n.toLowerCase() === lower)) return pending;
+	const existing = tags.find((t) => t.name.toLowerCase() === lower);
+	return [...pending, existing ? existing.name : name];
 }
 
 // FOV (degrees) → zoom level

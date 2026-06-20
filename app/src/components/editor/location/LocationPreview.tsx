@@ -27,7 +27,7 @@ import {
 	getVisibleTags,
 	getTagCounts,
 } from "@/store/useMapStore";
-import { sortTagsByMode } from "@/lib/util/util";
+import { sortTagsByMode, tagChipStyle, appendTagName } from "@/lib/util/util";
 import { ReviewBar } from "@/components/editor/location/ReviewBar";
 import {
 	useReviewSession,
@@ -88,6 +88,12 @@ import {
 	getViewportLockSnapshot,
 } from "@/lib/sv/viewportLock";
 import { resetTrail, pushTrail, clearTrail } from "@/lib/sv/svTrail";
+
+/** Tags are staged by name, not ID, because some tags do not exist yet. */
+function idsToNames(ids: number[]): string[] {
+	const tags = getCurrentMap()?.meta.tags ?? {};
+	return ids.map((id) => tags[id]?.name).filter((n): n is string => n != null);
+}
 
 function PanoBadge({ cameraType }: { cameraType: FullCameraType | null }) {
 	switch (cameraType) {
@@ -412,14 +418,14 @@ function LocationPreviewInner() {
 		selectedPanoId,
 	} = usePanoViewer();
 	const [tagInput, setTagInput] = useState("");
-	const [pendingTags, setPendingTags] = useState<number[]>(location?.tags ?? []);
+	const [pendingTags, setPendingTags] = useState<string[]>(() => idsToNames(location?.tags ?? []));
 	const tagSortMode = useSetting("tagSortMode");
 	const geoResult = useReverseGeocode(location?.lat ?? 0, location?.lng ?? 0);
 	const cancelTweenRef = useRef<(() => void) | null>(null);
 	const geoRef = useRef(geoResult);
 	geoRef.current = geoResult;
 	useEffect(() => {
-		setPendingTags(location?.tags ?? []);
+		setPendingTags(idsToNames(location?.tags ?? []));
 	}, [location?.id]);
 	useEffect(() => {
 		if (geoResult) seenUpdateGeo(geoResult.countryCode, geoResult.text);
@@ -648,7 +654,7 @@ function LocationPreviewInner() {
 		[location],
 	);
 
-	const handleSave = useCallback(() => {
+	const handleSave = useCallback(async () => {
 		if (!location || !singletonPano) return;
 		// Staged (virtual) location: updateLocation no-ops, cursorId can't match a
 		// negative id, so this falls through to setActiveLocation(null) = close.
@@ -666,7 +672,7 @@ function LocationPreviewInner() {
 			panoId: savedPanoId,
 			lat: pos?.lat() ?? location.lat,
 			lng: pos?.lng() ?? location.lng,
-			tags: pendingTags,
+			tags: (await createTags(pendingTags)).map((t) => t.id),
 			extra: panoChanged ? {} : location.extra,
 		});
 		if (isReviewMode && reviewSession?.cursorId === location.id) {
@@ -690,7 +696,6 @@ function LocationPreviewInner() {
 
 	const handleDelete = useCallback(() => {
 		if (!location) return;
-		// Staged: removeLocations treats virtual ids as "close the preview".
 		if (isReviewMode && reviewSession?.cursorId === location.id) {
 			reviewDelete();
 		} else {
@@ -876,8 +881,8 @@ function LocationPreviewInner() {
 		if (idx >= tags.length) return;
 		const tag = tags[idx];
 		const cur = pendingTagsRef.current;
-		const has = cur.includes(tag.id);
-		setPendingTags(has ? cur.filter((t) => t !== tag.id) : [...cur, tag.id]);
+		const has = cur.includes(tag.name);
+		setPendingTags(has ? cur.filter((t) => t !== tag.name) : [...cur, tag.name]);
 	};
 	// Per-map bindings: registered only while a location is open, so the keys
 	// fall through to global hotkeys otherwise. Soft-deleted (invisible) tags
@@ -889,9 +894,12 @@ function LocationPreviewInner() {
 		const unregisterApply = registerMapKeyActionHandler("applyTag", ({ tagId }) => {
 			const active = getActiveLocation();
 			if (!active || isVirtualLocation(active)) return false;
-			if (!getVisibleTags().some((t) => t.id === tagId)) return false;
+			const tag = getVisibleTags().find((t) => t.id === tagId);
+			if (!tag) return false;
 			const cur = pendingTagsRef.current;
-			setPendingTags(cur.includes(tagId) ? cur.filter((t) => t !== tagId) : [...cur, tagId]);
+			setPendingTags(
+				cur.includes(tag.name) ? cur.filter((t) => t !== tag.name) : [...cur, tag.name],
+			);
 		});
 		const unregisterCopy = registerMapKeyActionHandler("copyToMap", ({ mapId }) => {
 			const loc = getActiveLocation();
@@ -1061,10 +1069,10 @@ function LocationPreviewInner() {
 
 	if (!location || !map) return null;
 
-	const locTags = pendingTags.map((id) => map.meta.tags[id]).filter(Boolean);
 	const allTags = sortTagsByMode(getVisibleTags(), tagSortMode, getTagCounts());
+	const pendingLower = new Set(pendingTags.map((n) => n.toLowerCase()));
 	const suggestions = (() => {
-		const available = allTags.filter((t) => !pendingTags.includes(t.id));
+		const available = allTags.filter((t) => !pendingLower.has(t.name.toLowerCase()));
 		const cap = appSettings.tagSuggestionLimit || available.length;
 		if (tagInput.trim()) {
 			const lower = tagInput.toLowerCase();
@@ -1073,25 +1081,23 @@ function LocationPreviewInner() {
 		return available.slice(0, cap);
 	})();
 
-	const handleAddTag = async (e: React.FormEvent) => {
+	const addPendingTag = (name: string) =>
+		setPendingTags(appendTagName(pendingTags, name, getVisibleTags()));
+
+	const handleAddTag = (e: React.FormEvent) => {
 		e.preventDefault();
 		const name = tagInput.trim();
 		if (!name) return;
-		const [resolved] = await createTags([name]);
-		if (!pendingTags.includes(resolved.id)) {
-			setPendingTags([...pendingTags, resolved.id]);
-		}
+		addPendingTag(name);
 		setTagInput("");
 	};
 
-	const handleRemoveTag = (tagId: number) => {
-		setPendingTags(pendingTags.filter((t) => t !== tagId));
+	const handleRemoveTag = (name: string) => {
+		setPendingTags(pendingTags.filter((t) => t !== name));
 	};
 
 	const handleSuggestionClick = (t: Tag) => {
-		if (!pendingTags.includes(t.id)) {
-			setPendingTags([...pendingTags, t.id]);
-		}
+		addPendingTag(t.name);
 		setTagInput("");
 	};
 
@@ -1216,25 +1222,22 @@ function LocationPreviewInner() {
 						) : (
 						<>
 						<ul className="tag-list">
-							{locTags.map((t) => (
+							{pendingTags.map((name) => (
 								<li
-									key={t.id}
+									key={name}
 									className="tag is-small has-button"
-									style={{
-										backgroundColor: t.color,
-										color: textColorFor(t.color),
-									}}
+									style={tagChipStyle(name, allTags)}
 								>
 									<button
 										className="button tag__button tag__button--delete"
-										onClick={() => handleRemoveTag(t.id)}
+										onClick={() => handleRemoveTag(name)}
 										type="button"
 									>
 										<svg height="16" width="16" viewBox="0 0 24 24" fill="currentColor">
 											<path d="M19,6.41L17.59,5L12,10.59L6.41,5L5,6.41L10.59,12L5,17.59L6.41,19L12,13.41L17.59,19L19,17.59L13.41,12L19,6.41Z" />
 										</svg>
 									</button>
-									<span className="tag__text">{t.name}</span>
+									<span className="tag__text">{name}</span>
 								</li>
 							))}
 							<li>

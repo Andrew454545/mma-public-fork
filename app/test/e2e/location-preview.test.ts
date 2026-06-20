@@ -1142,6 +1142,53 @@ describe("LocationPreview — tag management in preview", () => {
 			expect(l.tags.length).toBeLessThan(2);
 		}
 	});
+
+	// Invariant: staged tags are a pure UI artifact. Typing a brand-new tag name
+	// must NOT create a map-level tag until the location is saved carrying it.
+	const tagNames = async () =>
+		withApi(async (api) =>
+			Object.values(api.getCurrentMap()!.meta.tags).map((t: { name: string }) => t.name),
+		);
+
+	it("typing a new tag then CLOSING creates no map-level tag", async () => {
+		await openLocation(tagmgmt1Id);
+		await waitForPreview();
+		const input = await browser.$(".form-add-tag__input");
+		await input.setValue("ZZStagedClose");
+		await browser.keys("Enter");
+		await browser.pause(200);
+		// staged chip is present, but nothing persisted yet
+		expect(await tagNames()).not.toContain("ZZStagedClose");
+
+		await closeLocation();
+		await browser.pause(300);
+		expect(await tagNames()).not.toContain("ZZStagedClose");
+	});
+
+	it("typing a new tag then SAVING creates it and applies it to the location", async () => {
+		await openLocation(tagmgmt1Id);
+		await waitForPreview();
+		const input = await browser.$(".form-add-tag__input");
+		await input.setValue("ZZStagedSave");
+		await browser.keys("Enter");
+		await browser.pause(200);
+		// still nothing persisted until save
+		expect(await tagNames()).not.toContain("ZZStagedSave");
+
+		const saveBtn = await browser.$("[data-qa='location-save']");
+		await saveBtn.click();
+		await browser.pause(500);
+
+		expect(await tagNames()).toContain("ZZStagedSave");
+		const newId = await withApi(async (api) => {
+			const t = Object.values(api.getCurrentMap()!.meta.tags).find(
+				(x: { name: string }) => x.name === "ZZStagedSave",
+			) as { id: number } | undefined;
+			return t?.id;
+		});
+		const l = await readLocation(tagmgmt1Id);
+		expect(l.tags).toContain(newId);
+	});
 });
 
 // ============================================================================

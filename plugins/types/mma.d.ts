@@ -1459,6 +1459,10 @@ declare const BORDER_DETAILS: {
 	readonly medium: "High (~10MB)";
 	readonly heavy: "Ultra (~46MB)";
 };
+declare const SUBDIVISION_DETAILS: {
+	readonly off: "Off";
+	readonly adm1: "States / provinces";
+};
 declare const PREVIEW_ASPECT_RATIOS: {
 	readonly "4 / 3": "4:3";
 	readonly "16 / 10": "16:10";
@@ -1474,6 +1478,7 @@ export type MapListField = keyof typeof MAP_LIST_FIELDS;
 export type GeocodeProvider = keyof typeof GEOCODE_PROVIDERS;
 export type TagViewMode = keyof typeof TAG_VIEW_MODES;
 export type BorderDetail = keyof typeof BORDER_DETAILS;
+export type SubdivisionDetail = keyof typeof SUBDIVISION_DETAILS;
 export type PreviewAspectRatio = keyof typeof PREVIEW_ASPECT_RATIOS;
 declare const DEFAULTS: {
 	showCameraBadges: boolean;
@@ -1533,6 +1538,7 @@ declare const DEFAULTS: {
 	tagViewMode: TagViewMode;
 	tagSortMode: TagSortMode;
 	borderDetail: BorderDetail;
+	subdivisionDetail: SubdivisionDetail;
 	previewAspectRatio: PreviewAspectRatio;
 	savedSelections: SavedSelection[];
 };
@@ -1759,6 +1765,7 @@ declare const mma: {
 		tagViewMode: TagViewMode;
 		tagSortMode: TagSortMode;
 		borderDetail: BorderDetail;
+		subdivisionDetail: SubdivisionDetail;
 		previewAspectRatio: PreviewAspectRatio;
 		savedSelections: SavedSelection[];
 	};
@@ -1866,6 +1873,7 @@ declare const mma: {
 	patchLocationExtra(loc: Location$1, extraPatch: Record<string, unknown>, replace?: boolean): Promise<void>;
 	isSelectionGhosted(key: string): boolean;
 	toggleGhostSelection(key: string): Promise<void>;
+	isolateSelection(key: string): Promise<void>;
 	toggleGhostAllSelections(): Promise<void>;
 	addSelections(props: SelectionProps[]): Promise<void>;
 	removeSelections(keys: string[]): Promise<void> | undefined;

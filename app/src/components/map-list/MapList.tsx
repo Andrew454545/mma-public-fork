@@ -68,6 +68,19 @@ function parseChangelog(md: string): ChangelogSection[] {
 	return sections;
 }
 
+declare const __APP_VERSION__: string;
+
+// Compare two version strings (e.g. "0.6.1"). Returns >0 if a > b.
+function cmpVersion(a: string, b: string): number {
+	const pa = a.split(".").map(Number);
+	const pb = b.split(".").map(Number);
+	for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+		const d = (pa[i] ?? 0) - (pb[i] ?? 0);
+		if (d) return d;
+	}
+	return 0;
+}
+
 // Inline markdown: **bold**, *italic*, `code`, [text](url).
 function renderInline(text: string, kb: string): React.ReactNode[] {
 	const nodes: React.ReactNode[] = [];
@@ -231,6 +244,9 @@ function WhatsNew() {
 	if (failed) return null;
 
 	const displayTag = activeTag ?? versions?.[0]?.tag ?? null;
+	const installed = typeof __APP_VERSION__ !== "undefined" ? __APP_VERSION__ : null;
+	const isUnreleased = (tag: string) =>
+		installed ? cmpVersion(tag.replace(/^v/, ""), installed) > 0 : false;
 
 	return (
 		<li className="updates__item updates__item--new">
@@ -257,7 +273,14 @@ function WhatsNew() {
 				<div>
 					<div className="updates__history" ref={historyRef} onScroll={onScroll}>
 						{versions?.map((v, vi) => (
-							<div key={v.tag} className="updates__release" data-tag={v.tag}>
+							<div
+								key={v.tag}
+								className={clsx(
+									"updates__release",
+									isUnreleased(v.tag) && "updates__release--unreleased",
+								)}
+								data-tag={v.tag}
+							>
 								{vi > 0 && <time className="updates__release-tag">{v.heading}</time>}
 								<div className="updates__release-body">{renderMarkdown(v.body)}</div>
 							</div>

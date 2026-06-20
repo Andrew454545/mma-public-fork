@@ -1215,6 +1215,9 @@ summary.button {
 	font-weight: 600;
 	font-size: 0.8125rem;
 }
+.updates__release--unreleased {
+	opacity: 0.4;
+}
 .updates__release-body p {
 	margin: 0.35rem 0;
 }

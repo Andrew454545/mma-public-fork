@@ -177,7 +177,7 @@ const STATIC_HOTKEY_DEFS = [
 	{ action: "panDown", label: "Pan down", group: "Map Navigation", defaultBinding: "s", altSlow: true },
 	{ action: "mapZoomIn", label: "Zoom in", group: "Map Navigation", defaultBinding: "Shift+w", altSlow: true },
 	{ action: "mapZoomOut", label: "Zoom out", group: "Map Navigation", defaultBinding: "Shift+s", altSlow: true },
-	{ action: "mapZoomBounds", label: "Zoom to bounds", group: "Map Navigation", defaultBinding: "Shift+q" },
+	{ action: "mapZoomBounds", label: "Zoom to bounds", group: "Map Navigation", defaultBinding: "Shift+b" },
 	{ action: "mapZoomReset", label: "Zoom all the way out", group: "Map Navigation", defaultBinding: "Shift+0" },
 	{
 		action: "panoLookLeft",
@@ -241,7 +241,7 @@ const STATIC_HOTKEY_DEFS = [
 	},
 	{
 		action: "countrySelect",
-		label: "Hold + click to select country",
+		label: "Hold + click for country (+Shift for subdivision)",
 		group: "Global",
 		defaultBinding: "q",
 	},

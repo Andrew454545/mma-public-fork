@@ -7,12 +7,17 @@ import { parseHotkey, matchesKey, isEditableElement } from "@/lib/hooks/useHotke
 /** Hold a single-key hotkey to arm a crosshair, then a map click runs `onClick`
  *  (consuming the click so it never falls through to the default map handler).
  *  `shiftKey` reflects whether Shift was held at click time, so a held key can fork
- *  behavior by modifier (e.g. country vs subdivision). */
+ *  behavior by modifier (e.g. country vs subdivision).
+ *
+ *  `ignoreShift` lets the key arm whether or not Shift is held, so a Shift+key chord
+ *  arms in any press order (the handler then reads `shiftKey` to fork). Leave it off
+ *  when Shift+key is a separate binding (e.g. deletePolygon "e" vs Shift+e zoom). */
 export function useHeldHotkeyClick(
 	action: HotkeyAction,
 	onClick: (lat: number, lng: number, shiftKey: boolean) => void,
-	cursor = "crosshair",
+	opts: { cursor?: string; ignoreShift?: boolean } = {},
 ) {
+	const { cursor = "crosshair", ignoreShift = false } = opts;
 	const handlerRef = useRef(onClick);
 	handlerRef.current = onClick;
 
@@ -24,7 +29,7 @@ export function useHeldHotkeyClick(
 			const binding = getBinding(action);
 			if (!binding) return;
 			for (const alt of parseHotkey(binding)) {
-				if (alt.length === 1 && matchesKey(e, alt[0])) {
+				if (alt.length === 1 && matchesKey(e, alt[0], { ignoreShift })) {
 					held = true;
 					document.body.style.cursor = cursor;
 					return;
@@ -69,5 +74,5 @@ export function useHeldHotkeyClick(
 			dispose();
 			document.body.style.cursor = "";
 		};
-	}, [action, cursor]);
+	}, [action, cursor, ignoreShift]);
 }

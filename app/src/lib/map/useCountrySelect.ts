@@ -15,5 +15,6 @@ export function useCountrySelect() {
 				if (geometry) selectPolygon(geometry, false);
 			})();
 		}, []),
+		{ ignoreShift: true },
 	);
 }

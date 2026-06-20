@@ -815,19 +815,22 @@ function BorderDetailSection() {
 	const s = useSettings();
 	const [mediumReady, setMediumReady] = useState<boolean | null>(null);
 	const [heavyReady, setHeavyReady] = useState<boolean | null>(null);
+	const [adm1Ready, setAdm1Ready] = useState<boolean | null>(null);
 	const [downloading, setDownloading] = useState<string | null>(null);
 	const [error, setError] = useState<string | null>(null);
 
 	useEffect(() => {
 		let cancelled = false;
 		(async () => {
-			const [m, h] = await Promise.all([
+			const [m, h, a] = await Promise.all([
 				cmd.checkBorderFile("medium").catch(() => false),
 				cmd.checkBorderFile("heavy").catch(() => false),
+				cmd.checkBorderFile("adm1").catch(() => false),
 			]);
 			if (!cancelled) {
 				setMediumReady(m);
 				setHeavyReady(h);
+				setAdm1Ready(a);
 			}
 		})();
 		return () => { cancelled = true; };
@@ -857,11 +860,35 @@ function BorderDetailSection() {
 		}
 	};
 
+	const handleSubdivisionChange = async (level: SubdivisionDetail) => {
+		setError(null);
+		if (level === "off" || adm1Ready) {
+			setSetting("subdivisionDetail", level);
+			return;
+		}
+		setDownloading(level);
+		try {
+			await cmd.downloadBorderFile(level);
+			setAdm1Ready(true);
+			setSetting("subdivisionDetail", level);
+		} catch (e) {
+			setError(`Download failed: ${e instanceof Error ? e.message : String(e)}`);
+		} finally {
+			setDownloading(null);
+		}
+	};
+
 	const statusLabel = (level: "medium" | "heavy") => {
 		if (downloading === level) return " (downloading...)";
 		const ready = level === "medium" ? mediumReady : heavyReady;
 		if (ready === null) return "";
 		return ready ? "" : " (will download)";
+	};
+
+	const subdivisionStatus = () => {
+		if (downloading === "adm1") return " (downloading...)";
+		if (adm1Ready === null) return "";
+		return adm1Ready ? "" : " (~3MB, will download)";
 	};
 
 	return (
@@ -884,81 +911,24 @@ function BorderDetailSection() {
 					))}
 				</select>
 			</label>
-			{downloading && (
-				<p style={{ margin: "0.25rem 0 0", fontSize: "0.85rem", opacity: 0.7 }}>
-					Downloading border data...
-				</p>
-			)}
-			{error && <p className="settings-popup__warning">{error}</p>}
-		</fieldset>
-	);
-}
-
-function SubdivisionSection() {
-	const s = useSettings();
-	const [adm1Ready, setAdm1Ready] = useState<boolean | null>(null);
-	const [downloading, setDownloading] = useState(false);
-	const [error, setError] = useState<string | null>(null);
-
-	useEffect(() => {
-		let cancelled = false;
-		cmd.checkBorderFile("adm1")
-			.catch(() => false)
-			.then((r) => {
-				if (!cancelled) setAdm1Ready(r);
-			});
-		return () => {
-			cancelled = true;
-		};
-	}, []);
-
-	const handleChange = async (level: SubdivisionDetail) => {
-		setError(null);
-		if (level === "off" || adm1Ready) {
-			setSetting("subdivisionDetail", level);
-			return;
-		}
-		setDownloading(true);
-		try {
-			await cmd.downloadBorderFile(level);
-			setAdm1Ready(true);
-			setSetting("subdivisionDetail", level);
-		} catch (e) {
-			setError(`Download failed: ${e instanceof Error ? e.message : String(e)}`);
-		} finally {
-			setDownloading(false);
-		}
-	};
-
-	const statusLabel = () => {
-		if (downloading) return " (downloading...)";
-		if (adm1Ready === null) return "";
-		return adm1Ready ? "" : " (~3MB, will download)";
-	};
-
-	return (
-		<fieldset className="fieldset">
-			<legend className="fieldset__header">
-				Subdivision Select <span className="fieldset__divider" />
-			</legend>
 			<label className="settings-popup__item">
-				Shift + click region
+				Subdivisions (Shift + click)
 				<select
 					value={s.subdivisionDetail}
-					onChange={(e) => handleChange(e.target.value as SubdivisionDetail)}
-					disabled={downloading}
+					onChange={(e) => handleSubdivisionChange(e.target.value as SubdivisionDetail)}
+					disabled={downloading !== null}
 				>
 					{Object.entries(SUBDIVISION_DETAILS).map(([value, label]) => (
 						<option key={value} value={value}>
 							{label}
-							{value !== "off" && statusLabel()}
+							{value !== "off" && subdivisionStatus()}
 						</option>
 					))}
 				</select>
 			</label>
 			{downloading && (
 				<p style={{ margin: "0.25rem 0 0", fontSize: "0.85rem", opacity: 0.7 }}>
-					Downloading subdivision data...
+					Downloading border data...
 				</p>
 			)}
 			{error && <p className="settings-popup__warning">{error}</p>}
@@ -976,7 +946,6 @@ function StreetViewTab() {
 			<DatePickerSection />
 			<GeocodingSection />
 			<BorderDetailSection />
-			<SubdivisionSection />
 		</>
 	);
 }

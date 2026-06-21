@@ -332,8 +332,7 @@ export const commands = {
 	storeSeenCountries: () => typedError<string[], string>(__TAURI_INVOKE("store_seen_countries")),
 	/**
 	 *  Returns all distinct maps that have seen entries, with resolved display names.
-	 *  Joins against the `maps` table for human-readable names; falls back to the raw
-	 *  map id if the map has been deleted.
+	 *  Returns maps that have seen entries. Only includes maps that still exist.
 	 */
 	storeSeenMaps: () => typedError<SeenMapInfo[], string>(__TAURI_INVOKE("store_seen_maps")),
 	/**  Deletes all seen history entries. */

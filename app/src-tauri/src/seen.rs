@@ -217,17 +217,16 @@ pub fn store_seen_countries() -> AppResult<Vec<String>> {
 }
 
 /// Returns all distinct maps that have seen entries, with resolved display names.
-/// Joins against the `maps` table for human-readable names; falls back to the raw
-/// map id if the map has been deleted.
+/// Returns maps that have seen entries. Only includes maps that still exist.
 #[tauri::command]
 #[specta::specta]
 pub fn store_seen_maps() -> AppResult<Vec<SeenMapInfo>> {
     let db = storage::open_db()?;
     let mut stmt = db
         .prepare(
-            "SELECT DISTINCT s.map_id AS id, COALESCE(m.name, s.map_id) AS name \
-             FROM seen s LEFT JOIN maps m ON m.id = s.map_id \
-             WHERE s.map_id IS NOT NULL ORDER BY name",
+            "SELECT DISTINCT s.map_id AS id, m.name \
+             FROM seen s JOIN maps m ON m.id = s.map_id \
+             WHERE s.map_id IS NOT NULL ORDER BY m.name",
         )?;
 
     let rows = stmt

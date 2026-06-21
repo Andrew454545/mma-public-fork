@@ -120,8 +120,13 @@ const DEFAULTS = {
 		"selection-delete-locations",
 		"review-selected",
 		"---",
+		"select-unpanned",
+		"select-untagged",
+		"---",
 		"find-duplicates",
 		"filter-by-metadata",
+		"---",
+		"bulk-enrich",
 	] as string[],
 };
 export type AppSettings = typeof DEFAULTS;

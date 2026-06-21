@@ -842,11 +842,11 @@ function SaveSelectionsDialog({
 							placeholder="Name this selection..."
 							autoFocus
 						/>
-						<div style={{ display: "flex", flexWrap: "wrap", gap: "0.25rem" }}>
+						<div className="saved-selection-row__rules">
 							{saveableItems.map((item, i) => (
-								<span key={i} className="command-palette__rule-chip">
+								<span key={i} className="saved-selection-row__chip">
 									<span
-										className="command-palette__rule-dot"
+										className="saved-selection-row__dot"
 										style={{ background: `rgb(${item.color[0]},${item.color[1]},${item.color[2]})` }}
 									/>
 									{describeRule(item.props)}
@@ -874,38 +874,39 @@ function ApplySavedSelectionDialog({ open, onOpenChange }: { open: boolean; onOp
 				{saved.length === 0 ? (
 					<p>No saved selections.</p>
 				) : (
-					<div style={{ display: "flex", flexDirection: "column", gap: "0.5rem", marginTop: 4 }}>
+					<div className="saved-selection-list">
 						{saved.map((s) => (
-							<div key={s.id} className="saved-selection-row">
-								<button
-									className="button saved-selection-row__apply"
-									onClick={() => {
-										if (map) {
-											applySavedSelection(s, map);
-											onOpenChange(false);
-										}
-									}}
-								>
-									{s.name}
-								</button>
-								<div style={{ display: "flex", flexWrap: "wrap", gap: "0.25rem", flex: 1 }}>
+							<div
+								key={s.id}
+								className="saved-selection-row"
+								onClick={() => {
+									if (map) {
+										applySavedSelection(s, map);
+										onOpenChange(false);
+									}
+								}}
+							>
+								<div className="saved-selection-row__header">
+									<span className="saved-selection-row__name">{s.name}</span>
+									<button
+										className="saved-selection-row__delete"
+										onClick={(e) => { e.stopPropagation(); deleteSavedSelection(s.id); }}
+										title="Delete"
+									>
+										<Icon path={mdiClose} size={14} />
+									</button>
+								</div>
+								<div className="saved-selection-row__rules">
 									{s.items.map((item, i) => (
-										<span key={i} className="command-palette__rule-chip">
+										<span key={i} className="saved-selection-row__chip">
 											<span
-												className="command-palette__rule-dot"
+												className="saved-selection-row__dot"
 												style={{ background: `rgb(${item.color[0]},${item.color[1]},${item.color[2]})` }}
 											/>
 											{describeRule(item.props)}
 										</span>
 									))}
 								</div>
-								<button
-									className="icon-button"
-									onClick={() => deleteSavedSelection(s.id)}
-									title="Delete"
-								>
-									<Icon path={mdiClose} />
-								</button>
 							</div>
 						))}
 					</div>

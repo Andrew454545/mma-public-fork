@@ -3816,13 +3816,64 @@ summary.button {
 	gap: 0.5rem;
 	margin-top: 0.5rem;
 }
+.saved-selection-list {
+	max-height: 400px;
+	overflow-y: auto;
+	display: flex;
+	flex-direction: column;
+	gap: 0.25rem;
+	margin-top: 4px;
+}
 .saved-selection-row {
+	padding: 0.5rem;
+	border-radius: 4px;
+	cursor: pointer;
+}
+.saved-selection-row:hover {
+	background: #0000000a;
+}
+.saved-selection-row__header {
 	display: flex;
 	align-items: center;
-	gap: 0.5rem;
+	justify-content: space-between;
 }
-.saved-selection-row__apply {
-	white-space: nowrap;
+.saved-selection-row__name {
+	font-weight: 600;
+	font-size: 0.875rem;
+}
+.saved-selection-row__delete {
+	background: none;
+	border: none;
+	cursor: pointer;
+	color: #888;
+	padding: 2px;
+	line-height: 0;
+	opacity: 0;
+}
+.saved-selection-row:hover .saved-selection-row__delete {
+	opacity: 1;
+}
+.saved-selection-row__delete:hover {
+	color: #c00;
+}
+.saved-selection-row__rules {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.25rem 0.5rem;
+	margin-top: 0.25rem;
+}
+.saved-selection-row__chip {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.3rem;
+	font-size: 0.75rem;
+	color: #888;
+}
+.saved-selection-row__dot {
+	width: 8px;
+	height: 8px;
+	border-radius: 50%;
+	flex-shrink: 0;
 }
 .selection-manager__toolbar {
 	margin-top: 0.5rem;

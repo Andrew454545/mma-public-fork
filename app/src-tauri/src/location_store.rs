@@ -434,6 +434,7 @@ impl Store {
     fn selections_need_full_resolve(&self) -> bool {
         self.selections.all.iter().any(|s| matches!(s.props,
             SelectionProps::Duplicates { .. }
+            | SelectionProps::Uncommitted
             | SelectionProps::Intersection { .. }
             | SelectionProps::Union { .. }
             | SelectionProps::Invert { .. }))

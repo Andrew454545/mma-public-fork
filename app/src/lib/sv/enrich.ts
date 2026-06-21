@@ -14,8 +14,9 @@ import { registerSvResolver, runResolvers, type SvResolver } from "@/lib/sv/svRu
 import { log } from "@/lib/util/log";
 import type { Location } from "@/types";
 
-export function needsEnrichment(loc: Location): boolean {
-	return loc.extra?.countryCode == null;
+export function needsEnrichment(loc: Location, enrichFields?: string[]): boolean {
+	const fields = enrichFields ?? getDefaultEnrichKeys();
+	return fields.some((key) => loc.extra?.[key] == null);
 }
 
 export function buildPatch(
@@ -77,7 +78,12 @@ export async function enrich(
 export const enrichMetaResolver: SvResolver = {
 	id: "enrichMeta",
 	label: "Enrich metadata",
-	pending: (loc, force) => force || needsEnrichment(loc),
+	pending: (loc, force) => {
+		if (force) return true;
+		const map = getCurrentMap();
+		const fields = map?.meta.settings.enrichFields ?? getDefaultEnrichKeys();
+		return needsEnrichment(loc, fields);
+	},
 	needsPanoResolve: (loc) => !loc.panoId,
 	needsMetadata: true,
 	runsProviders: true,

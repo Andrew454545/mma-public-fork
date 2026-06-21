@@ -23,7 +23,8 @@ import {
 } from "@/lib/data/fieldOps";
 import { ValidationState } from "@/store/selections";
 import { validateLocations } from "@/lib/sv/validate";
-import { enrichAll, needsEnrichment, type EnrichResult } from "@/lib/sv/enrich";
+import { enrichAll, type EnrichResult } from "@/lib/sv/enrich";
+import { getEnrichFieldOptions, getDefaultEnrichKeys, isFieldEnabled } from "@/lib/data/fieldDefs";
 import { bulkPinToPano } from "@/lib/sv/pinPano";
 import { bulkPanHeading, type RoadDirection } from "@/lib/sv/headingRoad";
 import { fmt } from "@/lib/util/format";
@@ -72,16 +73,50 @@ function BulkSetup({
 	const scopedLocs = applyScope(scope, locs);
 
 	if (operation === "enrich") {
-		const unenriched = scopedLocs.filter(needsEnrichment).length;
+		const enrichFields = map.meta.settings.enrichFields ?? getDefaultEnrichKeys();
+		const allOptions = getEnrichFieldOptions();
+		const enabledFields = allOptions.filter((f) => isFieldEnabled(enrichFields, f.key));
+		const total = scopedLocs.length;
+		const coverage: { key: string; label: string; have: number }[] = enabledFields.map((f) => ({
+			key: f.key,
+			label: f.label,
+			have: scopedLocs.filter((l) => l.extra?.[f.key] != null).length,
+		}));
+		const needsAny = coverage.some((c) => c.have < total);
 		const noPano = scopedLocs.filter((l) => !l.panoId).length;
 		return (
 			<div className="bulk-operation">
 				<ScopeSelector ctl={scopeCtl} />
-				<div className="bulk-operation__status">
-					{fmt.format(unenriched)} locations need enrichment.
-					{noPano > 0 &&
-						` ${fmt.format(noPano)} without pano ID will be resolved from coordinates.`}
-				</div>
+				{total > 0 && (
+					<table className="bulk-operation__coverage">
+						<tbody>
+							{coverage.map((c) => {
+								const missing = total - c.have;
+								return (
+									<tr key={c.key} className={missing > 0 ? "is-incomplete" : ""}>
+										<td className="bulk-operation__coverage-label">{c.label}</td>
+										<td className="bulk-operation__coverage-bar">
+											<span
+												className="bulk-operation__coverage-fill"
+												style={{ width: `${(c.have / total) * 100}%` }}
+											/>
+										</td>
+										<td className="bulk-operation__coverage-stat">
+											{missing > 0
+												? `${fmt.format(missing)} missing`
+												: "complete"}
+										</td>
+									</tr>
+								);
+							})}
+						</tbody>
+					</table>
+				)}
+				{noPano > 0 && (
+					<div className="bulk-operation__status">
+						{fmt.format(noPano)} without pano ID will be resolved from coordinates.
+					</div>
+				)}
 				<label className="bulk-operation__option">
 					<input type="checkbox" checked={force} onChange={(e) => setForce(e.target.checked)} />
 					Re-enrich already enriched locations
@@ -91,7 +126,7 @@ function BulkSetup({
 						className="button button--primary"
 						type="button"
 						onClick={() => onStart({ force })}
-						disabled={!force && unenriched === 0}
+						disabled={!force && !needsAny}
 					>
 						Start
 					</button>

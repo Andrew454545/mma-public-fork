@@ -31,7 +31,7 @@ import { SuggestInput } from "@/components/primitives/SuggestInput";
 import { stepFilterWindow } from "@/lib/data/fieldOps";
 import { useSetting } from "@/store/settings";
 import { cmd } from "@/lib/commands";
-import { getCommand } from "@/store/commands";
+import { getCommand, movePinnedCommand, removePinnedAt, insertSeparator, reorderPinned } from "@/store/commands";
 
 import { RgbColorPicker } from "react-colorful";
 import type { Selection, Tag } from "@/bindings.gen";
@@ -57,6 +57,7 @@ import {
 } from "@mdi/js";
 import { PluginToolbar } from "@/plugins/PluginPanels";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
+import * as ContextMenu from "@radix-ui/react-context-menu";
 import { fmt } from "@/lib/util/format";
 import { rgbCss } from "@/lib/util/color";
 import { getGoogleMap as getGoogleMapInstance } from "@/lib/map/mapState";
@@ -105,6 +106,8 @@ interface PanelDef {
 function PinnedToolbar({ right, panels }: { right?: ReactNode; panels: Record<string, PanelDef> }) {
 	const pinned = useSetting("pinnedCommands");
 	const [openPanels, setOpenPanels] = useState<Set<string>>(new Set());
+	const [dragIdx, setDragIdx] = useState<number | null>(null);
+	const [dropIdx, setDropIdx] = useState<number | null>(null);
 	useSelections();
 	useSelectedLocationIds();
 
@@ -139,12 +142,64 @@ function PinnedToolbar({ right, panels }: { right?: ReactNode; panels: Record<st
 		if (next.has(id)) next.delete(id); else next.add(id);
 		return next;
 	});
+
+	const handleDragStart = (i: number, e: React.MouseEvent) => {
+		if (e.button !== 0) return;
+		e.preventDefault();
+		const startX = e.clientX;
+		let started = false;
+
+		const onMove = (me: MouseEvent) => {
+			if (!started && Math.abs(me.clientX - startX) > 4) {
+				started = true;
+				setDragIdx(i);
+			}
+		};
+		const onUp = () => {
+			window.removeEventListener("mousemove", onMove);
+			window.removeEventListener("mouseup", onUp);
+			if (started) {
+				setDragIdx((di) => {
+					setDropIdx((dri) => {
+						if (di !== null && dri !== null && di !== dri) reorderPinned(di, dri);
+						return null;
+					});
+					return null;
+				});
+			}
+		};
+		window.addEventListener("mousemove", onMove);
+		window.addEventListener("mouseup", onUp);
+	};
+
+	const handleDragOver = (i: number) => {
+		if (dragIdx !== null && i !== dragIdx) setDropIdx(i);
+	};
+
 	return (
 		<div className="selection-manager__toolbar">
 			<div className="selection-manager__bar">
 				{pinned.map((id, i) => {
 					if (id === "---") {
-						return <span key={`sep-${i}`} className="selection-manager__bar-sep" />;
+						return (
+							<ContextMenu.Root key={`sep-${i}`}>
+								<ContextMenu.Trigger asChild>
+									<span
+										className={`selection-manager__bar-sep${dragIdx === i ? " is-dragging" : ""}`}
+										data-drop={dropIdx === i ? "" : undefined}
+										onMouseDown={(e) => handleDragStart(i, e)}
+										onMouseMove={() => handleDragOver(i)}
+									/>
+								</ContextMenu.Trigger>
+								<ContextMenu.Portal>
+									<ContextMenu.Content className="context-menu">
+										<ContextMenu.Item className="context-menu__item" onSelect={() => removePinnedAt(i)}>
+											Remove separator
+										</ContextMenu.Item>
+									</ContextMenu.Content>
+								</ContextMenu.Portal>
+							</ContextMenu.Root>
+						);
 					}
 					const command = getCommand(id);
 					if (!command) return null;
@@ -154,36 +209,73 @@ function PinnedToolbar({ right, panels }: { right?: ReactNode; panels: Record<st
 					const tipPos = itemIndex < 3 ? "bottom-right" : "bottom";
 					itemIndex++;
 					const handleClick = hasPanel ? () => togglePanel(id) : command.execute;
-					if (command.icon) {
-						return (
-							<button
-								key={id}
-								className={`icon-button${isOpen ? " is-active" : ""}`}
-								type="button"
-								disabled={disabled}
-								role="tooltip"
-								data-microtip-position={tipPos}
-								aria-label={command.label}
-								data-qa={id}
-								onClick={handleClick}
-							>
-								<Icon path={command.icon} />
-							</button>
-						);
-					}
-					return (
+					const isFirst = i === 0;
+					const isLast = i === pinned.length - 1;
+
+					const btn = command.icon ? (
 						<button
-							key={id}
-							className={`button${isOpen ? " is-active" : ""}`}
+							className={`icon-button${isOpen ? " is-active" : ""}${dragIdx === i ? " is-dragging" : ""}`}
 							type="button"
 							disabled={disabled}
 							role="tooltip"
 							data-microtip-position={tipPos}
 							aria-label={command.label}
+							data-qa={id}
+							data-drop={dropIdx === i ? "" : undefined}
 							onClick={handleClick}
+							onMouseDown={(e) => handleDragStart(i, e)}
+							onMouseMove={() => handleDragOver(i)}
+						>
+							<Icon path={command.icon} />
+						</button>
+					) : (
+						<button
+							className={`button${isOpen ? " is-active" : ""}${dragIdx === i ? " is-dragging" : ""}`}
+							type="button"
+							disabled={disabled}
+							role="tooltip"
+							data-microtip-position={tipPos}
+							aria-label={command.label}
+							data-drop={dropIdx === i ? "" : undefined}
+							onClick={handleClick}
+							onMouseDown={(e) => handleDragStart(i, e)}
+							onMouseMove={() => handleDragOver(i)}
 						>
 							{command.label}
 						</button>
+					);
+
+					return (
+						<ContextMenu.Root key={id}>
+							<ContextMenu.Trigger asChild>
+								{btn}
+							</ContextMenu.Trigger>
+							<ContextMenu.Portal>
+								<ContextMenu.Content className="context-menu">
+									{!isFirst && (
+										<ContextMenu.Item className="context-menu__item" onSelect={() => movePinnedCommand(i, -1)}>
+											Move left
+										</ContextMenu.Item>
+									)}
+									{!isLast && (
+										<ContextMenu.Item className="context-menu__item" onSelect={() => movePinnedCommand(i, 1)}>
+											Move right
+										</ContextMenu.Item>
+									)}
+									<ContextMenu.Separator style={{ height: 1, background: "#0000001a", margin: "4px 0" }} />
+									<ContextMenu.Item className="context-menu__item" onSelect={() => insertSeparator(i, "before")}>
+										Add separator before
+									</ContextMenu.Item>
+									<ContextMenu.Item className="context-menu__item" onSelect={() => insertSeparator(i, "after")}>
+										Add separator after
+									</ContextMenu.Item>
+									<ContextMenu.Separator style={{ height: 1, background: "#0000001a", margin: "4px 0" }} />
+									<ContextMenu.Item className="context-menu__item" onSelect={() => removePinnedAt(i)}>
+										Remove from toolbar
+									</ContextMenu.Item>
+								</ContextMenu.Content>
+							</ContextMenu.Portal>
+						</ContextMenu.Root>
 					);
 				})}
 				{right}
@@ -768,7 +860,7 @@ export function MapOverview({ hidden }: { hidden?: boolean }) {
 				title="Selections"
 				isCollapsed={selectionsCollapsed}
 				onCollapse={setSelectionsCollapsed}
-				collapsedAddons={<span>({fmt.format(selected.size)} selected)</span>}
+				collapsedAddons={<span>{fmt.format(selected.size)} selected</span>}
 				addons={
 					<>
 						<span className="selection-manager__count">

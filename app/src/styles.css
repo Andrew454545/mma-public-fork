@@ -867,7 +867,6 @@ summary.button {
 .icon-button:disabled {
 	opacity: 0.35;
 	cursor: default;
-	pointer-events: none;
 }
 .input {
 	border: none;
@@ -3776,10 +3775,12 @@ summary.button {
 	flex-grow: 1;
 }
 .selection-manager__bar-sep {
-	width: 1px;
+	width: 2px;
 	height: 1.25rem;
-	background: #ffffff33;
+	background: #ffffff40;
 	flex-shrink: 0;
+	margin: 0 2px;
+	cursor: grab;
 }
 .selection-manager__bulk-tag-row {
 	display: flex;
@@ -3789,8 +3790,8 @@ summary.button {
 }
 .selection-manager__toolbar {
 	margin-top: 0.5rem;
-	padding-top: 0.5rem;
-	border-top: 1px solid #0000000d;
+	padding-top: 1rem;
+	border-top: 1px solid #ffffff20;
 }
 .selection-manager__panel {
 	padding-top: 0.5rem;
@@ -3802,6 +3803,14 @@ summary.button {
 }
 .icon-button.is-active {
 	background: #ffffff1a;
+}
+.selection-manager__bar .is-dragging {
+	opacity: 0.3;
+}
+.selection-manager__bar [data-drop] {
+	outline: 2px solid #4a9eff;
+	outline-offset: -2px;
+	border-radius: 4px;
 }
 .selection-manager__bulk-tag {
 	display: inline-flex;
@@ -5630,6 +5639,9 @@ body {
 }
 
 /* Seen dialog */
+.modal__content:has(> .seen-dialog) {
+	overflow: visible;
+}
 .seen-dialog {
 	width: 720px;
 	max-width: 95vw;

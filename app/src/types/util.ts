@@ -1,4 +1,4 @@
-// ===== utils.ts =====
+/* eslint-disable @typescript-eslint/no-explicit-any */
 type Digits = {
 	"0": [];
 	"1": [0];

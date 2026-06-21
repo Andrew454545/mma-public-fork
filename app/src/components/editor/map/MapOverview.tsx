@@ -132,6 +132,7 @@ function PinnedToolbar({ right, panels }: { right?: ReactNode; panels: Record<st
 		return () => document.removeEventListener("open-inline-panel", handler);
 	}, [panels]);
 
+	// eslint-disable-next-line react-hooks/exhaustive-deps -- enabled() reads arbitrary external state; no dep list covers it
 	useEffect(() => {
 		if (openPanels.size === 0) return;
 		let changed = false;

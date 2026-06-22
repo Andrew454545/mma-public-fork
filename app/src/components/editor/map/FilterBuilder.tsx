@@ -59,6 +59,7 @@ export function useExtraFieldKeys(): FieldEntry[] {
 		for (const vf of VIRTUAL_FIELDS) {
 			if (!keys.has(vf.key)) entries.push(vf);
 		}
+		entries.sort((a, b) => a.label.localeCompare(b.label));
 		return entries;
 	}, [keys, defsVersion]);
 }

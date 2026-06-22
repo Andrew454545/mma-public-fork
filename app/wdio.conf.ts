@@ -3,6 +3,7 @@ import fs from "fs";
 import { installSvMock } from "./test/e2e/svMock";
 
 process.env.MMA_TEST_DB = "1";
+process.env.TSX_TSCONFIG_PATH = path.resolve("tsconfig.app.json");
 
 const isWorker = !!process.env.WDIO_WORKER_ID;
 let logStream: fs.WriteStream | undefined;

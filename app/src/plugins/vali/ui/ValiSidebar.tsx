@@ -1,7 +1,7 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { Command, type Child } from "@tauri-apps/plugin-shell";
 import { cmd } from "@/lib/commands";
-import { createLocation } from "@/types";
+import { createLocation, LocationFlag } from "@/types";
 import { createTags } from "@/store/useMapStore";
 import { Sidebar } from "@/components/primitives/Sidebar";
 import { createPluginStorage } from "@/plugins/registry";
@@ -20,7 +20,7 @@ interface ValiLocation {
 	heading?: number;
 	pitch?: number;
 	zoom?: number;
-	panoId?: string;
+	panoId: string;
 }
 
 const VALIG_URL = "https://valig.vercel.app";
@@ -70,12 +70,8 @@ export function ValiSidebar({ onClose }: { onClose: () => void }) {
 				}
 				const locations = valiLocs.map((v) =>
 					createLocation({
-						lat: v.lat,
-						lng: v.lng,
-						heading: v.heading ?? 0,
-						pitch: v.pitch ?? 0,
-						zoom: v.zoom ?? 0,
-						panoId: v.panoId ?? null,
+						...v,
+						flags: LocationFlag.LoadAsPanoId,
 						...(tagId != null ? { tags: [tagId] } : {}),
 					}),
 				);

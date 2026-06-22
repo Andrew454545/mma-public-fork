@@ -4,6 +4,7 @@ import reactHooks from "eslint-plugin-react-hooks";
 import reactRefresh from "eslint-plugin-react-refresh";
 import tseslint from "typescript-eslint";
 import { defineConfig, globalIgnores } from "eslint/config";
+import noDuplicateCommandIcons from "./eslint-rules/no-duplicate-command-icons.js";
 
 export default defineConfig([
 	globalIgnores(["dist", "src/bindings.gen.ts", "src/components/dialogs/manual-img-dims.gen.ts"]),
@@ -34,6 +35,11 @@ export default defineConfig([
 				},
 			],
 		},
+	},
+	{
+		files: ["src/store/commandDefs.ts"],
+		plugins: { local: { rules: { "no-duplicate-command-icons": noDuplicateCommandIcons } } },
+		rules: { "local/no-duplicate-command-icons": "error" },
 	},
 	{
 		files: ["test/e2e/**/*.ts"],

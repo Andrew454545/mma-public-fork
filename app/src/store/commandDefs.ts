@@ -25,6 +25,7 @@ import {
 	mdiCompassOutline,
 	mdiDiceMultiple,
 	mdiMapPlus,
+	mdiVectorPolygon,
 	mdiMapSearchOutline,
 	mdiFilterOutline,
 	mdiPodium,
@@ -177,7 +178,7 @@ const COMMANDS = {
 	},
 	"download-polygon-geojson": {
 		label: "Download polygon selections as GeoJSON",
-		icon: mdiCodeJson,
+		icon: mdiVectorPolygon,
 		group: "Selections",
 		enabled: () => getSelections().some((s) => s.props.type === "Polygon"),
 		execute: () => {

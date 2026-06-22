@@ -2988,9 +2988,13 @@ summary.button {
 	font-family: monospace;
 	font-size: 0.8125rem;
 }
-.manage-fields-table__no-data {
-	color: #0006;
-	font-family: sans-serif;
+.manage-fields-table__coverage-cell {
+	width: 14px;
+	padding-right: 0;
+	color: var(--stone-7);
+}
+.manage-fields-table__coverage {
+	display: block;
 }
 .manage-fields-table .input {
 	width: 100%;

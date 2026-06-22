@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Dialog, DialogContent } from "@/components/primitives/Dialog";
 import {
 	setMapExtraFields,
 	getKnownFieldKeys,
+	getCurrentMap,
 	renameField,
 	deleteField,
 	fetchAllLocations,
@@ -47,13 +48,35 @@ function tokenToComp(t: CompToken, period: number): Comparison | undefined {
 
 interface FieldRow {
 	key: string;
-	// Editable key. Diverges from `key` while the user types; a rename/merge is
-	// proposed on blur when it differs. `key` stays the stable row identity.
 	draftKey: string;
 	label: string;
 	type: ExtraFieldDef["type"];
 	comparison: ExtraFieldDef["comparison"];
-	hasData: boolean;
+}
+
+function CoverageIcon({ ratio }: { ratio: number }) {
+	const pct = Math.round(ratio * 100);
+	return (
+		<svg
+			className="manage-fields-table__coverage"
+			width="14"
+			height="14"
+			viewBox="0 0 14 14"
+		>
+			<title>{pct}% of locations</title>
+			<circle cx="7" cy="7" r="6" fill="none" stroke="currentColor" strokeWidth="1" opacity="0.3" />
+			{ratio > 0 && (
+				<circle
+					cx="7"
+					cy="7"
+					r="6"
+					fill="currentColor"
+					opacity="0.5"
+					style={{ clipPath: `inset(${(1 - ratio) * 100}% 0 0 0)` }}
+				/>
+			)}
+		</svg>
+	);
 }
 
 interface RenamePrompt {
@@ -76,7 +99,6 @@ function buildRows(): FieldRow[] {
 			label: def?.label ?? key,
 			type: def?.type ?? "string",
 			comparison: def?.comparison ?? null,
-			hasData: knownKeys.has(key),
 		};
 	});
 }
@@ -86,8 +108,25 @@ export function ManageFieldsModal({ onClose }: { onClose: () => void }) {
 	const [renamePrompt, setRenamePrompt] = useState<RenamePrompt | null>(null);
 	const [deleteKey, setDeleteKey] = useState<string | null>(null);
 	const [busy, setBusy] = useState(false);
-	// Open period prompt for circular comparison: { key, value } while picking, else null.
 	const [periodPrompt, setPeriodPrompt] = useState<{ key: string; value: string } | null>(null);
+	const [coverage, setCoverage] = useState<Map<string, number>>(new Map());
+
+	useEffect(() => {
+		const total = getCurrentMap()?.meta.locationCount ?? 0;
+		if (total === 0) return;
+		fetchAllLocations().then((locs) => {
+			const counts = new Map<string, number>();
+			for (const loc of locs) {
+				if (!loc.extra) continue;
+				for (const key of Object.keys(loc.extra)) {
+					counts.set(key, (counts.get(key) ?? 0) + 1);
+				}
+			}
+			const ratios = new Map<string, number>();
+			for (const [key, count] of counts) ratios.set(key, count / total);
+			setCoverage(ratios);
+		});
+	}, []);
 
 	const existingKeys = new Set(rows.map((r) => r.key));
 
@@ -178,6 +217,7 @@ export function ManageFieldsModal({ onClose }: { onClose: () => void }) {
 					<table className="manage-fields-table">
 						<thead>
 							<tr>
+								<th />
 								<th>Field</th>
 								<th>Label</th>
 								<th>Type</th>
@@ -188,6 +228,9 @@ export function ManageFieldsModal({ onClose }: { onClose: () => void }) {
 						<tbody>
 							{rows.map((row) => (
 								<tr key={row.key}>
+									<td className="manage-fields-table__coverage-cell">
+										<CoverageIcon ratio={coverage.get(row.key) ?? 0} />
+									</td>
 									<td className="manage-fields-table__key">
 										<input
 											className="input"
@@ -197,9 +240,6 @@ export function ManageFieldsModal({ onClose }: { onClose: () => void }) {
 											onBlur={() => proposeRename(row)}
 											onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
 										/>
-										{!row.hasData && (
-											<span className="manage-fields-table__no-data"> (no data)</span>
-										)}
 									</td>
 									<td>
 										<input

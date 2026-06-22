@@ -25,6 +25,7 @@ import { useHotkey } from "@/lib/hooks/useHotkey";
 import { useBinding } from "@/lib/util/hotkeys";
 import { useMapKeyboardNav } from "@/lib/hooks/useMapKeyboardNav";
 import { useTrailVersion } from "@/lib/sv/svTrail";
+import { useSeenOverlayVersion } from "@/lib/seen/seenOverlay";
 import type { MapEmbedPrefs } from "@/components/editor/map/mapEmbedPrefs";
 
 type OverlayEvent = { srcEvent?: { domEvent?: Event } };
@@ -70,6 +71,7 @@ export function useMapSurface(
 	const trailVersion = useTrailVersion();
 	const importMarkerVersion = useImportMarkerVersion();
 	const diffMarkerVersion = useDiffMarkerVersion();
+	const seenOverlayVersion = useSeenOverlayVersion();
 	const latLngAnchor = useLatLngAnchor();
 
 	const rebuild = useCallback(() => {
@@ -157,6 +159,7 @@ export function useMapSurface(
 		trailVersion,
 		importMarkerVersion,
 		diffMarkerVersion,
+		seenOverlayVersion,
 		latLngAnchor,
 	]);
 

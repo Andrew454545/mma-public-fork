@@ -8,7 +8,14 @@ import {
 	useMemo,
 	useSyncExternalStore,
 } from "react";
-import { LocationFlag, createLocation, isVirtualLocation } from "@/types";
+import {
+	LocationFlag,
+	VIRTUAL_FLAGS,
+	createLocation,
+	isVirtualLocation,
+	isImportPreview,
+	isSeenPreview,
+} from "@/types";
 import { clamp } from "@/types/util";
 import { PANO_ZOOM, PANO_PITCH, FRAME_MS, SV_SEARCH_RADIUS } from "@/lib/sv/constants";
 import type { Location, Tag } from "@/bindings.gen";
@@ -394,7 +401,6 @@ export function LocationPreview() {
 
 function LocationPreviewInner() {
 	const location = useActiveLocation();
-	const isStaged = location != null && isVirtualLocation(location);
 	const map = useCurrentMap();
 	const reviewSession = useReviewSession();
 	const isReviewMode = reviewSession !== null;
@@ -649,8 +655,27 @@ function LocationPreviewInner() {
 		const pos = singletonPano.getPosition();
 
 		const savedPanoId = selectedPanoId ?? pano ?? location.panoId;
+
+		// Seen preview has no real row to update — materialize it as a new location instead.
+		if (isSeenPreview(location)) {
+			await addLocations([
+				createLocation({
+					lat: pos?.lat() ?? location.lat,
+					lng: pos?.lng() ?? location.lng,
+					heading: pov.heading,
+					pitch: pov.pitch,
+					zoom,
+					panoId: savedPanoId,
+					flags: location.flags & ~VIRTUAL_FLAGS, // keep LoadAsPanoId; drop the preview-kind bits
+					tags: (await createTags(pendingTags)).map((t) => t.id),
+				}),
+			]);
+			setActiveLocation(null);
+			return;
+		}
+
 		const panoChanged = savedPanoId !== location.panoId;
-		updateLocations([{ 
+		updateLocations([{
 			id: location.id,
 			patch: {
 				heading: pov.heading,
@@ -1175,7 +1200,7 @@ function LocationPreviewInner() {
 					</div>
 					<div className="location-preview__actions">
 						<button className="button button--primary" onClick={handleSave} data-qa="location-save">
-							Save
+							{isSeenPreview(location) ? "Add to map" : "Save"}
 						</button>
 						{isReviewMode ? (
 							<div style={{ display: "flex", justifyContent: "space-around" }}>
@@ -1219,7 +1244,7 @@ function LocationPreviewInner() {
 						</button>
 					</div>
 					<div className="location-preview__tags">
-						{isStaged ? (
+						{isImportPreview(location) ? (
 							<p>
 								This location is still being imported and cannot be modified. Complete the
 								import before making changes.

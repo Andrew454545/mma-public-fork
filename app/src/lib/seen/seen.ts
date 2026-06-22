@@ -122,8 +122,9 @@ export async function getSeenEntries(
 	limit = 100,
 	offset = 0,
 	filter?: SeenFilter,
+	thumbnails = true,
 ): Promise<SeenEntry[]> {
-	const result = await cmd.storeSeenList(limit, offset, filter ?? null);
+	const result = await cmd.storeSeenList(limit, offset, filter ?? null, thumbnails);
 	return result;
 }
 

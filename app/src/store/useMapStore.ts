@@ -1,6 +1,6 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
 import type { WorkArea, LatLng } from "@/types";
-import { isVirtualLocation, stagedIndexToVirtualId, virtualIdToStagedIndex } from "@/types";
+import { isVirtualLocation, isImportPreview, LocationFlag } from "@/types";
 import type { Location, MapData, MapMeta, Tag, ExtraFieldDef, FilterOp, KeySpec, Scope, CommitDiff, PartitionBucket, EditorImportPreview } from "@/bindings.gen";
 import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
 import { emit as tauriEmit, listen } from "@tauri-apps/api/event";
@@ -210,12 +210,6 @@ export const useSelectedLocationIds = makeStoreHook(() => selectedLocationIds);
 let cachedActiveLocation: Location | null = null;
 
 export const useActiveLocation = makeStoreHook((): Location | null => cachedActiveLocation);
-
-/** Staged-import preview index when the active location is virtual. */
-export function getActiveStagedIndex(): number | null {
-	const loc = cachedActiveLocation;
-	return loc && isVirtualLocation(loc) ? virtualIdToStagedIndex(loc.id) : null;
-}
 
 export const useDuplicateLocations = makeStoreHook(() => duplicateLocations);
 
@@ -1143,16 +1137,32 @@ export function useSelectedTagIds() {
 	return ids;
 }
 
-/** Open a staged-import location read-only, "as if" it were active. The location
- *  becomes virtual (negative id) so identity and mutate-guards derive from it. */
+// Each preview gets a fresh negative id so its identity changes between previews (the pano
+// viewer re-resolves on active-id change). The kind lives in the location's flags, not the id.
+let virtualIdSeq = 0;
+const freshVirtualId = () => --virtualIdSeq;
+
+/** Open a staged-import location read-only, "as if" it were active. The location becomes
+ *  virtual (negative id; ImportPreview flag) so identity and mutate-guards derive from it. */
 export async function openStagedLocation(index: number) {
 	const loc = await cmd.storeImportStagedLocation(index);
 	activeLocationId = null;
 	// Rust's active_id must not stay pinned to the previous real location.
 	fireAndForget(cmd.storeSetActive(null), "stagedOpen:setActive");
-	cachedActiveLocation = { ...loc, id: stagedIndexToVirtualId(index) };
+	cachedActiveLocation = { ...loc, id: freshVirtualId(), flags: loc.flags | LocationFlag.ImportPreview };
 	workArea = "location";
 	importMarkerVersion++;
+	bump();
+	emitEvent("active:change", null);
+}
+
+/** Open an arbitrary location read-only as a virtual seen-preview: loads its pano without
+ *  adding anything to the map. The caller sets LoadAsPanoId so the exact pano resolves. */
+export function previewVirtualLocation(loc: Location) {
+	activeLocationId = null;
+	fireAndForget(cmd.storeSetActive(null), "virtualPreview:setActive");
+	cachedActiveLocation = { ...loc, id: freshVirtualId(), flags: loc.flags | LocationFlag.SeenOverlay };
+	workArea = "location";
 	bump();
 	emitEvent("active:change", null);
 }
@@ -1161,9 +1171,12 @@ export async function setActiveLocation(id: number | null, checkDuplicates = tru
 	const t = trace("setActive");
 	if (cachedActiveLocation && isVirtualLocation(cachedActiveLocation)) {
 		importMarkerVersion++;
+		const wasStaged = isImportPreview(cachedActiveLocation);
 		if (id == null) {
 			cachedActiveLocation = null;
-			workArea = "import";
+			if (wasStaged) workArea = "import";
+			else if (activePluginId) workArea = "plugin";
+			else workArea = "overview";
 			bump();
 			emitEvent("active:change", null);
 			t.end();

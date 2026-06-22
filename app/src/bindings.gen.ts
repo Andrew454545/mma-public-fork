@@ -322,7 +322,7 @@ export const commands = {
 	 */
 	storeSeenWrite: (entry: SeenWriteEntry) => typedError<null, string>(__TAURI_INVOKE("store_seen_write", { entry })),
 	/**  Returns a page of seen entries, newest first, with optional filtering. */
-	storeSeenList: (limit: number, offset: number, filter: SeenFilter | null) => typedError<SeenEntry[], string>(__TAURI_INVOKE("store_seen_list", { limit, offset, filter })).then((v) => ((v.status === "ok" ? { ...v, data: v.data.map(i=>i) } : v) as typeof v)),
+	storeSeenList: (limit: number, offset: number, filter: SeenFilter | null, thumbnails: boolean) => typedError<SeenEntry[], string>(__TAURI_INVOKE("store_seen_list", { limit, offset, filter, thumbnails })).then((v) => ((v.status === "ok" ? { ...v, data: v.data.map(i=>i) } : v) as typeof v)),
 	/**  Returns the total number of seen entries matching the filter (for pagination). */
 	storeSeenCount: (filter: SeenFilter | null) => typedError<number, string>(__TAURI_INVOKE("store_seen_count", { filter })),
 	/**

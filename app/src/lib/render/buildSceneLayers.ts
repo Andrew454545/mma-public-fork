@@ -6,7 +6,9 @@ import type { CellManager } from "@/lib/render/CellManager";
 import type { MarkerStyle } from "@/components/editor/map/mapSettingsTypes";
 import type { PanoDot } from "@/lib/geo/photometa";
 import type { LatLng } from "@/types";
-import type { Location } from "@/bindings.gen";
+import { isImportPreview } from "@/types";
+import type { Location, SeenEntry } from "@/bindings.gen";
+import { isSeenOverlayActive, getSeenOverlayEntries } from "@/lib/seen/seenOverlay";
 import {
 	getCurrentMap,
 	getWorkArea,
@@ -14,7 +16,6 @@ import {
 	getActiveLocation,
 	getSelections,
 	getImportPreviewPositions,
-	getActiveStagedIndex,
 } from "@/store/useMapStore";
 import { getTrail } from "@/lib/sv/svTrail";
 import { getLatLngAnchor } from "@/lib/sv/measure";
@@ -134,6 +135,25 @@ export function buildSceneLayers(cm: CellManager, ctx: SceneContext): Layer[] {
 		if (!livePolygonKeys.has(k)) ctx.polygonGeomCache.delete(k);
 	}
 
+	if (isSeenOverlayActive()) {
+		const seen = getSeenOverlayEntries();
+		if (seen.length > 0) {
+			layers.push(
+				new ScatterplotLayer<SeenEntry>({
+					id: "seen-overlay",
+					data: seen,
+					getPosition: (d) => [d.lng, d.lat],
+					getFillColor: [255, 176, 0, 220],
+					getRadius: 5,
+					radiusUnits: "pixels",
+					radiusMinPixels: 3,
+					stroked: false,
+					pickable: true,
+				}),
+			);
+		}
+	}
+
 	layers.push(...baseMarkerLayers(cm, ctx.markerStyle, ctx.markerOpacity));
 
 	// Selection overlay rides on top as its own pickable layer — otherwise clicks fall through to
@@ -152,8 +172,35 @@ export function buildSceneLayers(cm: CellManager, ctx: SceneContext): Layer[] {
 		);
 	}
 
+	// Staged import preview markers; clicking one opens a read-only preview. Drawn *under* the
+	// active marker, which highlights whichever staged location is open — no per-index coloring.
+	const stagedActive = getActiveLocation();
+	if (getWorkArea() === "import" || (stagedActive != null && isImportPreview(stagedActive))) {
+		const previewPos = getImportPreviewPositions();
+		const previewCount = previewPos.length / 2;
+		if (previewCount > 0) {
+			layers.push(
+				new ScatterplotLayer({
+					id: "import-preview",
+					data: {
+						length: previewCount,
+						attributes: { getPosition: { value: previewPos, size: 2 } },
+					},
+					getRadius: 6,
+					radiusUnits: "pixels",
+					radiusMinPixels: 3,
+					getFillColor: [ctx.importPreviewColor.r, ctx.importPreviewColor.g, ctx.importPreviewColor.b, 200],
+					stroked: false,
+					pickable: true,
+				}),
+			);
+		}
+	}
+
+	// Active marker renders even with no committed locations so virtual previews (staged/seen)
+	// on an empty map still show — and it draws on top of the preview dots, which is the highlight.
 	const activeLoc = getActiveLocation();
-	if (activeLoc && cm.totalCount > 0) {
+	if (activeLoc) {
 		const activeColor: [number, number, number, number] = [
 			ctx.activeLocationColor.r,
 			ctx.activeLocationColor.g,
@@ -285,36 +332,6 @@ export function buildSceneLayers(cm: CellManager, ctx: SceneContext): Layer[] {
 				pickable: false,
 			}),
 		);
-	}
-
-	// Staged import preview markers; clicking one opens a read-only preview.
-	if (getWorkArea() === "import" || getActiveStagedIndex() !== null) {
-		const previewPos = getImportPreviewPositions();
-		const previewCount = previewPos.length / 2;
-		const stagedIdx = getActiveStagedIndex();
-		if (previewCount > 0) {
-			layers.push(
-				new ScatterplotLayer({
-					id: "import-preview",
-					data: {
-						length: previewCount,
-						attributes: { getPosition: { value: previewPos, size: 2 } },
-					},
-					getRadius: 6,
-					radiusUnits: "pixels",
-					radiusMinPixels: 3,
-					getFillColor: (_: unknown, { index }: { index: number }) =>
-						index === stagedIdx
-							? [ctx.activeLocationColor.r, ctx.activeLocationColor.g, ctx.activeLocationColor.b, 255]
-							: [ctx.importPreviewColor.r, ctx.importPreviewColor.g, ctx.importPreviewColor.b, 200],
-					stroked: false,
-					pickable: true,
-					updateTriggers: {
-						getFillColor: [stagedIdx, ctx.importPreviewColor, ctx.activeLocationColor],
-					},
-				}),
-			);
-		}
 	}
 
 	return layers;

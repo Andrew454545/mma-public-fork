@@ -142,13 +142,15 @@ pub fn store_seen_list(
     limit: u32,
     offset: u32,
     filter: Option<SeenFilter>,
+    thumbnails: bool,
 ) -> AppResult<Vec<SeenEntry>> {
     let db = storage::open_db()?;
     let (where_clause, mut params) = build_where_clause(&filter);
 
+    // The thumbnail blob dominates the payload; the map overlay omits it (thumbnails=false).
+    let thumb_col = if thumbnails { "thumbnail" } else { "NULL" };
     let sql = format!(
-        "SELECT id, pano_id, lat, lng, heading, pitch, zoom, entered_at, map_id, location_id, country_code, address, thumbnail FROM seen{} ORDER BY entered_at DESC LIMIT ? OFFSET ?",
-        where_clause
+        "SELECT id, pano_id, lat, lng, heading, pitch, zoom, entered_at, map_id, location_id, country_code, address, {thumb_col} FROM seen{where_clause} ORDER BY entered_at DESC LIMIT ? OFFSET ?"
     );
 
     params.push(Box::new(limit));

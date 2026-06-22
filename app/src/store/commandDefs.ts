@@ -15,6 +15,7 @@ import {
 	mdiMapMarkerCheck,
 	mdiHistory,
 	mdiEye,
+	mdiEyeOutline,
 	mdiTagRemove,
 	mdiTagMultipleOutline,
 	mdiTrashCanOutline,
@@ -60,6 +61,7 @@ import {
 	toggleGhostAllSelections,
 } from "./useMapStore";
 import { loadGeoJSON } from "@/lib/util/loadGeoJSON";
+import { toggleSeenOverlay } from "@/lib/seen/seenOverlay";
 
 const COMMANDS = {
 	"save": {
@@ -119,6 +121,13 @@ const COMMANDS = {
 		icon: mdiEye,
 		group: "Map",
 		execute: () => document.dispatchEvent(new CustomEvent("open-seen")),
+		enabled: () => getCurrentMap() !== null,
+	},
+	"toggle-seen-overlay": {
+		label: "Toggle seen locations overlay",
+		icon: mdiEyeOutline,
+		group: "Map",
+		execute: () => toggleSeenOverlay(),
 		enabled: () => getCurrentMap() !== null,
 	},
 	"selectAll": {

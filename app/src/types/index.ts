@@ -10,7 +10,14 @@ export const enum LocationFlag {
 	None = 0,
 	LoadAsPanoId = 1,
 	Informational = 2,
+	// Virtual-preview kind tags. JS-only and set only on the ephemeral active-location preview
+	// (never persisted) — strip with VIRTUAL_FLAGS before materializing one into the map.
+	ImportPreview = 4,
+	SeenOverlay = 8,
 }
+
+/** Mask of the virtual-only kind bits, to clear when turning a preview into a real location. */
+export const VIRTUAL_FLAGS = LocationFlag.ImportPreview | LocationFlag.SeenOverlay;
 
 /** Panorama source type from Google's internal metadata. */
 export const enum PanoType {
@@ -31,21 +38,20 @@ export function isPinnedToPano(loc: Location): boolean {
 	return hasLoadAsPanoId(loc) && loc.panoId != null;
 }
 
-/** Virtual locations (negative id) exist only ephemerally — e.g. staged imports
- *  previewed before commit. They display like real locations but every mutate
- *  path no-ops, and UI hides affordances that cannot apply. */
+/** Virtual locations exist only ephemerally as the single active-location preview — never in
+ *  the map. They display like real locations but every mutate path no-ops. Identity is a unique
+ *  negative id (so id-only checks work); the kind rides in `flags` (read where you hold the
+ *  full Location). */
 export function isVirtualLocation(loc: { id: number }): boolean {
 	return loc.id < 0;
 }
 
-/** Encoding between a staged-import preview index and its virtual location id.
- *  Single source for the `-(index + 1)` scheme. */
-export function stagedIndexToVirtualId(index: number): number {
-	return -(index + 1);
+export function isImportPreview(loc: Location): boolean {
+	return (loc.flags & LocationFlag.ImportPreview) !== 0;
 }
 
-export function virtualIdToStagedIndex(id: number): number {
-	return -id - 1;
+export function isSeenPreview(loc: Location): boolean {
+	return (loc.flags & LocationFlag.SeenOverlay) !== 0;
 }
 
 export function createLocation(

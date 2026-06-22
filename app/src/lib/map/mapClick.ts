@@ -4,18 +4,19 @@ import { LOCATION_LAYER_ID } from "@/lib/render/buildSceneLayers";
 import { cmd } from "@/lib/commands";
 import { lookupStreetView, showToast } from "@/lib/sv/lookup";
 import { tryInterceptClick } from "@/lib/map/mapState";
+import { openSeenEntry } from "@/lib/seen/seenOverlay";
 import { openContextMenuLatLng, openContextMenuLocation } from "@/lib/sv/measure";
 import { trace } from "@/lib/util/debug";
 import {
 	addLocations,
-	getActiveStagedIndex,
+	getActiveLocation,
 	getCurrentMap,
 	getWorkArea,
 	openStagedLocation,
 	setActiveLocation,
 	toggleManualSelection,
 } from "@/store/useMapStore";
-import { isVirtualLocation } from "@/types";
+import { isVirtualLocation, isImportPreview } from "@/types";
 import type { Location } from "@/bindings.gen";
 
 type OverlayEvent = { srcEvent?: { domEvent?: Event } };
@@ -53,7 +54,8 @@ export async function createLocationAtLatLng(
 ): Promise<Location | null> {
 	const area = getWorkArea();
 	if (area === "plugin" || area === "import" || area === "diff") return null;
-	if (getActiveStagedIndex() !== null) return null;
+	const active = getActiveLocation();
+	if (active != null && isImportPreview(active)) return null;
 
 	const t = trace("add");
 	const ms = getCurrentMap()?.meta.settings;
@@ -101,6 +103,12 @@ export async function handleMapClick(
 	// Staged import markers open a read-only preview; never fall through to SV lookup.
 	if (info.layer?.id === "import-preview") {
 		if (typeof info.index === "number" && info.index >= 0) void openStagedLocation(info.index);
+		return;
+	}
+
+	// Seen-overlay dots open the visited pano; never fall through to a map-click create.
+	if (info.layer?.id === "seen-overlay") {
+		if (typeof info.index === "number" && info.index >= 0) void openSeenEntry(info.index);
 		return;
 	}
 

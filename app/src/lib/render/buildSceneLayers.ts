@@ -135,6 +135,8 @@ export function buildSceneLayers(cm: CellManager, ctx: SceneContext): Layer[] {
 		if (!livePolygonKeys.has(k)) ctx.polygonGeomCache.delete(k);
 	}
 
+	layers.push(...baseMarkerLayers(cm, ctx.markerStyle, ctx.markerOpacity));
+
 	if (isSeenOverlayActive()) {
 		const seen = getSeenOverlayEntries();
 		if (seen.length > 0) {
@@ -153,8 +155,6 @@ export function buildSceneLayers(cm: CellManager, ctx: SceneContext): Layer[] {
 			);
 		}
 	}
-
-	layers.push(...baseMarkerLayers(cm, ctx.markerStyle, ctx.markerOpacity));
 
 	// Selection overlay rides on top as its own pickable layer — otherwise clicks fall through to
 	// the cell layer where selected markers have no z-priority, and an overlapping neighbor gets

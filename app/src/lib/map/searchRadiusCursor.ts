@@ -12,6 +12,7 @@ import { clickSearchRadius } from "@/lib/sv/lookup";
 import { getGoogleMap } from "@/lib/map/mapState";
 import { getCurrentMap } from "@/store/useMapStore";
 import { google } from "@/lib/sv/opensv";
+import type { LatLng } from "@/types";
 
 const LAYER_ID = "mma-search-radius-cursor";
 
@@ -43,7 +44,7 @@ export function mountSearchRadiusCursor(): () => void {
 		const radius = clickSearchRadius(latLng.lat(), zoom, minRadius);
 		overlay.setProps({
 			layers: [
-				new ScatterplotLayer<{ lat: number; lng: number }>({
+				new ScatterplotLayer<LatLng>({
 					id: LAYER_ID,
 					data: [{ lat: latLng.lat(), lng: latLng.lng() }],
 					getPosition: (d) => [d.lng, d.lat],

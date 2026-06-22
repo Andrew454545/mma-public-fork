@@ -1441,6 +1441,13 @@ declare const COMMANDS: {
 		execute: () => boolean;
 		enabled: () => boolean;
 	};
+	"toggle-seen-overlay": {
+		label: string;
+		icon: string;
+		group: "Map";
+		execute: () => void;
+		enabled: () => boolean;
+	};
 	selectAll: {
 		label: string;
 		group: "Selections";
@@ -1471,6 +1478,12 @@ declare const COMMANDS: {
 		label: string;
 		group: "Selections";
 		execute: typeof selectUncommitted;
+	};
+	"select-reviewed": {
+		label: string;
+		group: "Selections";
+		execute: () => Promise<void>;
+		enabled: () => boolean;
 	};
 	"invert-selection": {
 		label: string;
@@ -1760,7 +1773,7 @@ declare const DEFAULTS: {
 };
 export type AppSettings = typeof DEFAULTS;
 declare function setSetting<K extends keyof AppSettings>(key: K, value: AppSettings[K]): void;
-declare function getSeenEntries(limit?: number, offset?: number, filter?: SeenFilter): Promise<SeenEntry[]>;
+declare function getSeenEntries(limit?: number, offset?: number, filter?: SeenFilter, thumbnails?: boolean): Promise<SeenEntry[]>;
 declare function getSeenCount(filter?: SeenFilter): Promise<number>;
 declare function clearSeen(): Promise<void>;
 declare function loadSeenPano(entry: SeenEntry): Promise<void>;
@@ -1874,7 +1887,7 @@ declare const mma: {
 		storeDbClearTable: (table: string) => Promise<number>;
 		storeDbStats: () => Promise<DbStats>;
 		storeSeenWrite: (entry: SeenWriteEntry) => Promise<null>;
-		storeSeenList: (limit: number, offset: number, filter: SeenFilter | null) => Promise<SeenEntry[]>;
+		storeSeenList: (limit: number, offset: number, filter: SeenFilter | null, thumbnails: boolean) => Promise<SeenEntry[]>;
 		storeSeenCount: (filter: SeenFilter | null) => Promise<number>;
 		storeSeenCountries: () => Promise<string[]>;
 		storeSeenMaps: () => Promise<SeenMapInfo[]>;
@@ -2008,6 +2021,7 @@ declare const mma: {
 	};
 	retreat(s: ReviewSession): ReviewSession | null;
 	reviewIndex(s: ReviewSession): number;
+	reviewedHistoryIds(sessions: ReviewSession[]): number[];
 	isAtStart(s: ReviewSession): boolean;
 	isCurrentReviewed(s: ReviewSession): boolean;
 	useReviewSession(): ReviewSession | null;
@@ -2020,12 +2034,12 @@ declare const mma: {
 	cancelReview(): void;
 	deleteSession(id: string): Promise<void>;
 	listSessions(status?: "active" | "done"): Promise<ReviewSession[]>;
+	selectReviewedHistory(): Promise<void>;
 	selectReviewSet(s: ReviewSession, mode: "reviewed" | "unreviewed"): Promise<void>;
 	invalidateMapList(): Promise<void>;
 	getTagCounts(): Record<number, number>;
 	refreshAfterMutation(): void;
 	getVisibleTags(): Tag[];
-	getActiveStagedIndex(): number | null;
 	getImportPreviewPositions(): Float32Array<ArrayBuffer>;
 	getCommitDiffPreview(): CommitDiffPreview | null;
 	hasCommitDiff(): boolean;
@@ -2124,6 +2138,7 @@ declare const mma: {
 	toggleTagSelections(tagIds: number[]): void;
 	useSelectedTagIds(): Set<number>;
 	openStagedLocation(index: number): Promise<void>;
+	previewVirtualLocation(loc: Location$1): void;
 	setActiveLocation(id: number | null, checkDuplicates?: boolean): Promise<void>;
 	openDuplicateLocation(loc: Location$1): void;
 	removeDuplicate(id: number): void;

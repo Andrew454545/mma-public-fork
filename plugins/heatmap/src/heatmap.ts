@@ -1,6 +1,6 @@
 import { GoogleMapsOverlay } from "@deck.gl/google-maps";
 import { HeatmapLayer } from "@deck.gl/aggregation-layers";
-import type { LocationStore, ScopeHandle } from "mma-plugin-types";
+import type { LatLng, LocationStore, ScopeHandle } from "mma-plugin-types";
 
 export interface HeatmapSettings {
 	visible: boolean;
@@ -67,11 +67,6 @@ function sampleColorRange(stops: RGB[], n = 6): RGB[] {
 	return out;
 }
 
-interface LocPoint {
-	lat: number;
-	lng: number;
-}
-
 let overlay: GoogleMapsOverlay | null = null;
 let locStore: LocationStore | null = null;
 let settings: HeatmapSettings = loadSettings();
@@ -90,7 +85,7 @@ export function getLocationCount(): number {
 }
 
 // The renderer's pool is the plugin's own LocationStore; the scope just narrows it.
-function scopedLocations(): LocPoint[] {
+function scopedLocations(): LatLng[] {
 	if (!locStore) return [];
 	return locStore.get(scopeHandle.get()).map((l) => ({ lat: l.lat, lng: l.lng }));
 }
@@ -117,7 +112,7 @@ function rebuild() {
 	const layer = new HeatmapLayer({
 		id: "mma-heatmap",
 		data,
-		getPosition: (d: LocPoint) => [d.lng, d.lat],
+		getPosition: (d: LatLng) => [d.lng, d.lat],
 		getWeight: 1,
 		radiusPixels: settings.radiusPixels,
 		intensity: settings.intensity,

@@ -28,6 +28,7 @@ interface RegistryEntry {
 	icon: string;
 	version: string;
 	main: string;
+	comingSoon?: boolean;
 }
 
 type Tab = "core" | "additional";
@@ -123,6 +124,7 @@ function AdditionalCard({
 	enabled,
 	updatable,
 	latestVersion,
+	comingSoon,
 	onInstall,
 	onEnable,
 	onDisable,
@@ -137,6 +139,7 @@ function AdditionalCard({
 	enabled: boolean;
 	updatable: boolean;
 	latestVersion?: string;
+	comingSoon?: boolean;
 	onInstall: (id: string) => void;
 	onEnable: (id: string) => void;
 	onDisable: (id: string) => void;
@@ -175,7 +178,7 @@ function AdditionalCard({
 	const TRASH = "M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z";
 
 	return (
-		<div className={`plugin-card ${enabled ? "plugin-card--enabled" : ""}`}>
+		<div className={`plugin-card ${enabled ? "plugin-card--enabled" : ""} ${comingSoon ? "plugin-card--coming-soon" : ""}`}>
 			<div className="plugin-card__icon">
 				{icon ? <Icon path={icon} size={32} /> : null}
 			</div>
@@ -183,35 +186,37 @@ function AdditionalCard({
 				<div className="plugin-card__name">{name}</div>
 				{description && <div className="plugin-card__desc">{description}</div>}
 			</div>
-			<div className="plugin-card__actions">
-				{installed && updatable && (
+			{!comingSoon && (
+				<div className="plugin-card__actions">
+					{installed && updatable && (
+						<button
+							className="button plugin-card__toggle button--primary"
+							onClick={handleUpdate}
+							disabled={busy}
+							title={latestVersion ? `Update to v${latestVersion}` : "Update"}
+						>
+							{busy ? "..." : "Update"}
+						</button>
+					)}
 					<button
-						className="button plugin-card__toggle button--primary"
-						onClick={handleUpdate}
+						className={`button plugin-card__toggle ${primaryClass}`}
+						onClick={handlePrimary}
 						disabled={busy}
-						title={latestVersion ? `Update to v${latestVersion}` : "Update"}
 					>
-						{busy ? "..." : "Update"}
+						{busy ? "..." : primaryLabel}
 					</button>
-				)}
-				<button
-					className={`button plugin-card__toggle ${primaryClass}`}
-					onClick={handlePrimary}
-					disabled={busy}
-				>
-					{busy ? "..." : primaryLabel}
-				</button>
-				{installed && (
-					<button
-						className="plugin-card__uninstall"
-						onClick={() => onUninstall(id)}
-						disabled={busy}
-						aria-label="Uninstall"
-					>
-						<Icon path={TRASH} size={16} />
-					</button>
-				)}
-			</div>
+					{installed && (
+						<button
+							className="plugin-card__uninstall"
+							onClick={() => onUninstall(id)}
+							disabled={busy}
+							aria-label="Uninstall"
+						>
+							<Icon path={TRASH} size={16} />
+						</button>
+					)}
+				</div>
+			)}
 			{installed && enabled && <PluginSettings pluginId={id} />}
 		</div>
 	);
@@ -226,6 +231,7 @@ interface AdditionalEntry {
 	enabled: boolean;
 	updatable: boolean;
 	latestVersion?: string;
+	comingSoon?: boolean;
 }
 
 export function PluginMarketplace({
@@ -290,6 +296,7 @@ export function PluginMarketplace({
 					enabled: isPluginEnabled(r.id),
 					updatable,
 					latestVersion: r.version,
+					comingSoon: r.comingSoon,
 				});
 			}
 		}

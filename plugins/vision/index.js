@@ -367,5 +367,6 @@ MMA.registerPlugin({
   activate() {
   },
   sidebar: VisionSidebar,
-  locationPanel: FindSimilarButton
+  locationPanel: FindSimilarButton,
+  comingSoon: true
 });

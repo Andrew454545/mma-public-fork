@@ -5,4 +5,5 @@ MMA.registerPlugin({
 	activate() {},
 	sidebar: VisionSidebar,
 	locationPanel: FindSimilarButton,
+	comingSoon: true
 });

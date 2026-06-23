@@ -76,7 +76,7 @@ export function CopyToMapDialog({ onClose }: { onClose: () => void }) {
 				if (!open) onClose();
 			}}
 		>
-			<DialogContent title="Add location to map" className="copy-to-map-modal-host">
+			<DialogContent title="Copy location to map (hotkeys)" className="copy-to-map-modal-host">
 				<div className="copy-to-map-modal">
 				<p className="copy-to-map-modal__hint">
 					Pressing an assigned key while a location is open copies that location into the map

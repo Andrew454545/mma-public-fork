@@ -81,11 +81,18 @@ const COMMANDS = {
 		execute: () => document.dispatchEvent(new CustomEvent("open-import")),
 		enabled: () => getCurrentMap() !== null,
 	},
-	"addLocationToMap": {
-		label: "Add location to map...",
+	"copyToMap": {
+		label: "Copy location to map via hotkeys...",
 		icon: mdiMapPlus,
 		group: "Map",
 		execute: () => document.dispatchEvent(new CustomEvent("open-copy-to-map")),
+		enabled: () => getCurrentMap() !== null,
+	},
+	"quickCopyToMap": {
+		label: "Copy location to map...",
+		icon: mdiMapPlus,
+		group: "Map",
+		execute: () => document.dispatchEvent(new CustomEvent("open-quick-copy-to-map")),
 		enabled: () => getCurrentMap() !== null,
 	},
 	"undo": {

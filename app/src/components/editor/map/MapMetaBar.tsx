@@ -13,6 +13,7 @@ import { ExportDialog } from "@/components/dialogs/ExportDialog";
 import { VersionHistory } from "@/components/dialogs/VersionHistory";
 import { SeenDialog } from "@/components/dialogs/SeenDialog";
 import { CopyToMapDialog } from "@/components/editor/CopyToMapDialog";
+import { QuickCopyToMapDialog } from "@/components/editor/QuickCopyToMapDialog";
 import { loadSeenPano } from "@/components/editor/location/LocationPreview";
 import { Icon } from "@/components/primitives/Icon";
 import { mdiUndo, mdiRedo } from "@mdi/js";
@@ -27,6 +28,7 @@ export function MapMetaBar() {
 	const [showHistory, setShowHistory] = useState(false);
 	const [showSeen, setShowSeen] = useState(false);
 	const [showCopyToMap, setShowCopyToMap] = useState(false);
+	const [showQuickCopy, setShowQuickCopy] = useState(false);
 
 	useEffect(() => {
 		const onExport = () => setShowExport(true);
@@ -34,17 +36,20 @@ export function MapMetaBar() {
 		const onHistory = () => setShowHistory(true);
 		const onSeen = () => setShowSeen(true);
 		const onCopyToMap = () => setShowCopyToMap(true);
+		const onQuickCopy = () => setShowQuickCopy(true);
 		document.addEventListener("open-export", onExport);
 		document.addEventListener("open-import", onImport);
 		document.addEventListener("open-history", onHistory);
 		document.addEventListener("open-seen", onSeen);
 		document.addEventListener("open-copy-to-map", onCopyToMap);
+		document.addEventListener("open-quick-copy-to-map", onQuickCopy);
 		return () => {
 			document.removeEventListener("open-export", onExport);
 			document.removeEventListener("open-import", onImport);
 			document.removeEventListener("open-history", onHistory);
 			document.removeEventListener("open-seen", onSeen);
 			document.removeEventListener("open-copy-to-map", onCopyToMap);
+			document.removeEventListener("open-quick-copy-to-map", onQuickCopy);
 		};
 	}, []);
 
@@ -113,6 +118,7 @@ export function MapMetaBar() {
 			{showHistory && <VersionHistory onClose={() => setShowHistory(false)} />}
 			<SeenDialog open={showSeen} onOpenChange={setShowSeen} onLoadPano={loadSeenPano} />
 			{showCopyToMap && <CopyToMapDialog onClose={() => setShowCopyToMap(false)} />}
+			{showQuickCopy && <QuickCopyToMapDialog onClose={() => setShowQuickCopy(false)} />}
 		</>
 	);
 }

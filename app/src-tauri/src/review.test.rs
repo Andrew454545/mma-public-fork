@@ -78,6 +78,7 @@ fn update_persists_cursor_reviewed_and_ordering() {
         &conn,
         ReviewUpdate {
             id: s.id.clone(),
+            name: None,
             cursor_id: Some(3),
             reviewed: Some(vec![1, 2]),
             ordering: None,
@@ -101,6 +102,7 @@ fn pruning_ordering_and_reviewed_does_not_disturb_cursor() {
         &conn,
         ReviewUpdate {
             id: s.id.clone(),
+            name: None,
             cursor_id: Some(3),
             reviewed: Some(vec![1, 2]),
             ordering: None,
@@ -113,6 +115,7 @@ fn pruning_ordering_and_reviewed_does_not_disturb_cursor() {
         &conn,
         ReviewUpdate {
             id: s.id.clone(),
+            name: None,
             cursor_id: None,
             reviewed: Some(vec![1]),
             ordering: Some(vec![1, 3, 5]),
@@ -134,6 +137,7 @@ fn done_sessions_are_excluded_from_get_but_listable() {
         &conn,
         ReviewUpdate {
             id: s.id.clone(),
+            name: None,
             cursor_id: None,
             reviewed: None,
             ordering: None,

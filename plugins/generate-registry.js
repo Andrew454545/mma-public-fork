@@ -39,14 +39,16 @@ for (const name of fs.readdirSync(pluginsDir)) {
 		hasError = true;
 	}
 
-	entries.push({
+	const entry = {
 		id,
 		name: raw.name,
 		description: raw.description || "",
 		icon: raw.icon || "",
 		version: raw.version || "0.0.0",
 		main: raw.main || "index.js",
-	});
+	};
+	if (raw.comingSoon) entry.comingSoon = true;
+	entries.push(entry);
 }
 
 if (hasError) {

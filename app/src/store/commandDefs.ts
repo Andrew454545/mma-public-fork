@@ -26,6 +26,7 @@ import {
 	mdiCompassOutline,
 	mdiDiceMultiple,
 	mdiMapPlus,
+	mdiMapMarkerPlus,
 	mdiVectorPolygon,
 	mdiMapSearchOutline,
 	mdiFilterOutline,
@@ -90,7 +91,7 @@ const COMMANDS = {
 	},
 	"quickCopyToMap": {
 		label: "Copy location to map...",
-		icon: mdiMapPlus,
+		icon: mdiMapMarkerPlus,
 		group: "Map",
 		execute: () => document.dispatchEvent(new CustomEvent("open-quick-copy-to-map")),
 		enabled: () => getCurrentMap() !== null,

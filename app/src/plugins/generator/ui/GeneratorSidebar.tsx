@@ -123,7 +123,7 @@ export function GeneratorSidebar({ onClose }: { onClose: () => void }) {
 		setSettings((prev) => {
 			const next = { ...prev, ...patch };
 			saveSettings(next);
-			engineRef.current?.updateSettings(next); // apply live to a running job (#46)
+			engineRef.current?.updateSettings(next); // apply live to a running job
 			return next;
 		});
 	}, []);
@@ -178,13 +178,29 @@ export function GeneratorSidebar({ onClose }: { onClose: () => void }) {
 		const engine = engineRef.current;
 		if (!engine) return;
 		if (engine.isPaused()) {
+			const sels = getSelections().filter((s) => s.props.type === "Polygon");
+			const nextMeta = new Map(sessionMeta);
+			const desired: GeneratorRegion[] = [];
+			for (const sel of sels) {
+				const m = nextMeta.get(sel.key) ?? {
+					target: settings.defaultTarget,
+					found: [],
+					checkedPanos: new Set(),
+					isProcessing: false,
+				};
+				nextMeta.set(sel.key, m);
+				const region = selectionToRegion(sel, m);
+				if (region) desired.push(region);
+			}
+			setMeta(nextMeta);
+			engine.reconcileRegions(desired);
 			engine.resume();
 			setPaused(false);
 		} else {
 			engine.pause();
 			setPaused(true);
 		}
-	}, []);
+	}, [settings.defaultTarget]);
 
 	const handleStop = useCallback(() => {
 		engineRef.current?.stop();

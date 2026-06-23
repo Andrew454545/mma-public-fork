@@ -26,7 +26,10 @@ export class GenerationEngine {
 	private google: Google;
 	private running = false;
 	private paused = false;
-	private pauseResolve: (() => void) | null = null;
+	private pauseResolvers: (() => void)[] = [];
+	private cancelledRegions = new Set<string>();
+	private regionTasks: Promise<void>[] = [];
+	private liveRegionIds = new Set<string>();
 	private globalFoundPanoIds = new Set<string>();
 	private pendingBatch: GeneratedLocation[] = [];
 	private flushTimer: ReturnType<typeof setTimeout> | null = null;
@@ -59,18 +62,15 @@ export class GenerationEngine {
 		this.beginSearchOverlay();
 		try {
 			if (this.settings.oneCountryAtATime) {
-				for (const region of this.regions) {
-					if (!this.running) break;
-					await this.generateRegion(region);
-				}
+				this.regionTasks.push(this.runSequential());
 			} else {
-				const tasks: Promise<void>[] = [];
 				for (const region of this.regions) {
-					for (let i = 0; i < this.settings.numGenerators; i++) {
-						tasks.push(this.generateRegion(region));
-					}
+					this.regionTasks.push(this.runRegionWorkers(region, this.settings.numGenerators));
 				}
-				await Promise.all(tasks);
+			}
+			// Drain dynamically: reconcileRegions() can push new tasks while we await.
+			while (this.regionTasks.length) {
+				await Promise.all(this.regionTasks.splice(0));
 			}
 		} finally {
 			this.flushBatch();
@@ -79,20 +79,61 @@ export class GenerationEngine {
 		}
 	}
 
+	// One worker per region, finishing each before the next (oneCountryAtATime).
+	// Skips regions already running as a reconcile-added worker, or cancelled.
+	private async runSequential(): Promise<void> {
+		for (let i = 0; i < this.regions.length; i++) {
+			if (!this.running) return;
+			const region = this.regions[i];
+			if (this.cancelledRegions.has(region.id) || this.liveRegionIds.has(region.id)) continue;
+			this.liveRegionIds.add(region.id);
+			await this.generateRegion(region);
+			this.liveRegionIds.delete(region.id);
+		}
+	}
+
+	private runRegionWorkers(region: GeneratorRegion, count: number): Promise<void> {
+		this.liveRegionIds.add(region.id);
+		const workers: Promise<void>[] = [];
+		for (let i = 0; i < count; i++) workers.push(this.generateRegion(region));
+		return Promise.all(workers).then(() => {
+			this.liveRegionIds.delete(region.id);
+		});
+	}
+
+	// Apply a region set change to a running job. Intended to be called while paused
+	// (parked workers see cancellation / new workers park immediately), then resume().
+	reconcileRegions(desired: GeneratorRegion[]): void {
+		if (!this.running) return;
+		const desiredIds = new Set(desired.map((r) => r.id));
+
+		for (const region of this.regions) {
+			if (!desiredIds.has(region.id)) this.cancelledRegions.add(region.id);
+		}
+
+		const count = this.settings.oneCountryAtATime ? 1 : this.settings.numGenerators;
+		for (const region of desired) {
+			this.cancelledRegions.delete(region.id); // revive if previously removed
+			if (this.liveRegionIds.has(region.id)) continue; // already working (or parked)
+			if (!this.regions.some((r) => r.id === region.id)) this.regions.push(region);
+			this.regionTasks.push(this.runRegionWorkers(region, count));
+		}
+	}
+
 	pause(): void {
+		this.flushBatch(); // commit confirmed-but-buffered finds so they land on the map immediately
 		this.paused = true;
 	}
 
 	resume(): void {
 		this.paused = false;
-		if (this.pauseResolve) {
-			this.pauseResolve();
-			this.pauseResolve = null;
-		}
+		const resolvers = this.pauseResolvers.splice(0);
+		for (const resolve of resolvers) resolve();
 		this.flushBatch(); // flush any locations held back while paused
 	}
 
 	stop(): void {
+		this.flushBatch(); // commit confirmed finds before teardown (running still true here)
 		this.running = false;
 		if (this.flushTimer) {
 			clearTimeout(this.flushTimer);
@@ -135,16 +176,16 @@ export class GenerationEngine {
 	private async waitIfPaused(): Promise<void> {
 		if (!this.paused) return;
 		await new Promise<void>((resolve) => {
-			this.pauseResolve = resolve;
+			this.pauseResolvers.push(resolve);
 		});
 	}
 
 	private async generateRegion(region: GeneratorRegion): Promise<void> {
 		const [west, south, east, north] = getBoundingBox(region.feature);
 
-		while (region.found.length < region.target && this.running) {
+		while (region.found.length < region.target && this.running && !this.cancelledRegions.has(region.id)) {
 			await this.waitIfPaused();
-			if (!this.running) return;
+			if (!this.running || this.cancelledRegions.has(region.id)) return;
 
 			region.isProcessing = true;
 			const n = Math.min(region.target * 100, this.settings.speed);
@@ -164,7 +205,8 @@ export class GenerationEngine {
 
 			const batchSize = this.settings.findRegions ? 1 : 75;
 			for (const batch of chunk(randomCoords, batchSize)) {
-				if (!this.running || region.found.length >= region.target) break;
+				if (!this.running || this.cancelledRegions.has(region.id) || region.found.length >= region.target)
+					break;
 				await this.waitIfPaused();
 				await Promise.allSettled(batch.map((coord) => this.getLoc(coord, region)));
 			}
@@ -258,7 +300,7 @@ export class GenerationEngine {
 	}
 
 	private getPanoDeep(id: string, region: GeneratorRegion, depth: number): void {
-		if (!this.running || this.paused) return;
+		if (!this.running || this.paused || this.cancelledRegions.has(region.id)) return;
 		const s = this.settings;
 		if (depth > s.linksDepth) return;
 		if (region.checkedPanos.has(id)) return;
@@ -268,7 +310,7 @@ export class GenerationEngine {
 		this.sv.getPanorama(
 			{ pano: id },
 			(data: google.maps.StreetViewPanoramaData | null, status: string) => {
-				if (!this.running || this.paused) return;
+				if (!this.running || this.paused || this.cancelledRegions.has(region.id)) return;
 				if (status === "UNKNOWN_ERROR") {
 					region.checkedPanos.delete(id);
 					this.getPanoDeep(id, region, depth);
@@ -318,7 +360,7 @@ export class GenerationEngine {
 		pano: google.maps.StreetViewResolvedPanoramaData,
 		region: GeneratorRegion,
 	): void {
-		if (!this.running || this.paused) return;
+		if (!this.running || this.paused || this.cancelledRegions.has(region.id)) return;
 		const s = this.settings;
 		const panoId: string = pano.location.pano;
 

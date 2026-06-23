@@ -54,6 +54,7 @@ import {
 	getUndoRedoState,
 	deleteTags,
 	getSelections,
+	getAllSelections,
 	getSelectedLocationIds,
 	removeLocations,
 	getTagCounts,
@@ -222,7 +223,7 @@ const COMMANDS = {
 		group: "Selections",
 		defaultBinding: "Mod+d",
 		execute: resetSelections,
-		enabled: () => getSelections().length > 0,
+		enabled: () => getAllSelections().length > 0,
 	},
 	"find-duplicates": {
 		label: "Find duplicates...",
@@ -267,14 +268,14 @@ const COMMANDS = {
 		icon: mdiGhostOutline,
 		group: "Selections",
 		execute: () => toggleGhostAllSelections(),
-		enabled: () => getSelections().length > 0,
+		enabled: () => getAllSelections().length > 0,
 	},
 	"save-selections": {
 		label: "Save current selections...",
 		icon: mdiBookmarkOutline,
 		group: "Selections",
 		execute: () => document.dispatchEvent(new CustomEvent("open-save-selections")),
-		enabled: () => getSelections().length > 0,
+		enabled: () => getAllSelections().length > 0,
 	},
 	"apply-saved-selection": {
 		label: "Apply saved selection...",

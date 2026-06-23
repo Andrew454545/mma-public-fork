@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef, type ReactNode } from "react"
 import {
 	useCurrentMap,
 	useSelectedLocationIds,
-	useSelections,
+	useAllSelections,
 	removeSelections,
 	selectInverse,
 	setPolygonName,
@@ -117,7 +117,7 @@ function PinnedToolbar({ right, panels }: { right?: ReactNode; panels: Record<st
 	const [openPanels, setOpenPanels] = useState<Set<string>>(new Set());
 	const [dragIdx, setDragIdx] = useState<number | null>(null);
 	const [dropIdx, setDropIdx] = useState<number | null>(null);
-	useSelections();
+	useAllSelections();
 	useSelectedLocationIds();
 
 	useEffect(() => {
@@ -846,7 +846,7 @@ function SaveSelectionsDialog({
 	onNameChange: (v: string) => void;
 }) {
 	const map = useCurrentMap();
-	const selections = useSelections();
+	const selections = useAllSelections();
 	const saveableItems: SavedSelectionItem[] = (() => {
 		if (!map) return [];
 		return selections
@@ -961,7 +961,7 @@ function ApplySavedSelectionDialog({ open, onOpenChange }: { open: boolean; onOp
 export function MapOverview({ hidden }: { hidden?: boolean }) {
 	const map = useCurrentMap();
 	const selected = useSelectedLocationIds();
-	const selections = useSelections();
+	const selections = useAllSelections();
 	const [bulkTagInput, setBulkTagInput] = useState("");
 	const tagSortMode = useSetting("tagSortMode");
 	const [selectionsCollapsed, setSelectionsCollapsed] = useState(false);

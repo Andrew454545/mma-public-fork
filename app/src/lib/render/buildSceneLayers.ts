@@ -14,7 +14,7 @@ import {
 	getWorkArea,
 	getCommitDiffPreview,
 	getActiveLocation,
-	getSelections,
+	getAllSelections,
 	getImportPreviewPositions,
 } from "@/store/useMapStore";
 import { getTrail } from "@/lib/sv/svTrail";
@@ -91,7 +91,7 @@ export function buildSceneLayers(cm: CellManager, ctx: SceneContext): Layer[] {
 		return layers;
 	}
 
-	const allSelections = getSelections();
+	const allSelections = getAllSelections();
 	const polygonSels = allSelections.flatMap((sel) =>
 		sel.props.type === "Intersection" ? sel.props.selections : [sel],
 	);

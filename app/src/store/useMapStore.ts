@@ -444,8 +444,15 @@ export async function fetchLocationsByIds(ids: number[]): Promise<Location[]> {
 	return cmd.storeGetLocationsByIds(ids);
 }
 
-export function getSelections() {
+/** All selections including ghosted. Only for rendering/UI that needs the full list. */
+export function getAllSelections() {
 	return selections;
+}
+
+/** Active (non-ghosted) selections, the default for any operational logic. */
+export function getSelections() {
+	if (ghostedSelections.size === 0) return selections;
+	return selections.filter((s) => !ghostedSelections.has(s.key));
 }
 
 export function getSelectedLocationIds() {
@@ -826,7 +833,13 @@ export async function patchLocationExtra(
 
 // --- Selections ---
 
-export const useSelections = makeStoreHook(() => selections);
+/** All selections including ghosted. Only for rendering/UI that needs the full list. */
+export const useAllSelections = makeStoreHook(() => selections);
+
+/** Active (non-ghosted) selections — the default for any operational logic. */
+export const useSelections = makeStoreHook(() =>
+	ghostedSelections.size === 0 ? selections : selections.filter((s) => !ghostedSelections.has(s.key)),
+);
 
 /** Resolve a selection's overlay color, substituting the live tag color for Tag selections. */
 function selectionSyncColor(s: Selection): [number, number, number] {

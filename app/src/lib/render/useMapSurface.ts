@@ -14,7 +14,7 @@ import {
 	useMapVersion,
 	useSelectedLocationIds,
 	useSelectedTagIds,
-	useSelections,
+	useAllSelections,
 	useImportMarkerVersion,
 	useDiffMarkerVersion,
 	getActiveLocation,
@@ -67,7 +67,7 @@ export function useMapSurface(
 	const mapVer = useMapVersion();
 	const selectedIds = useSelectedLocationIds();
 	const selectedTags = useSelectedTagIds();
-	const allSelections = useSelections();
+	const allSelections = useAllSelections();
 	const trailVersion = useTrailVersion();
 	const importMarkerVersion = useImportMarkerVersion();
 	const diffMarkerVersion = useDiffMarkerVersion();

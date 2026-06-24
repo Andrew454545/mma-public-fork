@@ -18,14 +18,18 @@ const defaultProps: DefaultProps<PanoCoverageLayerProps> = {
 	minZoom: 14.9,
 };
 
+const MAX_TILES = 1024;
+
 export default class PanoCoverageLayer extends CompositeLayer<Required<_PanoCoverageLayerProps>> {
 	static layerName = "PanoCoverageLayer";
 	static defaultProps = defaultProps;
 
-	declare state: { dots: PanoDot[]; tiles: Set<string>; show: boolean };
+	// tiles: insertion order is age (oldest first); dots is the flattened render array,
+	// rebuilt only when tiles change so the ScatterplotLayer data ref stays stable per frame.
+	declare state: { tiles: Map<string, PanoDot[]>; dots: PanoDot[]; show: boolean };
 
 	initializeState(): void {
-		this.setState({ dots: [], tiles: new Set(), show: false });
+		this.setState({ tiles: new Map(), dots: [], show: false });
 	}
 
 	shouldUpdateState({ changeFlags }: UpdateParameters<this>): boolean {
@@ -41,20 +45,39 @@ export default class PanoCoverageLayer extends CompositeLayer<Required<_PanoCove
 		}
 
 		const [west, south, east, north] = context.viewport.getBounds();
-		const tiles = boundsToTiles(west, south, east, north);
+		const inView = boundsToTiles(west, south, east, north);
 		const known = this.state.tiles;
-		const fresh = tiles.filter((t) => !known.has(tileKey(t)));
+		const fresh = inView.filter((t) => !known.has(tileKey(t)));
 		if (this.state.show && fresh.length === 0) return; // nothing new in view
 
-		const nextTiles = fresh.length ? new Set(known) : known;
-		for (const t of fresh) nextTiles.add(tileKey(t));
-		this.setState({ show: true, tiles: nextTiles });
+		const tiles = new Map(known);
+		for (const t of fresh) tiles.set(tileKey(t), []);
+		this.evict(tiles, new Set(inView.map(tileKey)));
+		this.commit(tiles, true);
 
 		for (const t of fresh) {
+			const key = tileKey(t);
 			fetchPanoDots(t).then((d) => {
-				if (d.length) this.setState({ dots: this.state.dots.concat(d) });
+				if (!d.length || !this.state.tiles.has(key)) return; // evicted mid-fetch
+				const next = new Map(this.state.tiles);
+				next.set(key, d);
+				this.commit(next, this.state.show);
 			});
 		}
+	}
+
+	// Drop oldest tiles outside the current view until under the cap.
+	private evict(tiles: Map<string, PanoDot[]>, keep: Set<string>): void {
+		for (const key of tiles.keys()) {
+			if (tiles.size <= MAX_TILES) break;
+			if (!keep.has(key)) tiles.delete(key);
+		}
+	}
+
+	private commit(tiles: Map<string, PanoDot[]>, show: boolean): void {
+		let dots: PanoDot[] = [];
+		for (const arr of tiles.values()) dots = dots.concat(arr);
+		this.setState({ tiles, dots, show });
 	}
 
 	renderLayers() {

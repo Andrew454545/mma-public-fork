@@ -148,6 +148,7 @@ export function ExportDialog({ onClose }: Props) {
 							name="name"
 							value={fileName}
 							onChange={(e) => setFileName(e.target.value)}
+							autoFocus
 						/>
 					</div>
 					<div className="export-modal__fieldset">

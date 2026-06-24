@@ -338,6 +338,7 @@ function RenameForm({ name, onRename }: { name: string; onRename?: (from: string
 					className="input"
 					minLength={1}
 					maxLength={100}
+					autoFocus
 				/>
 			</p>
 			<div className="edit-map-modal__actions">

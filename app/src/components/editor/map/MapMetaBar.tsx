@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { Tooltip } from "@/components/primitives/Tooltip";
 import {
 	useCurrentMap,
 	useUndoRedo,
@@ -74,30 +75,30 @@ export function MapMetaBar() {
 						<span className="map-meta__count--updated">&plusmn;{fmt.format(diff.modified)}</span>
 					</span>
 				)}
-				<button
-					type="button"
-					className="icon-button"
-					disabled={!canUndo}
-					style={{ color: canUndo ? undefined : "var(--stone-7)" }}
-					role="tooltip"
-					aria-label="Undo"
-					data-microtip-position="top"
-					onClick={undo}
-				>
-					<Icon path={mdiUndo} />
-				</button>
-				<button
-					type="button"
-					className="icon-button"
-					disabled={!canRedo}
-					style={{ color: canRedo ? undefined : "var(--stone-7)" }}
-					role="tooltip"
-					aria-label="Redo"
-					data-microtip-position="top"
-					onClick={redo}
-				>
-					<Icon path={mdiRedo} />
-				</button>
+				<Tooltip content="Undo">
+					<button
+						type="button"
+						className="icon-button"
+						disabled={!canUndo}
+						style={{ color: canUndo ? undefined : "var(--stone-7)" }}
+						aria-label="Undo"
+						onClick={undo}
+					>
+						<Icon path={mdiUndo} />
+					</button>
+				</Tooltip>
+				<Tooltip content="Redo">
+					<button
+						type="button"
+						className="icon-button"
+						disabled={!canRedo}
+						style={{ color: canRedo ? undefined : "var(--stone-7)" }}
+						aria-label="Redo"
+						onClick={redo}
+					>
+						<Icon path={mdiRedo} />
+					</button>
+				</Tooltip>
 			</span>
 			<span className="map-meta__spacer"></span>
 			<div className="map-meta__import">

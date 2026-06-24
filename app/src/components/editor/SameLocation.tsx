@@ -1,4 +1,5 @@
 import { useMemo, useState, useCallback } from "react";
+import { Tooltip } from "@/components/primitives/Tooltip";
 import type { Location } from "@/bindings.gen";
 import {
 	useDuplicateLocations,
@@ -160,26 +161,24 @@ export default function SameLocation() {
 				))}
 			</ul>
 			<div className="duplicates__actions">
-				<button
-					className="button button--destructive"
-					disabled={selected.size === 0}
-					onClick={keepSelected}
-					aria-label="Delete all duplicate locations, except the selected ones"
-					role="tooltip"
-					data-microtip-position="bottom"
-				>
-					Keep selected
-				</button>
-				<button
-					className="button button--destructive"
-					disabled={selected.size === 0}
-					onClick={deleteSelected}
-					aria-label="Delete selected locations"
-					role="tooltip"
-					data-microtip-position="bottom"
-				>
-					Delete selected
-				</button>
+				<Tooltip content="Delete all duplicate locations, except the selected ones" side="bottom">
+					<button
+						className="button button--destructive"
+						disabled={selected.size === 0}
+						onClick={keepSelected}
+					>
+						Keep selected
+					</button>
+				</Tooltip>
+				<Tooltip content="Delete selected locations" side="bottom">
+					<button
+						className="button button--destructive"
+						disabled={selected.size === 0}
+						onClick={deleteSelected}
+					>
+						Delete selected
+					</button>
+				</Tooltip>
 				<button className="button" onClick={closeDuplicates}>
 					Cancel
 				</button>

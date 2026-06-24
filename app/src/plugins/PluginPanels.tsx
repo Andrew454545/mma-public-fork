@@ -8,6 +8,7 @@ import {
 import { useCurrentMap } from "@/store/useMapStore";
 import { setPluginMode } from "@/store/useMapStore";
 import { Icon } from "@/components/primitives/Icon";
+import { Tooltip } from "@/components/primitives/Tooltip";
 
 export function PluginToolbar() {
 	useSyncExternalStore(subscribeRegistry, getRegistrySnapshot);
@@ -27,22 +28,21 @@ export function PluginToolbar() {
 	return (
 		<>
 			{toolbarPlugins.map((p) => (
-				<button
-					key={p.id}
-					className="icon-button"
-					onClick={() => {
-						if (p.sidebar) {
-							setPluginMode(p.id);
-						} else if (p.modal) {
-							setModalId(modalId === p.id ? null : p.id);
-						}
-					}}
-					role="tooltip"
-					data-microtip-position="bottom"
-					aria-label={p.name}
-				>
-					<Icon path={p.icon} />
-				</button>
+				<Tooltip key={p.id} content={p.name} side="bottom">
+					<button
+						className="icon-button"
+						onClick={() => {
+							if (p.sidebar) {
+								setPluginMode(p.id);
+							} else if (p.modal) {
+								setModalId(modalId === p.id ? null : p.id);
+							}
+						}}
+						aria-label={p.name}
+					>
+						<Icon path={p.icon} />
+					</button>
+				</Tooltip>
 			))}
 			{modalPlugin &&
 				modalPlugin.modal &&

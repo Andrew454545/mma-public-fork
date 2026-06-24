@@ -12,6 +12,7 @@ import { useBinding } from "@/lib/util/hotkeys";
 import { useHotkeyRef } from "@/lib/hooks/useHotkey";
 import { open } from "@tauri-apps/plugin-shell";
 import { tweenPov } from "@/lib/sv/tweenPov";
+import { Tooltip } from "@/components/primitives/Tooltip";
 
 // --- Compass ---
 
@@ -380,22 +381,22 @@ export function PanoControls({
 					style={{ inset: "0px 0px auto auto" }}
 				>
 					<div className="map-control map-control--button">
-						<button
-							onClick={onFullscreen}
-							role="tooltip"
-							aria-label={`Toggle fullscreen (${fullscreenKey.toUpperCase()})`}
-							data-microtip-position="bottom-left"
-						>
-							{isFullscreen ? (
-								<svg height="24" width="24" viewBox="0 0 24 24">
-									<path d="M14,14H19V16H16V19H14V14M5,14H10V19H8V16H5V14M8,5H10V10H5V8H8V5M19,8V10H14V5H16V8H19Z" />
-								</svg>
-							) : (
-								<svg height="24" width="24" viewBox="0 0 24 24">
-									<path d="M5,5H10V7H7V10H5V5M14,5H19V10H17V7H14V5M17,14H19V19H14V17H17V14M10,17V19H5V14H7V17H10Z" />
-								</svg>
-							)}
-						</button>
+						<Tooltip content={`Toggle fullscreen (${fullscreenKey.toUpperCase()})`} side="bottom" align="end">
+							<button
+								onClick={onFullscreen}
+								aria-label={`Toggle fullscreen (${fullscreenKey.toUpperCase()})`}
+							>
+								{isFullscreen ? (
+									<svg height="24" width="24" viewBox="0 0 24 24">
+										<path d="M14,14H19V16H16V19H14V14M5,14H10V19H8V16H5V14M8,5H10V10H5V8H8V5M19,8V10H14V5H16V8H19Z" />
+									</svg>
+								) : (
+									<svg height="24" width="24" viewBox="0 0 24 24">
+										<path d="M5,5H10V7H7V10H5V5M14,5H19V10H17V7H14V5M17,14H19V19H14V17H17V14M10,17V19H5V14H7V17H10Z" />
+									</svg>
+								)}
+							</button>
+						</Tooltip>
 					</div>
 				</div>
 			)}
@@ -407,26 +408,26 @@ export function PanoControls({
 					style={{ inset: "56px 0px auto auto" }}
 				>
 					<div className="map-control map-control--button">
-						<button
-							ref={jumpForwardRef}
-							disabled={vis.defaultMovementMode !== "moving"}
-							onClick={jumpForward}
-							role="tooltip"
-							aria-label={`Jump forward 100 metres (${jumpForwardKey})`}
-							data-microtip-position="left"
-						>
-							100m
-						</button>
-						<button
-							ref={jumpBackwardRef}
-							disabled={vis.defaultMovementMode !== "moving"}
-							onClick={jumpBackward}
-							role="tooltip"
-							aria-label={`Jump backward 100 metres (${jumpBackwardKey})`}
-							data-microtip-position="left"
-						>
-							-100m
-						</button>
+						<Tooltip content={`Jump forward 100 metres (${jumpForwardKey})`} side="left">
+							<button
+								ref={jumpForwardRef}
+								disabled={vis.defaultMovementMode !== "moving"}
+								onClick={jumpForward}
+								aria-label={`Jump forward 100 metres (${jumpForwardKey})`}
+							>
+								100m
+							</button>
+						</Tooltip>
+						<Tooltip content={`Jump backward 100 metres (${jumpBackwardKey})`} side="left">
+							<button
+								ref={jumpBackwardRef}
+								disabled={vis.defaultMovementMode !== "moving"}
+								onClick={jumpBackward}
+								aria-label={`Jump backward 100 metres (${jumpBackwardKey})`}
+							>
+								-100m
+							</button>
+						</Tooltip>
 					</div>
 				</div>
 			)}
@@ -439,15 +440,15 @@ export function PanoControls({
 				>
 					<div className="map-control map-control--transparent">
 						<div className="compass-control">
-							<button
-								className="compass-control__button"
-								onClick={pointNorth}
-								role="tooltip"
-								aria-label="Click to point north (N). Ctrl+click to cycle through linked panoramas."
-								data-microtip-position="right"
-							>
-								<Compass heading={heading} />
-							</button>
+							<Tooltip content="Click to point north (N). Ctrl+click to cycle through linked panoramas." side="right">
+								<button
+									className="compass-control__button"
+									onClick={pointNorth}
+									aria-label="Point north"
+								>
+									<Compass heading={heading} />
+								</button>
+							</Tooltip>
 							{links.map((link) => (
 								<button
 									key={link.pano}
@@ -478,38 +479,27 @@ export function PanoControls({
 					style={{ inset: "auto auto 112px 0px" }}
 				>
 					<div className="map-control map-control--button">
-						<button
-							onClick={zoomIn}
-							role="tooltip"
-							aria-label="Zoom in"
-							data-microtip-position="right"
-						>
-							<svg height="24" width="24" viewBox="0 0 24 24">
-								<path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z" />
-							</svg>
-						</button>
-						<button
-							disabled={zoom === 0}
-							onClick={resetZoom}
-							role="tooltip"
-							aria-label="Reset zoom"
-							data-microtip-position="right"
-						>
-							<svg height="24" width="24" viewBox="0 0 24 24">
-								<path d="M12,9A3,3 0 0,0 9,12A3,3 0 0,0 12,15A3,3 0 0,0 15,12A3,3 0 0,0 12,9M19,19H15V21H19A2,2 0 0,0 21,19V15H19M19,3H15V5H19V9H21V5A2,2 0 0,0 19,3M5,5H9V3H5A2,2 0 0,0 3,5V9H5M5,15H3V19A2,2 0 0,0 5,21H9V19H5V15Z" />
-							</svg>
-						</button>
-						<button
-							disabled={zoom === 0}
-							onClick={zoomOut}
-							role="tooltip"
-							aria-label="Zoom out"
-							data-microtip-position="right"
-						>
-							<svg height="24" width="24" viewBox="0 0 24 24">
-								<path d="M19,13H5V11H19V13Z" />
-							</svg>
-						</button>
+						<Tooltip content="Zoom in" side="right">
+							<button onClick={zoomIn} aria-label="Zoom in">
+								<svg height="24" width="24" viewBox="0 0 24 24">
+									<path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z" />
+								</svg>
+							</button>
+						</Tooltip>
+						<Tooltip content="Reset zoom" side="right">
+							<button disabled={zoom === 0} onClick={resetZoom} aria-label="Reset zoom">
+								<svg height="24" width="24" viewBox="0 0 24 24">
+									<path d="M12,9A3,3 0 0,0 9,12A3,3 0 0,0 12,15A3,3 0 0,0 15,12A3,3 0 0,0 12,9M19,19H15V21H19A2,2 0 0,0 21,19V15H19M19,3H15V5H19V9H21V5A2,2 0 0,0 19,3M5,5H9V3H5A2,2 0 0,0 3,5V9H5M5,15H3V19A2,2 0 0,0 5,21H9V19H5V15Z" />
+								</svg>
+							</button>
+						</Tooltip>
+						<Tooltip content="Zoom out" side="right">
+							<button disabled={zoom === 0} onClick={zoomOut} aria-label="Zoom out">
+								<svg height="24" width="24" viewBox="0 0 24 24">
+									<path d="M19,13H5V11H19V13Z" />
+								</svg>
+							</button>
+						</Tooltip>
 					</div>
 				</div>
 			)}
@@ -521,17 +511,17 @@ export function PanoControls({
 					style={{ inset: "auto auto 56px 0px" }}
 				>
 					<div className="map-control map-control--button">
-						<button
-							disabled={!hasChanged}
-							onClick={onReturnToSpawn}
-							role="tooltip"
-							aria-label="Return to spawn (R)"
-							data-microtip-position="right"
-						>
-							<svg height="24" width="24" viewBox="0 0 24 24">
-								<path d="M10,20V14H14V20H19V12H22L12,3L2,12H5V20H10Z" />
-							</svg>
-						</button>
+						<Tooltip content="Return to spawn (R)" side="right">
+							<button
+								disabled={!hasChanged}
+								onClick={onReturnToSpawn}
+								aria-label="Return to spawn (R)"
+							>
+								<svg height="24" width="24" viewBox="0 0 24 24">
+									<path d="M10,20V14H14V20H19V12H22L12,3L2,12H5V20H10Z" />
+								</svg>
+							</button>
+						</Tooltip>
 					</div>
 				</div>
 			)}
@@ -543,36 +533,33 @@ export function PanoControls({
 			>
 				{vis.showMapLinks && (
 					<div className="map-control map-control--button map-links-control">
-						<button
-							onClick={openInMaps}
-							role="tooltip"
-							aria-label="Open in maps"
-							data-microtip-position="top-right"
-						>
-							<svg height="24" width="24" viewBox="0 0 24 24">
-								<path d="M14,3V5H17.59L7.76,14.83L9.17,16.24L19,6.41V10H21V3M19,19H5V5H12V3H5C3.89,3 3,3.9 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V12H19V19Z" />
-							</svg>
-						</button>
-						<button
-							onClick={(e) => doCopy({ long: e.altKey, noTags: e.shiftKey })}
-							role="tooltip"
-							aria-label="Copy link - Shift: without tags, Alt: long URL"
-							data-microtip-position="right"
-						>
-							{copyState === "loading" ? (
-								<svg height="24" width="24" viewBox="0 0 24 24" className="spin">
-									<path d="M12,4V2A10,10 0 0,0 2,12H4A8,8 0 0,1 12,4Z" />
-								</svg>
-							) : copyState === "done" ? (
+						<Tooltip content="Open in maps" side="top" align="start">
+							<button onClick={openInMaps} aria-label="Open in maps">
 								<svg height="24" width="24" viewBox="0 0 24 24">
-									<path d="M21,7L9,19L3.5,13.5L4.91,12.09L9,16.17L19.59,5.59L21,7Z" />
+									<path d="M14,3V5H17.59L7.76,14.83L9.17,16.24L19,6.41V10H21V3M19,19H5V5H12V3H5C3.89,3 3,3.9 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V12H19V19Z" />
 								</svg>
-							) : (
-								<svg height="24" width="24" viewBox="0 0 24 24">
-									<path d="M19,21H8V7H19M19,5H8A2,2 0 0,0 6,7V21A2,2 0 0,0 8,23H19A2,2 0 0,0 21,21V7A2,2 0 0,0 19,5M16,1H4A2,2 0 0,0 2,3V17H4V3H16V1Z" />
-								</svg>
-							)}
-						</button>
+							</button>
+						</Tooltip>
+						<Tooltip content="Copy link - Shift: without tags, Alt: long URL" side="right">
+							<button
+								onClick={(e) => doCopy({ long: e.altKey, noTags: e.shiftKey })}
+								aria-label="Copy link"
+							>
+								{copyState === "loading" ? (
+									<svg height="24" width="24" viewBox="0 0 24 24" className="spin">
+										<path d="M12,4V2A10,10 0 0,0 2,12H4A8,8 0 0,1 12,4Z" />
+									</svg>
+								) : copyState === "done" ? (
+									<svg height="24" width="24" viewBox="0 0 24 24">
+										<path d="M21,7L9,19L3.5,13.5L4.91,12.09L9,16.17L19.59,5.59L21,7Z" />
+									</svg>
+								) : (
+									<svg height="24" width="24" viewBox="0 0 24 24">
+										<path d="M19,21H8V7H19M19,5H8A2,2 0 0,0 6,7V21A2,2 0 0,0 8,23H19A2,2 0 0,0 21,21V7A2,2 0 0,0 19,5M16,1H4A2,2 0 0,0 2,3V17H4V3H16V1Z" />
+									</svg>
+								)}
+							</button>
+						</Tooltip>
 					</div>
 				)}
 			</div>

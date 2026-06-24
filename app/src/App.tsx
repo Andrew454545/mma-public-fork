@@ -17,6 +17,7 @@ import { useSetting } from "@/store/settings";
 import { Icon } from "@/components/primitives/Icon";
 import { mdiCog, mdiPuzzle, mdiClose } from "@mdi/js";
 import { ToastContainer } from "@/components/primitives/Toast";
+import { TooltipProvider } from "@/components/primitives/Tooltip";
 import { useUpdateState, dismissUpdate, installUpdate, relaunchApp } from "@/lib/util/updateCheck";
 import "@/plugins";
 
@@ -47,11 +48,11 @@ export default function App() {
 	useCustomCss();
 
 	return (
-		<>
+		<TooltipProvider>
 			{closing ? <Blank /> : targetMapId ? <EditorRoot /> : <MapList />}
 			{!closing && <AppChrome />}
 			<ToastContainer />
-		</>
+		</TooltipProvider>
 	);
 }
 

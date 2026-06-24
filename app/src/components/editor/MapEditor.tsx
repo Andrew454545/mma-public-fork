@@ -37,6 +37,7 @@ import { useLocalStorage } from "@/lib/hooks/useLocalStorage";
 import { useSettings, setSetting, getSettings } from "@/store/settings";
 import { parseMapsUrl, parseCoordinates, parseUrlList, parsedLocationsToImportJson, type ParsedLocation } from "@/lib/data/importExport";
 import { Icon } from "@/components/primitives/Icon";
+import { Tooltip } from "@/components/primitives/Tooltip";
 import { mdiBackburger, mdiPencil } from "@mdi/js";
 import { PluginSidebarHost } from "@/components/editor/PluginSidebarHost";
 import SameLocation from "@/components/editor/SameLocation";
@@ -322,32 +323,32 @@ export function MapEditor() {
 		>
 			<SplitHandle onSplitChange={setSplit} />
 			<header>
-				<a
-					href="#"
-					style={{ textDecoration: "none" }}
-					role="tooltip"
-					data-microtip-position="bottom-right"
-					aria-label="Back to map list"
-					onClick={(e) => {
-						e.preventDefault();
-						goToList();
-					}}
-				>
-					<Icon path={mdiBackburger} />
-				</a>
+				<Tooltip content="Back to map list" side="bottom" align="start">
+					<a
+						href="#"
+						style={{ textDecoration: "none" }}
+						aria-label="Back to map list"
+						onClick={(e) => {
+							e.preventDefault();
+							goToList();
+						}}
+					>
+						<Icon path={mdiBackburger} />
+					</a>
+				</Tooltip>
 				<h1>{map.meta.name}</h1>
 				<Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
-					<DialogTrigger asChild>
-						<button
-							className="icon-button"
-							type="button"
-							role="tooltip"
-							aria-label="Edit map"
-							data-microtip-position="bottom"
-						>
-							<Icon path={mdiPencil} />
-						</button>
-					</DialogTrigger>
+					<Tooltip content="Edit map" side="bottom">
+						<DialogTrigger asChild>
+							<button
+								className="icon-button"
+								type="button"
+								aria-label="Edit map"
+							>
+								<Icon path={mdiPencil} />
+							</button>
+						</DialogTrigger>
+					</Tooltip>
 					<DialogContent title="Map settings" className="edit-map-modal">
 						<MapRenameForm mapId={map.meta.id} currentName={map.meta.name} />
 					</DialogContent>

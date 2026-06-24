@@ -67,6 +67,7 @@ import {
 import { PluginToolbar } from "@/plugins/PluginPanels";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import * as ContextMenu from "@radix-ui/react-context-menu";
+import { Tooltip } from "@/components/primitives/Tooltip";
 import { fmt } from "@/lib/util/format";
 import { rgbCss } from "@/lib/util/color";
 import { getGoogleMap as getGoogleMapInstance } from "@/lib/map/mapState";
@@ -216,7 +217,6 @@ function PinnedToolbar({ right, panels }: { right?: ReactNode; panels: Record<st
 					const disabled = command.enabled ? !command.enabled() : false;
 					const hasPanel = id in panels;
 					const isOpen = openPanels.has(id);
-					const tipPos = itemIndex < 3 ? "bottom-right" : "bottom";
 					itemIndex++;
 					const handleClick = hasPanel ? () => togglePanel(id) : command.execute;
 					const isFirst = i === 0;
@@ -226,8 +226,6 @@ function PinnedToolbar({ right, panels }: { right?: ReactNode; panels: Record<st
 						<button
 							className={`icon-button${isOpen ? " is-active" : ""}${disabled ? " is-disabled" : ""}${dragIdx === i ? " is-dragging" : ""}`}
 							type="button"
-							role="tooltip"
-							data-microtip-position={tipPos}
 							aria-label={command.label}
 							data-qa={id}
 							data-drop={dropIdx === i ? "" : undefined}
@@ -241,9 +239,6 @@ function PinnedToolbar({ right, panels }: { right?: ReactNode; panels: Record<st
 						<button
 							className={`button${isOpen ? " is-active" : ""}${disabled ? " is-disabled" : ""}${dragIdx === i ? " is-dragging" : ""}`}
 							type="button"
-							role="tooltip"
-							data-microtip-position={tipPos}
-							aria-label={command.label}
 							data-drop={dropIdx === i ? "" : undefined}
 							onClick={disabled ? undefined : handleClick}
 							onMouseDown={(e) => handleDragStart(i, e)}
@@ -255,9 +250,11 @@ function PinnedToolbar({ right, panels }: { right?: ReactNode; panels: Record<st
 
 					return (
 						<ContextMenu.Root key={id}>
-							<ContextMenu.Trigger asChild>
-								{btn}
-							</ContextMenu.Trigger>
+							<Tooltip content={command.label} side="bottom">
+								<ContextMenu.Trigger asChild>
+									{btn}
+								</ContextMenu.Trigger>
+							</Tooltip>
 							<ContextMenu.Portal>
 								<ContextMenu.Content className="context-menu">
 									{!isFirst && (
@@ -1061,17 +1058,17 @@ export function MapOverview({ hidden }: { hidden?: boolean }) {
 						</span>
 						<span className="selection-manager__space" />
 						<PluginToolbar />
-						<button
-							className="icon-button"
-							type="button"
-							role="tooltip"
-							data-microtip-position="bottom"
-							aria-label="Review sessions"
-							data-qa="open-reviews"
-							onClick={() => setShowReviews(true)}
-						>
-							<Icon path={mdiBookOpenOutline} />
-						</button>
+						<Tooltip content="Review sessions" side="bottom">
+							<button
+								className="icon-button"
+								type="button"
+								aria-label="Review sessions"
+								data-qa="open-reviews"
+								onClick={() => setShowReviews(true)}
+							>
+								<Icon path={mdiBookOpenOutline} />
+							</button>
+						</Tooltip>
 						<button
 							className="button"
 							onClick={() => document.dispatchEvent(new CustomEvent("open-command-palette"))}

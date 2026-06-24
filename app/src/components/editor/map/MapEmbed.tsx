@@ -4,6 +4,7 @@ import { mdiGoogleStreetView, mdiMapMarker } from "@mdi/js";
 import { startSceneEngine, loadScene, clearScene } from "@/lib/render/sceneStore";
 import { useMapSurface } from "@/lib/render/useMapSurface";
 import { Icon } from "@/components/primitives/Icon";
+import { Tooltip } from "@/components/primitives/Tooltip";
 import { svThumbnailUrl, svSearchRadius } from "@/lib/sv/lookup";
 import { cmd } from "@/lib/commands";
 import { log } from "@/lib/util/log";
@@ -399,17 +400,17 @@ export function MapEmbed({ onAddLocation }: { onAddLocation: (parsed: ParsedLoca
 						}}
 					/>
 					<div className="map-control sv-opacity-control">
-						<button
-							className="opacity-target-toggle"
-							onClick={() => setOpacityTarget((t) => (t === "sv" ? "markers" : "sv"))}
-							role="tooltip"
-							aria-label={
-								opacityTarget === "sv" ? "Adjusting Street View opacity" : "Adjusting marker opacity"
-							}
-							data-microtip-position="left"
+						<Tooltip
+							content={opacityTarget === "sv" ? "Adjusting Street View opacity" : "Adjusting marker opacity"}
+							side="left"
 						>
-							<Icon path={opacityTarget === "sv" ? mdiGoogleStreetView : mdiMapMarker} size={20} />
-						</button>
+							<button
+								className="opacity-target-toggle"
+								onClick={() => setOpacityTarget((t) => (t === "sv" ? "markers" : "sv"))}
+							>
+								<Icon path={opacityTarget === "sv" ? mdiGoogleStreetView : mdiMapMarker} size={20} />
+							</button>
+						</Tooltip>
 						<input
 							className="sv-opacity-control__slider"
 							type="range"
@@ -426,26 +427,20 @@ export function MapEmbed({ onAddLocation }: { onAddLocation: (parsed: ParsedLoca
 				</div>
 				<div className="embed-controls__control" style={{ right: 0, bottom: 0 }}>
 					<div className="map-control map-control--button white">
-						<button
-							onClick={zoomIn}
-							role="tooltip"
-							aria-label="Zoom in"
-							data-microtip-position="left"
-						>
-							<svg height="18" width="18" viewBox="0 0 24 24" fill="currentColor">
-								<path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z" />
-							</svg>
-						</button>
-						<button
-							onClick={zoomOut}
-							role="tooltip"
-							aria-label="Zoom out"
-							data-microtip-position="left"
-						>
-							<svg height="18" width="18" viewBox="0 0 24 24" fill="currentColor">
-								<path d="M19,13H5V11H19V13Z" />
-							</svg>
-						</button>
+						<Tooltip content="Zoom in" side="left">
+							<button onClick={zoomIn} aria-label="Zoom in">
+								<svg height="18" width="18" viewBox="0 0 24 24" fill="currentColor">
+									<path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z" />
+								</svg>
+							</button>
+						</Tooltip>
+						<Tooltip content="Zoom out" side="left">
+							<button onClick={zoomOut} aria-label="Zoom out">
+								<svg height="18" width="18" viewBox="0 0 24 24" fill="currentColor">
+									<path d="M19,13H5V11H19V13Z" />
+								</svg>
+							</button>
+						</Tooltip>
 					</div>
 				</div>
 				{svPreview && (

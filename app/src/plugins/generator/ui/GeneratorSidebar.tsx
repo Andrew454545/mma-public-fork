@@ -70,6 +70,76 @@ let sessionRunning = false;
 let sessionPaused = false;
 let sessionTagId: number | null = null;
 
+const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+function formatYearMonth(ym: string) {
+	const [y, m] = ym.split("-");
+	return `${MONTH_NAMES[parseInt(m, 10) - 1]} ${y}`;
+}
+
+function summarizeSettings(s: GeneratorSettings): string {
+	const parts: string[] = [];
+
+	// Coverage type
+	let coverage = "any";
+	if (s.rejectUnofficial && !s.rejectOfficial) coverage = "official";
+	else if (s.rejectOfficial && !s.rejectUnofficial) coverage = "unofficial";
+	if (s.rejectGen1) coverage += " (no Gen 1)";
+	if (s.findGeneration) {
+		const gen = s.generation === 23 ? "Gen 2/3" : `Gen ${s.generation}`;
+		coverage += ` ${gen}`;
+	}
+	if (s.rejectDescription) coverage += " trekker";
+	parts.push(`${coverage} coverage`);
+
+	// Date range
+	if (s.selectMonths) {
+		const fm = MONTH_NAMES[parseInt(s.fromMonth, 10) - 1];
+		const tm = MONTH_NAMES[parseInt(s.toMonth, 10) - 1];
+		parts.push(`in ${fm}–${tm}, ${s.fromYear}–${s.toYear}`);
+	} else {
+		parts.push(`between ${formatYearMonth(s.fromDate)} and ${formatYearMonth(s.toDate)}`);
+	}
+
+	// Heading / pitch / zoom
+	if (s.adjustHeading) {
+		const ref = s.headingReference === "link" ? "along road" : s.headingReference;
+		const dev = s.headingDeviation > 0 ? ` ±${s.headingDeviation}°` : "";
+		parts.push(`facing ${ref}${dev}`);
+	}
+	if (s.adjustPitch) parts.push(`pitch ±${s.pitchDeviation}°`);
+	if (s.adjustZoom) parts.push(`zoom ${s.zoomLevel}`);
+
+	// Radius
+	parts.push(s.radius >= 1000 ? `${s.radius / 1000}km radius` : `${s.radius}m radius`);
+
+	// Date behavior
+	if (s.checkAllDates) parts.push("checking all dates");
+	if (s.randomInTimeline) parts.push("random date in timeline");
+
+	// Acceptance toggles (only show non-default)
+	if (!s.rejectDateless) parts.push("allowing dateless");
+	if (!s.rejectNoDescription) parts.push("allowing no-description");
+	if (s.onlyOneInTimeframe) parts.push("unique in timeframe");
+
+	// Search strategy
+	if (s.getIntersection) parts.push("intersections");
+	if (s.pinpointSearch) parts.push(`curves >${s.pinpointAngle}°`);
+	if (s.checkLinks) parts.push(`checking ${s.linksDepth} link hops`);
+	if (s.findRegions) parts.push(`${s.regionRadius}km from existing`);
+	if (s.filterByLinks) parts.push(`${s.minLinks}–${s.maxLinks} links`);
+	if (s.searchInDescription && s.searchTerms) {
+		const verb = s.searchFilterType === "include" ? "matching" : "excluding";
+		parts.push(`${verb} "${s.searchTerms}"`);
+	}
+
+	// Parallelism
+	if (s.numGenerators > 1) parts.push(`${s.numGenerators} workers`);
+	if (s.oneCountryAtATime) parts.push("one region at a time");
+
+	return parts.join(", ");
+}
+
 export function GeneratorSidebar({ onClose }: { onClose: () => void }) {
 	const [settings, setSettings] = useState<GeneratorSettings>(loadSettings);
 	const [meta, setMeta] = useState<Map<string, GeneratorRegionMeta>>(sessionMeta);
@@ -256,6 +326,7 @@ export function GeneratorSidebar({ onClose }: { onClose: () => void }) {
 			</Section>
 
 			<div className="generator-sidebar__footer">
+				<p className="generator-sidebar__summary">{summarizeSettings(settings)}</p>
 				{running && regions.length > 0 && (
 					<div className="generator-progress">
 						<ProgressDisplay regions={regions} />

@@ -568,6 +568,9 @@ export async function deleteMap(id: string) {
 }
 
 export async function renameFolder(from: string, to: string) {
+	cachedMapList = cachedMapList.map((m) => (m.folder === from ? { ...m, folder: to } : m));
+	mapListVersion++;
+	notify();
 	await cmd.storeRenameFolder(from, to);
 	await invalidateMapList();
 }

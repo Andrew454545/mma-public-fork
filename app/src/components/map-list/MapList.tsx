@@ -316,7 +316,7 @@ function hitTestDropTarget(x: number, y: number): DropTarget {
 
 // --- Subcomponents ---
 
-function RenameForm({ name }: { name: string }) {
+function RenameForm({ name, onRename }: { name: string; onRename?: (from: string, to: string) => void }) {
 	const close = useCloseDialog();
 	return (
 		<form
@@ -324,7 +324,9 @@ function RenameForm({ name }: { name: string }) {
 				e.preventDefault();
 				const val = new FormData(e.currentTarget).get("name");
 				if (typeof val === "string" && val.trim() !== "") {
-					renameFolder(name, val.trim()).finally(close);
+					const to = val.trim();
+					onRename?.(name, to);
+					renameFolder(name, to).finally(close);
 				}
 			}}
 		>
@@ -1244,7 +1246,14 @@ export function MapList() {
 								</div>
 							</>
 						)}
-						{activeAction.type === "rename-folder" && <RenameForm name={activeAction.name} />}
+						{activeAction.type === "rename-folder" && (
+								<RenameForm
+									name={activeAction.name}
+									onRename={(from, to) =>
+										setSyntheticFolders((prev) => prev.map((f) => (f === from ? to : f)))
+									}
+								/>
+							)}
 						{activeAction.type === "delete-folder" && (
 							<>
 								<p>

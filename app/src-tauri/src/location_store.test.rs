@@ -1380,6 +1380,30 @@ fn color_for_uses_last_matching_selection() {
     assert_eq!(store.selections.color_for(2), None, "unselected id");
 }
 
+#[test]
+fn color_map_matches_color_for() {
+    let mut store = setup_store_with(&[loc(1, 0.0, 0.0), loc(2, 0.0, 0.0), loc(3, 0.0, 0.0)]);
+    for (key, color, members) in [
+        ("a", [255, 0, 0], vec![1u32, 2]),
+        ("b", [0, 0, 255], vec![2u32, 3]),
+    ] {
+        store.selections.all.push(selections::Selection {
+            key: key.into(),
+            color,
+            props: selections::SelectionProps::Manual { locations: members.clone() },
+            count: None,
+        });
+        let mut bm = RoaringBitmap::new();
+        for id in &members { bm.insert(*id); store.selections.ids.insert(*id); }
+        store.selections.loc_sets.push(bm);
+    }
+
+    let map = store.selections.color_map();
+    for id in 1..=4 {
+        assert_eq!(map.get(&id).copied(), store.selections.color_for(id), "id {}", id);
+    }
+}
+
 // -----------------------------------------------------------------------
 // Sorted ID invariant
 // -----------------------------------------------------------------------

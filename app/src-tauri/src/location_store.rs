@@ -217,6 +217,17 @@ impl SelectionState {
         }
         color
     }
+
+    fn color_map(&self) -> HashMap<u32, [u8; 3]> {
+        let mut map = HashMap::with_capacity(self.ids.len() as usize);
+        for (si, set) in self.loc_sets.iter().enumerate() {
+            let color = self.all[si].color;
+            for id in set {
+                map.insert(id, color);
+            }
+        }
+        map
+    }
 }
 
 pub(crate) struct TagState {
@@ -2268,6 +2279,7 @@ fn build_cell_render_buffers(store: &mut Store, req: &RenderRequest) -> Vec<u8> 
     let has_patches = !store.overlay.patches.is_empty();
 
     let selected_set: &RoaringBitmap = &store.selections.ids;
+    let color_map = store.selections.color_map();
     let active_id = store.selections.active_id;
     let arrow_style = req.marker_style == "arrow";
 
@@ -2305,7 +2317,7 @@ fn build_cell_render_buffers(store: &mut Store, req: &RenderRequest) -> Vec<u8> 
         else { out.colors.extend_from_slice(&[42, 42, 42, 255]); }
         out.angles.push(angle);
         out.ids.push(id);
-        if let Some([r, g, b]) = store.selections.color_for(id) {
+        if let Some(&[r, g, b]) = color_map.get(&id) {
             sel_ov.positions.push(lng as f32);
             sel_ov.positions.push(lat as f32);
             sel_ov.colors.extend_from_slice(&[r, g, b, 255]);
@@ -2328,7 +2340,7 @@ fn build_cell_render_buffers(store: &mut Store, req: &RenderRequest) -> Vec<u8> 
         else { out.colors.extend_from_slice(&[42, 42, 42, 255]); }
         out.angles.push(angle);
         out.ids.push(id);
-        if let Some([r, g, b]) = store.selections.color_for(id) {
+        if let Some(&[r, g, b]) = color_map.get(&id) {
             sel_ov.positions.push(loc.lng as f32);
             sel_ov.positions.push(loc.lat as f32);
             sel_ov.colors.extend_from_slice(&[r, g, b, 255]);

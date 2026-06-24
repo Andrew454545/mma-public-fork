@@ -230,3 +230,17 @@
 .generator-settings__date-label input {
 	font-size: inherit;
 }
+
+.generator-settings__desc-search {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+}
+.generator-settings__desc-search-row {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+}
+.generator-settings__desc-search-row .nselect {
+	flex: 1;
+}

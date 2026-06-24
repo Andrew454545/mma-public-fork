@@ -409,15 +409,28 @@ export function SettingsPanel({
 					onChange={(v) => set("searchInDescription", v)}
 				/>
 				{settings.searchInDescription && (
-					<div className="generator-settings__indent">
-						<SegmentedControl
-							value={settings.searchFilterType}
-							onChange={(v) => set("searchFilterType", v as "include" | "exclude")}
-							options={[
-								{ value: "include", label: "Include" },
-								{ value: "exclude", label: "Exclude" },
-							]}
-						/>
+					<div className="generator-settings__indent generator-settings__desc-search">
+						<div className="generator-settings__desc-search-row">
+							<SegmentedControl
+								value={settings.searchFilterType}
+								onChange={(v) => set("searchFilterType", v as "include" | "exclude")}
+								options={[
+									{ value: "include", label: "Include" },
+									{ value: "exclude", label: "Exclude" },
+								]}
+							/>
+							<select
+								className="nselect nselect--compact"
+								value={settings.searchMode}
+								onChange={(e) => set("searchMode", e.target.value as GeneratorSettings["searchMode"])}
+							>
+								<option value="contains">Contains</option>
+								<option value="fullword">Full word</option>
+								<option value="startswith">Starts with</option>
+								<option value="endswith">Ends with</option>
+								<option value="sectionmatch">Section match</option>
+							</select>
+						</div>
 						<input
 							className="input"
 							type="text"
@@ -425,17 +438,6 @@ export function SettingsPanel({
 							value={settings.searchTerms}
 							onChange={(e) => set("searchTerms", e.target.value)}
 						/>
-						<select
-							className="nselect nselect--compact"
-							value={settings.searchMode}
-							onChange={(e) => set("searchMode", e.target.value as GeneratorSettings["searchMode"])}
-						>
-							<option value="contains">Contains</option>
-							<option value="fullword">Full word</option>
-							<option value="startswith">Starts with</option>
-							<option value="endswith">Ends with</option>
-							<option value="sectionmatch">Section match</option>
-						</select>
 					</div>
 				)}
 				<Check

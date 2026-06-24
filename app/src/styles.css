@@ -1974,6 +1974,7 @@ summary.button {
 }
 .tool-block__content {
 	padding-top: 0.5rem;
+	min-width: 0;
 }
 .tag-input {
 	white-space: nowrap;
@@ -3512,15 +3513,20 @@ summary.button {
 .tag-list {
 	grid-gap: 1rem;
 	flex-wrap: wrap;
-	margin: 0;
-	padding: 0;
+	margin: -4px;
+	padding: 4px;
 	list-style: none;
 	display: flex;
+	overflow: hidden;
 }
 .tag-list.is-collapsed {
 	opacity: 0.7;
 	flex-wrap: nowrap;
 	line-height: 1.5rem;
+}
+.tag-list.is-collapsed .tag {
+	overflow: hidden;
+	text-overflow: ellipsis;
 }
 @media (max-width: 1600px) {
 	.tag-list {
@@ -3535,6 +3541,12 @@ summary.button {
 	border-radius: 1rem;
 	padding: 0.25rem 1rem;
 	display: inline-block;
+	max-width: 100%;
+	min-width: 0;
+}
+.tag.has-button {
+	display: inline-flex;
+	align-items: center;
 }
 .tag.is-selected {
 	opacity: 1;
@@ -3570,6 +3582,10 @@ summary.button {
 	padding-right: 0.75rem;
 	line-height: 2rem;
 	display: inline-block;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	min-width: 0;
+	flex: 1;
 }
 .tag__button {
 	cursor: pointer;
@@ -3858,6 +3874,9 @@ summary.button {
 	overflow-x: hidden;
 	overflow-y: auto;
 	scrollbar-width: none;
+}
+.map-overview > * {
+	min-width: 0;
 }
 .map-overview[hidden] {
 	display: none;

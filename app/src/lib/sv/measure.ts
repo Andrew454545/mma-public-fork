@@ -166,7 +166,10 @@ export function bboxToMaxError(bbox: [number, number, number, number]): number {
  */
 export function padBbox(bbox: [number, number, number, number]): [number, number, number, number] {
 	const pad = 0.01;
-	const out: [number, number, number, number] = [bbox[0], bbox[1], bbox[2], bbox[3]];
+	// An antimeridian-crossing box arrives as west > east; unwrap east past 180 so
+	// the midpoint/pad math stays monotonic (haversine downstream is periodic-safe).
+	const east = bbox[2] < bbox[0] ? bbox[2] + 360 : bbox[2];
+	const out: [number, number, number, number] = [bbox[0], bbox[1], east, bbox[3]];
 	const cx = (out[0] + out[2]) / 2;
 	const cy = (out[1] + out[3]) / 2;
 	if (cx - pad < out[0]) out[0] = cx - pad;

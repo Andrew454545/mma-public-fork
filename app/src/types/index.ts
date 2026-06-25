@@ -46,6 +46,15 @@ export function isVirtualLocation(loc: { id: number }): boolean {
 	return loc.id < 0;
 }
 
+/** A location you already hold in full, or just its id to fetch on demand.
+ *  Lets the pick -> activate path carry "materialized or not" as plain data;
+ *  `resolveLocation` (in the store) fetches only the id case. */
+export type MaybeLocation = Location | number;
+
+export function locId(m: MaybeLocation): number {
+	return typeof m === "number" ? m : m.id;
+}
+
 export function isImportPreview(loc: Location): boolean {
 	return (loc.flags & LocationFlag.ImportPreview) !== 0;
 }

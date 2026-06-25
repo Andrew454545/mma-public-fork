@@ -13,10 +13,12 @@ import {
 	getCurrentMap,
 	getWorkArea,
 	openStagedLocation,
+	resolveLocation,
 	setActiveLocation,
 	toggleManualSelection,
 } from "@/store/useMapStore";
-import { isVirtualLocation, isImportPreview } from "@/types";
+import { isVirtualLocation, isImportPreview, locId } from "@/types";
+import type { MaybeLocation } from "@/types";
 import type { Location } from "@/bindings.gen";
 
 type OverlayEvent = { srcEvent?: { domEvent?: Event } };
@@ -75,7 +77,7 @@ export async function createLocationAtLatLng(
 	t.step("lookup");
 	await addLocations([loc], { hideInDelta: true });
 	t.step("addLocations");
-	setActiveLocation(loc.id);
+	setActiveLocation(loc);
 	t.step("setActive");
 	t.end();
 	return loc;
@@ -112,18 +114,16 @@ export async function handleMapClick(
 		return;
 	}
 
-	const resolvePickedLocation = async (): Promise<Location | undefined> => {
+	const resolvePicked = async (): Promise<MaybeLocation | null> => {
 		if (info.object) return info.object as Location;
-		const id = await resolvePickedId(ctx.cm, info);
-		if (id == null) return undefined;
-		const loc = await cmd.storeGetLocation(id);
-		return loc ?? undefined;
+		return await resolvePickedId(ctx.cm, info);
 	};
 
 	if (domEvent instanceof MouseEvent && domEvent.button === 2) {
 		if (!ctx.onContextMenu) return;
 		if (isLocationLayer(info.layer?.id)) {
-			const loc = await resolvePickedLocation();
+			const picked = await resolvePicked();
+			const loc = picked == null ? null : await resolveLocation(picked);
 			if (loc) openContextMenuLocation(loc);
 			else if (info.coordinate)
 				openContextMenuLatLng({ lat: info.coordinate[1], lng: info.coordinate[0] });
@@ -147,11 +147,11 @@ export async function handleMapClick(
 		return;
 
 	if (isLocationLayer(info.layer?.id)) {
-		const loc = await resolvePickedLocation();
-		if (loc) {
-			if (isVirtualLocation(loc)) return; // staged location's active pin: already open
-			if (domEvent instanceof MouseEvent && domEvent.ctrlKey) toggleManualSelection(loc.id);
-			else setActiveLocation(loc.id);
+		const picked = await resolvePicked();
+		if (picked != null) {
+			if (isVirtualLocation({ id: locId(picked) })) return; // staged location's active pin: already open
+			if (domEvent instanceof MouseEvent && domEvent.ctrlKey) toggleManualSelection(locId(picked));
+			else setActiveLocation(picked); // fetches once iff lazy; free if materialized
 			return;
 		}
 	}

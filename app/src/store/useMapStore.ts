@@ -1,6 +1,6 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
-import type { WorkArea, LatLng } from "@/types";
-import { isVirtualLocation, isImportPreview, LocationFlag } from "@/types";
+import type { WorkArea, LatLng, MaybeLocation } from "@/types";
+import { isVirtualLocation, isImportPreview, LocationFlag, locId } from "@/types";
 import type { Location, MapData, MapMeta, Tag, ExtraFieldDef, FilterOp, KeySpec, Scope, CommitDiff, PartitionBucket, EditorImportPreview } from "@/bindings.gen";
 import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
 import { emit as tauriEmit, listen } from "@tauri-apps/api/event";
@@ -1183,8 +1183,18 @@ export function previewVirtualLocation(loc: Location) {
 	emitEvent("active:change", null);
 }
 
-export async function setActiveLocation(id: number | null, checkDuplicates = true) {
+/** Full row from a `MaybeLocation` — fetches only when it's an id. The fetch is
+ *  O(log n) but queues behind main-thread render, scaling to 200-580ms on large
+ *  maps, so callers that hold the row pass it to skip the get entirely. */
+export async function resolveLocation(m: MaybeLocation): Promise<Location | null> {
+	return typeof m === "number" ? await cmd.storeGetLocation(m) : m;
+}
+
+// Pass a `Location` when you already hold it (e.g. map-click add) to skip the get;
+// pass an id to fetch. The distinction is explicit at the call site by design.
+export async function setActiveLocation(target: MaybeLocation | null, checkDuplicates = true) {
 	const t = trace("setActive");
+	const id: number | null = target == null ? null : locId(target);
 	if (cachedActiveLocation && isVirtualLocation(cachedActiveLocation)) {
 		importMarkerVersion++;
 		const wasStaged = isImportPreview(cachedActiveLocation);
@@ -1202,7 +1212,7 @@ export async function setActiveLocation(id: number | null, checkDuplicates = tru
 	activeLocationId = id;
 	fireAndForget(cmd.storeSetActive(id), "setActive");
 	if (id) {
-		const loc = await cmd.storeGetLocation(id);
+		const loc = await resolveLocation(target!); // identity if a Location, fetch if an id
 		t.step("ipc");
 		if (checkDuplicates && loc) {
 			const nearby = await cmd.storeFindNearby(loc.lat, loc.lng, 2.0);

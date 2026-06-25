@@ -768,6 +768,10 @@ export type Tag = {
 	count?: number;
 };
 export type LatLng = google.maps.LatLngLiteral;
+/** A location you already hold in full, or just its id to fetch on demand.
+ *  Lets the pick -> activate path carry "materialized or not" as plain data;
+ *  `resolveLocation` (in the store) fetches only the id case. */
+export type MaybeLocation = Location$1 | number;
 declare function createLocation(partial: Partial<Location$1> & LatLng): Location$1;
 export type TagSortMode = "default" | "name" | "amount";
 export type WorkArea = "overview" | "location" | "duplicates" | "import" | "plugin" | "diff";
@@ -2173,7 +2177,8 @@ declare const mma: {
 	useSelectedTagIds(): Set<number>;
 	openStagedLocation(index: number): Promise<void>;
 	previewVirtualLocation(loc: Location$1): void;
-	setActiveLocation(id: number | null, checkDuplicates?: boolean): Promise<void>;
+	resolveLocation(m: MaybeLocation): Promise<Location$1 | null>;
+	setActiveLocation(target: MaybeLocation | null): Promise<void>;
 	openDuplicateLocation(loc: Location$1): void;
 	removeDuplicate(id: number): void;
 	closeDuplicates(): void;

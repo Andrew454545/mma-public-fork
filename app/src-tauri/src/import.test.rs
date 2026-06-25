@@ -148,6 +148,75 @@ fn extract_tag_meta_no_extra() {
     assert!(meta.is_empty());
 }
 
+// -----------------------------------------------------------------------
+// Boundary scanner (find_object_boundaries) — string/escape correctness.
+// A `{`/`}`/`]` inside a string value must never be read as structure.
+// -----------------------------------------------------------------------
+
+/// Parse a full doc and return the location count — exercises find_object_boundaries
+/// + the parallel parse end to end.
+fn parse_count(json: &[u8]) -> usize {
+    let mut buf = json.to_vec();
+    parse_single_json_mut(&mut buf).locations.len()
+}
+
+#[test]
+fn boundaries_braces_in_string_value() {
+    // The uploaderName contains { } , ] — none may be treated as structure.
+    let json = br#"{"customCoordinates":[
+        {"lat":1,"lng":2,"extra":{"uploaderName":"a},{b]["}},
+        {"lat":3,"lng":4}
+    ]}"#;
+    assert_eq!(parse_count(json), 2);
+}
+
+#[test]
+fn boundaries_escaped_quote_in_string() {
+    // Escaped quote must not end the string early (which would expose the inner braces).
+    let json = br#"{"customCoordinates":[
+        {"lat":1,"lng":2,"extra":{"note":"he said \"}{,\" loudly"}},
+        {"lat":3,"lng":4}
+    ]}"#;
+    assert_eq!(parse_count(json), 2);
+}
+
+#[test]
+fn boundaries_escaped_backslash_before_quote() {
+    // Trailing escaped backslash: the closing quote is real (even backslash count).
+    let json = br#"{"customCoordinates":[
+        {"lat":1,"lng":2,"extra":{"path":"C:\\"}},
+        {"lat":3,"lng":4}
+    ]}"#;
+    assert_eq!(parse_count(json), 2);
+}
+
+#[test]
+fn boundaries_empty_array() {
+    assert_eq!(parse_count(br#"{"customCoordinates":[]}"#), 0);
+    assert_eq!(parse_count(br#"{"customCoordinates":[],"extra":{"tags":{}}}"#), 0);
+}
+
+#[test]
+fn boundaries_bare_array_root() {
+    let json = br#"[{"lat":1,"lng":2},{"lat":3,"lng":4},{"lat":5,"lng":6}]"#;
+    assert_eq!(parse_count(json), 3);
+}
+
+#[test]
+fn boundaries_tag_meta_after_brace_heavy_strings() {
+    // extra.tags metadata must still be found even when object values held braces.
+    let json = br#"{"customCoordinates":[
+        {"lat":1,"lng":2,"extra":{"note":"}{}{","tags":["X"]}}
+    ],"extra":{"tags":{"X":{"color":[1,2,3],"order":7}}}}"#;
+    let mut buf = json.to_vec();
+    let parsed = parse_single_json_mut(&mut buf);
+    assert_eq!(parsed.locations.len(), 1);
+    assert_eq!(parsed.tags.len(), 1);
+    assert_eq!(parsed.tags[0].name, "X");
+    assert_eq!(parsed.tags[0].order, Some(7));
+    assert_eq!(parsed.tags[0].color, "#010203");
+}
+
 #[test]
 fn parsed_tags_sorted_by_order() {
     let json = br#"{"name":"test","customCoordinates":[

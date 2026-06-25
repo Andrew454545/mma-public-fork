@@ -50,6 +50,9 @@ specta = { version = "=2.0.0-rc.25", features = ["derive", "serde_json"] }
 tauri-specta = { version = "=2.0.0-rc.25", features = ["derive", "typescript"] }
 specta-typescript = "0.0.12"
 csv = "1"
+memchr = "2"
+rustc-hash = "2"
+mimalloc = "0.1"
 tauri-plugin-webserve = { path = "crates/tauri-plugin-webserve", optional = true }
 
 [profile.dev]

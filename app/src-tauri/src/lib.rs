@@ -7,6 +7,12 @@
 use crate::types::{AppError, AppResult};
 use tauri::Manager;
 
+// Faster, lower-variance allocator than the system one (esp. on Windows). The
+// import/parse pipeline is allocation-bound (serde Maps/Strings, large Vecs), so
+// this lifts every phase at once and stabilizes the timing.
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 #[cfg(debug_assertions)]
 pub fn promote_serialize_bindings(path: &std::path::Path) {
     let src = std::fs::read_to_string(path).expect("read bindings");

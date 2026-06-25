@@ -250,39 +250,79 @@ fn parse_single_json(text: &str) -> ParsedMap {
     parse_single_json_mut(&mut buf)
 }
 
+/// Given the index just past an opening `"`, return the index just past the
+/// matching closing `"`, honoring backslash escapes. Uses memchr (SIMD) to jump
+/// between quote candidates instead of inspecting every byte.
+#[inline]
+fn skip_string(bytes: &[u8], from: usize) -> usize {
+    let mut search = from;
+    while let Some(off) = memchr::memchr(b'"', &bytes[search..]) {
+        let q = search + off;
+        // Count consecutive backslashes immediately before the quote (down to,
+        // but not past, the first content byte `from`). Even count => the quote
+        // is unescaped and closes the string.
+        let mut k = q;
+        while k > from && bytes[k - 1] == b'\\' { k -= 1; }
+        if (q - k) % 2 == 0 {
+            return q + 1;
+        }
+        search = q + 1;
+    }
+    bytes.len()
+}
+
 /// Scan raw bytes for `{...}` object boundaries inside a JSON array.
 /// Returns `(ranges, array_end)` where `array_end` is the offset of the array's
 /// closing `]` (or `bytes.len()` if unterminated). Stops there so trailing
 /// top-level keys (e.g. a sibling `"extra"`) aren't mistaken for objects.
-/// This is the key to parallel parsing: we find boundaries in a single pass,
-/// then hand each slice to rayon/simd_json.
+///
+/// SIMD-accelerated via memchr: we jump directly between the structural bytes
+/// (`"`, `{`, `}`) and skip string bodies wholesale, instead of branching on
+/// every byte. This is the precursor to parallel parsing — we find boundaries
+/// in one pass, then hand each slice to rayon.
 fn find_object_boundaries(bytes: &[u8]) -> (Vec<(usize, usize)>, usize) {
-    let mut ranges = Vec::new();
+    // Pre-size to avoid ~20 doubling reallocs (the range Vec grows to ~13MB at
+    // 850k objects). Estimate from a conservative average object size.
+    let mut ranges = Vec::with_capacity(bytes.len() / 96);
     let mut depth = 0i32;
-    let mut in_string = false;
-    let mut escape = false;
     let mut obj_start = 0usize;
+    let mut i = 0usize;
 
-    for (i, &b) in bytes.iter().enumerate() {
-        if escape { escape = false; continue; }
-        if b == b'\\' && in_string { escape = true; continue; }
-        if b == b'"' { in_string = !in_string; continue; }
-        if in_string { continue; }
-        match b {
+    // The array's closing `]` is the first `]` at or after the end of the last
+    // top-level object (nested `extra.tags` arrays close at depth > 0, before it).
+    let array_close = |ranges: &[(usize, usize)]| -> usize {
+        let from = ranges.last().map_or(0, |r| r.1);
+        memchr::memchr(b']', &bytes[from..]).map_or(bytes.len(), |o| from + o)
+    };
+
+    while let Some(off) = memchr::memchr3(b'"', b'{', b'}', &bytes[i..]) {
+        let pos = i + off;
+        match bytes[pos] {
             b'{' => {
-                if depth == 0 { obj_start = i; }
+                if depth == 0 { obj_start = pos; }
                 depth += 1;
+                i = pos + 1;
             }
             b'}' => {
                 depth -= 1;
+                i = pos + 1;
                 if depth == 0 {
-                    ranges.push((obj_start, i + 1));
+                    ranges.push((obj_start, pos + 1));
+                } else if depth < 0 {
+                    // Root object's `}` after the array — array already ended.
+                    let close = array_close(&ranges);
+                    return (ranges, close);
                 }
             }
-            // The coordinate array's own `]` is the first one seen outside any
-            // object (nested `extra.tags` arrays close while depth > 0).
-            b']' if depth == 0 => return (ranges, i),
-            _ => {}
+            // A quote at array level (depth 0) is a sibling key like "extra" —
+            // we've passed the array's `]`. Inside an object, skip the string.
+            _ => {
+                if depth == 0 {
+                    let close = array_close(&ranges);
+                    return (ranges, close);
+                }
+                i = skip_string(bytes, pos + 1);
+            }
         }
     }
     (ranges, bytes.len())
@@ -380,71 +420,90 @@ fn parse_single_json_mut(buf: &mut [u8]) -> ParsedMap {
     let t_boundaries = t0.elapsed();
 
     let now = now_unix();
-    let known_keys: &[&str] = &["lat", "latitude", "lng", "longitude", "lon", "heading", "pitch",
-        "zoom", "panoId", "pano", "pano_id", "extra", "countryCode", "stateCode",
-        "flags", "tags", "id", "createdAt", "modifiedAt"];
 
-    struct RawLoc {
-        loc: Location,
-        raw_tags: Vec<String>,
+    #[derive(serde::Deserialize)]
+    struct RawObj {
+        #[serde(alias = "latitude")]
+        lat: Option<f64>,
+        #[serde(alias = "longitude", alias = "lon")]
+        lng: Option<f64>,
+        #[serde(default)]
+        heading: f64,
+        #[serde(default)]
+        pitch: f64,
+        #[serde(default)]
+        zoom: f64,
+        #[serde(rename = "panoId", alias = "pano", alias = "pano_id")]
+        pano_id: Option<String>,
+        extra: Option<serde_json::Map<String, Value>>,
     }
 
-    // Parse each object in parallel — each thread gets its own byte slice copy
+    // Each worker parses a contiguous chunk and dedups tag names *locally*: the
+    // ~millions of duplicate tag strings serde allocates are freed inside the
+    // parallel region (only the few distinct names per chunk survive), and each
+    // Location stores chunk-local tag ids. The serial merge below maps locals to
+    // globals — a cheap pass over u32s, no string work.
+    struct ChunkOut {
+        locs: Vec<Location>,
+        names: Vec<String>, // local id (index) -> tag name
+    }
+
     let arr_slice = &buf[arr_start..arr_end];
-    let raw_results: Vec<Option<RawLoc>> = obj_ranges.par_iter().map(|&(start, end)| {
-        let mut slice = arr_slice[start..end].to_vec();
-        let obj: serde_json::Map<String, Value> = simd_json::serde::from_slice(&mut slice).ok()?;
+    let chunk_size = (obj_ranges.len() / (rayon::current_num_threads() * 4)).max(1);
+    let chunks: Vec<ChunkOut> = obj_ranges.par_chunks(chunk_size).map(|chunk| {
+        let mut names: Vec<String> = Vec::new();
+        let mut name_to_local: rustc_hash::FxHashMap<String, u32> = rustc_hash::FxHashMap::default();
+        let mut locs: Vec<Location> = Vec::with_capacity(chunk.len());
 
-        let lat = get_f64(&obj, &["lat", "latitude"]);
-        let lng = get_f64(&obj, &["lng", "longitude", "lon"]);
-        let (lat, lng) = match (lat, lng) {
-            (Some(la), Some(ln)) if la.is_finite() && ln.is_finite() => (la, ln),
-            _ => return None,
-        };
+        for &(start, end) in chunk {
+            let Ok(raw) = serde_json::from_slice::<RawObj>(&arr_slice[start..end]) else { continue };
+            let (lat, lng) = match (raw.lat, raw.lng) {
+                (Some(la), Some(ln)) if la.is_finite() && ln.is_finite() => (la, ln),
+                _ => continue,
+            };
 
-        let heading = get_f64(&obj, &["heading"]).unwrap_or(0.0);
-        let pitch = get_f64(&obj, &["pitch"]).unwrap_or(0.0);
-        let zoom = get_f64(&obj, &["zoom"]).unwrap_or(0.0);
+            let has_top_pano = raw.pano_id.is_some();
+            let mut extra_map = raw.extra.unwrap_or_default();
 
-        let top_pano = get_str(&obj, &["panoId", "pano", "pano_id"]);
-        let extra_pano = obj.get("extra")
-            .and_then(|e| e.as_object())
-            .and_then(|e| get_str(e, &["panoId"]));
-        let pano_id = top_pano.or(extra_pano);
-        let flags = if top_pano.is_some() { LocationFlags::LOAD_AS_PANO_ID } else { LocationFlags::empty() };
-
-        let raw_tags: Vec<String> = obj.get("extra")
-            .and_then(|e| e.get("tags"))
-            .and_then(|t| t.as_array())
-            .map(|arr| arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect())
-            .unwrap_or_default();
-
-        let mut extra_map = serde_json::Map::new();
-        for (k, v) in &obj {
-            if !known_keys.contains(&k.as_str()) {
-                extra_map.insert(k.clone(), v.clone());
+            let mut tags: Vec<u32> = Vec::new();
+            if let Some(Value::Array(arr)) = extra_map.remove("tags") {
+                for v in arr {
+                    let Value::String(s) = v else { continue };
+                    // Hit (common): borrow-lookup, drop the duplicate string here
+                    // (parallel free). Miss (rare): clone into names, move into map.
+                    let id = match name_to_local.get(s.as_str()) {
+                        Some(&id) => id,
+                        None => {
+                            let id = names.len() as u32;
+                            names.push(s.clone());
+                            name_to_local.insert(s, id);
+                            id
+                        }
+                    };
+                    tags.push(id);
+                }
             }
-        }
-        if let Some(item_extra) = obj.get("extra").and_then(|e| e.as_object()) {
-            for (k, v) in item_extra {
-                if k == "tags" || k == "panoId" { continue; }
-                extra_map.insert(k.clone(), v.clone());
-            }
-        }
 
-        Some(RawLoc {
-            loc: Location {
-                id: 0, // placeholder; assigned by store on add
-                lat, lng, heading, pitch, zoom,
-                pano_id: pano_id.map(|s| s.to_string()),
+            let extra_pano = extra_map.remove("panoId")
+                .and_then(|v| match v { Value::String(s) => Some(s), _ => None });
+            let pano_id = raw.pano_id.or(extra_pano);
+            let flags = if has_top_pano { LocationFlags::LOAD_AS_PANO_ID } else { LocationFlags::empty() };
+
+            locs.push(Location {
+                id: 0,
+                lat, lng,
+                heading: raw.heading,
+                pitch: raw.pitch,
+                zoom: raw.zoom,
+                pano_id,
                 flags,
-                tags: Vec::new(),
+                tags,
                 extra: if extra_map.is_empty() { None } else { Some(extra_map) },
                 created_at: now,
                 modified_at: None,
-            },
-            raw_tags,
-        })
+            });
+        }
+        ChunkOut { locs, names }
     }).collect();
 
     let t_parse = t0.elapsed();
@@ -454,18 +513,23 @@ fn parse_single_json_mut(buf: &mut [u8]) -> ParsedMap {
     // the whole buffer.
     let tag_meta = extract_tag_meta(buf, arr_start + arr_close, 2);
 
+    // Merge chunk-local tag tables into one global table, remapping each chunk's
+    // local ids to global ids in place.
+    let total: usize = chunks.iter().map(|c| c.locs.len()).sum();
     let mut tags_by_name: HashMap<String, u32> = HashMap::new();
     let mut next_tag: u32 = 1;
-    let mut locations = Vec::with_capacity(raw_results.len());
-    for raw in raw_results.into_iter().flatten() {
-        let mut loc = raw.loc;
-        for tag_name in raw.raw_tags {
-            let id = *tags_by_name.entry(tag_name)
-                .or_insert_with(|| { let id = next_tag; next_tag += 1; id });
-            loc.tags.push(id);
+    let mut locations = Vec::with_capacity(total);
+    for chunk in chunks {
+        let ChunkOut { mut locs, names } = chunk;
+        let local_to_global: Vec<u32> = names.into_iter().map(|name| {
+            *tags_by_name.entry(name).or_insert_with(|| { let id = next_tag; next_tag += 1; id })
+        }).collect();
+        for loc in &mut locs {
+            for t in &mut loc.tags { *t = local_to_global[*t as usize]; }
         }
-        locations.push(loc);
+        locations.append(&mut locs);
     }
+    let t_merge = t0.elapsed();
 
     let mut tags: Vec<Tag> = tags_by_name.into_iter().map(|(name, id)| {
         let meta = tag_meta.get(&name);
@@ -479,30 +543,14 @@ fn parse_single_json_mut(buf: &mut [u8]) -> ParsedMap {
             .then_with(|| a.name.cmp(&b.name))
     });
 
-    log::debug!("[parse] scan={:.0}ms boundaries={:.0}ms parallel_parse={:.0}ms total={:.0}ms objs={}",
-        t_scan.as_millis(), t_boundaries.as_millis(), t_parse.as_millis(),
+    log::debug!("[parse] scan={:.0}ms boundaries={:.0}ms parse={:.0}ms merge={:.0}ms total={:.0}ms objs={}",
+        t_scan.as_millis(), (t_boundaries - t_scan).as_millis(),
+        (t_parse - t_boundaries).as_millis(), (t_merge - t_parse).as_millis(),
         t0.elapsed().as_millis(), locations.len());
 
     ParsedMap { name, folder, locations, tags, fields: None, warnings }
 }
 
-fn get_f64(obj: &serde_json::Map<String, Value>, keys: &[&str]) -> Option<f64> {
-    for k in keys {
-        if let Some(v) = obj.get(*k) {
-            if let Some(n) = v.as_f64() { return Some(n); }
-        }
-    }
-    None
-}
-
-fn get_str<'a>(obj: &'a serde_json::Map<String, Value>, keys: &[&str]) -> Option<&'a str> {
-    for k in keys {
-        if let Some(v) = obj.get(*k) {
-            if let Some(s) = v.as_str() { return Some(s); }
-        }
-    }
-    None
-}
 
 // ---------------------------------------------------------------------------
 // Zip orchestration

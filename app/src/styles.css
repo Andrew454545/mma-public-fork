@@ -789,7 +789,7 @@ summary.button {
 }
 .updates__item {
 	--item-color: #ccc;
-	text-align: justify;
+	text-align: left;
 	padding: 0 1rem 0.5rem;
 	position: relative;
 }

@@ -432,6 +432,25 @@ export class CellManager {
 		this.selOverlayVersion++;
 	}
 
+	/** Selected-id set derived from the current selection overlay. */
+	selectedIds(): SelectedIds {
+		const n = this.selOverlayCount;
+		if (n === 0) return SelectedIds.EMPTY;
+		const ids = this.selOverlayIds;
+		const bits = new Uint8Array((this.maxId >>> 3) + 1);
+		let size = 0;
+		for (let i = 0; i < n; i++) {
+			const id = ids[i];
+			const w = id >>> 3;
+			const m = 1 << (id & 7);
+			if ((bits[w] & m) === 0) {
+				bits[w] |= m;
+				size++;
+			}
+		}
+		return new SelectedIds(bits, size);
+	}
+
 	/**
 	 * Decode per-cell bitmasks from Rust into a colored selection overlay.
 	 * Selected locations are hidden in their main cell (alpha=0) and drawn in the overlay with

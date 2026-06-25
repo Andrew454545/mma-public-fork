@@ -459,6 +459,10 @@ export function getSelectedLocationIds() {
 	return selectedLocationIds;
 }
 
+export function setSelectedLocationIds(ids: SelectedIds) {
+	selectedLocationIds = ids;
+}
+
 /** @internal Test-only. Forces a full selection re-resolve in Rust and returns
  *  the raw selected IDs. App code should use getSelectedLocationIds() instead —
  *  mutations already sync selections via MutationResult. */

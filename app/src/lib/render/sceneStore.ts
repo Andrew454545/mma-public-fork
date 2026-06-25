@@ -10,6 +10,7 @@ import {
 	mapOpenMark,
 	renderDeltaBus,
 	selBitmaskBus,
+	setSelectedLocationIds,
 	subscribeStore,
 } from "@/store/useMapStore";
 import type { MarkerStyle } from "@/components/editor/map/mapSettingsTypes";
@@ -98,6 +99,9 @@ export async function loadScene(markerStyle: MarkerStyle): Promise<void> {
 		t.step("parse");
 		mapOpenMark("markers");
 		applyActive();
+		// The reloaded binary carries the selection overlay; re-derive the id set from it,
+		// since any bitmask decode in `mutate` ran against the pre-reload scene.
+		setSelectedLocationIds(scene.selectedIds());
 		t.end({ cells: scene.cells.size, total: scene.totalCount, bytes: buf.byteLength });
 		bumpScene();
 	} catch (e) {

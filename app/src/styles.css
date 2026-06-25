@@ -168,6 +168,9 @@
 	position: absolute;
 }
 /* Radix Tooltip */
+[data-radix-popper-content-wrapper]:has(> .tooltip) {
+	pointer-events: none !important;
+}
 .tooltip {
 	color: #fff;
 	font-size: 13px;
@@ -176,6 +179,7 @@
 	padding: 0.5em 1em;
 	white-space: nowrap;
 	z-index: 10;
+	pointer-events: none;
 	animation: tooltip-fade-in 0.18s ease-in-out;
 }
 .tooltip[data-state="closed"] {

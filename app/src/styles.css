@@ -3105,6 +3105,8 @@ summary.button {
 	grid-gap: 1rem;
 	grid-template-rows: min-content min-content;
 	display: grid;
+	overflow-y: auto;
+	scrollbar-width: none;
 }
 .location-preview.free-resize {
 	grid-template-rows: 1fr min-content;

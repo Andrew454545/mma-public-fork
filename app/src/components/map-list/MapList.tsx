@@ -680,7 +680,7 @@ function ImportPreviewModal({
 							)}
 							onClick={() => toggle(i)}
 						>
-							<input type="checkbox" checked={entry.selected} onChange={() => toggle(i)} />
+							<input type="checkbox" checked={entry.selected} readOnly />
 							<span className="import-preview__name">{entry.name}</span>
 							<span className="import-preview__meta">
 								{fmt.format(entry.locationCount)} loc

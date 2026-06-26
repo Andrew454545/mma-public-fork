@@ -6,6 +6,7 @@
 //! preview/confirm flow lets the user inspect data before committing.
 
 use crate::types::AppResult;
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::io::Read;
 use std::sync::Mutex;
@@ -420,7 +421,7 @@ fn parse_single_json_mut(buf: &mut [u8]) -> ParsedMap {
     let now = now_unix();
 
     #[derive(serde::Deserialize)]
-    struct RawObj {
+    struct RawObj<'a> {
         #[serde(alias = "latitude")]
         lat: Option<f64>,
         #[serde(alias = "longitude", alias = "lon")]
@@ -431,8 +432,8 @@ fn parse_single_json_mut(buf: &mut [u8]) -> ParsedMap {
         pitch: f64,
         #[serde(default)]
         zoom: f64,
-        #[serde(rename = "panoId", alias = "pano", alias = "pano_id")]
-        pano_id: Option<String>,
+        #[serde(borrow, rename = "panoId", alias = "pano", alias = "pano_id")]
+        pano_id: Option<Cow<'a, str>>,
         extra: Option<serde_json::Map<String, Value>>,
     }
 
@@ -454,13 +455,14 @@ fn parse_single_json_mut(buf: &mut [u8]) -> ParsedMap {
         let mut locs: Vec<Location> = Vec::with_capacity(chunk.len());
 
         for &(start, end) in chunk {
-            let Ok(raw) = serde_json::from_slice::<RawObj>(&arr_slice[start..end]) else { continue };
+            let Ok(raw) = serde_json::from_slice::<RawObj<'_>>(&arr_slice[start..end]) else { continue };
             let (lat, lng) = match (raw.lat, raw.lng) {
                 (Some(la), Some(ln)) if la.is_finite() && ln.is_finite() => (la, ln),
                 _ => continue,
             };
 
             let has_top_pano = raw.pano_id.is_some();
+            let top_pano = raw.pano_id.map(|c| c.into_owned());
             let mut extra_map = raw.extra.unwrap_or_default();
 
             let mut tags: Vec<u32> = Vec::new();
@@ -484,7 +486,7 @@ fn parse_single_json_mut(buf: &mut [u8]) -> ParsedMap {
 
             let extra_pano = extra_map.remove("panoId")
                 .and_then(|v| match v { Value::String(s) => Some(s), _ => None });
-            let pano_id = raw.pano_id.or(extra_pano);
+            let pano_id = top_pano.or(extra_pano);
             let flags = if has_top_pano { LocationFlags::LOAD_AS_PANO_ID } else { LocationFlags::empty() };
 
             locs.push(Location {

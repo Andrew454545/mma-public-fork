@@ -40,7 +40,7 @@ import type { MapMeta } from "@/bindings.gen";
 import { fmt, relativeTime, shortDateFmt } from "@/lib/util/format";
 import { useLocalStorage } from "@/lib/hooks/useLocalStorage";
 import { useSetting, type MapListField } from "@/store/settings";
-import { toast } from "@/lib/util/toast";
+import { toast, progressToast } from "@/lib/util/toast";
 
 // --- What's new (latest release notes) ---
 
@@ -733,6 +733,11 @@ export function BulkActions() {
 
 	const handleExport = useCallback(async () => {
 		setExporting(true);
+		const progress = progressToast("Exporting maps...");
+		const unlisten = await listen<{ current: number; total: number; mapName: string }>(
+			"bulk-export-progress",
+			(e) => progress.update(e.payload.current / e.payload.total, `${e.payload.current} / ${e.payload.total}`),
+		);
 		try {
 			const path = await cmd.storeExportBulkZip();
 			const res = await fetch(mmaBufUrl(path));
@@ -743,7 +748,11 @@ export function BulkActions() {
 			a.download = `mma-backup-${new Date().toISOString().slice(0, 10)}.zip`;
 			a.click();
 			URL.revokeObjectURL(url);
+			progress.finish("Export saved");
+		} catch {
+			progress.finish();
 		} finally {
+			unlisten();
 			setExporting(false);
 		}
 	}, []);
@@ -790,21 +799,22 @@ export function BulkActions() {
 		const path = importPathRef.current;
 		if (!path) return;
 		setImporting(true);
-		setParseStatus(`Importing 0 / ${indices.length}...`);
 		setPreview(null);
+		const progress = progressToast("Importing maps...");
 		const unlisten = await listen<{ current: number; total: number; mapName: string }>(
 			"bulk-import-progress",
-			(e) => setParseStatus(`Importing ${e.payload.current} / ${e.payload.total}...`),
+			(e) => progress.update(e.payload.current / e.payload.total, `${e.payload.current} / ${e.payload.total}`),
 		);
 		try {
 			await cmd.bulkImportConfirm(path, indices);
 			await invalidateMapList();
+			progress.finish("Import complete");
 		} catch (e) {
 			log.error("[bulk import] confirm failed:", e);
+			progress.finish();
 		} finally {
 			unlisten();
 			setImporting(false);
-			setParseStatus(null);
 			importPathRef.current = null;
 		}
 	}, []);

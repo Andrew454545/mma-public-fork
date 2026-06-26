@@ -293,8 +293,12 @@ pub async fn store_export_bulk_zip() -> AppResult<String> {
                 .compression_method(zip::CompressionMethod::Deflated);
 
             let mut used_names = std::collections::HashSet::new();
+            let total = maps.len();
 
-            for (map_id, name, _folder, tags_json, extra_json) in &maps {
+            for (i, (map_id, name, _folder, tags_json, extra_json)) in maps.iter().enumerate() {
+                crate::emit_event("bulk-export-progress", serde_json::json!({
+                    "current": i + 1, "total": total, "mapName": name,
+                }));
                 // Base file + uncommitted delta sidecar = the map's full current state.
                 let locs = crate::location_store::read_full_state_from_disk(map_id)?;
 

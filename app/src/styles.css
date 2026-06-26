@@ -5521,9 +5521,9 @@ body {
 	padding: 0.5rem 1rem;
 	border-radius: 4px;
 	font-size: 0.875rem;
+	white-space: nowrap;
 	border: 1px solid #555;
 	animation: toast-in 150ms ease-out;
-	min-width: 200px;
 }
 @keyframes toast-in {
 	from {
@@ -5539,6 +5539,8 @@ body {
 	display: flex;
 	align-items: center;
 	gap: 0.75rem;
+	white-space: nowrap;
+	min-width: 280px;
 }
 .toast-progress__label {
 	font-size: 0.75rem;

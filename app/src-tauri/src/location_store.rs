@@ -722,6 +722,8 @@ impl Store {
 
     /// Adjust tag counts by `delta` (+1 for adds, -1 for removes). O(L * T) where L = locs, T = avg tags per loc.
     pub(crate) fn update_tag_counts(&mut self, locs: &[Location], delta: isize) {
+        // Pre-aggregate membership changes per tag for bulk bitmap operations.
+        let mut members: HashMap<u32, Vec<u32>> = HashMap::new();
         for loc in locs {
             for &tag_id in &loc.tags {
                 if let Some(tag) = self.tags.all.get_mut(&tag_id) {
@@ -741,12 +743,15 @@ impl Store {
                     });
                     self.tags.dirty = true;
                 }
-                // Maintain the membership index alongside counts (same choke point).
-                if delta > 0 {
-                    self.tags.sets.entry(tag_id).or_default().insert(loc.id);
-                } else if let Some(set) = self.tags.sets.get_mut(&tag_id) {
-                    set.remove(loc.id);
-                }
+                members.entry(tag_id).or_default().push(loc.id);
+            }
+        }
+        for (tag_id, mut ids) in members {
+            if delta > 0 {
+                ids.sort_unstable();
+                self.tags.sets.entry(tag_id).or_default().extend(ids);
+            } else if let Some(set) = self.tags.sets.get_mut(&tag_id) {
+                for id in ids { set.remove(id); }
             }
         }
     }

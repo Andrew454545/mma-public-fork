@@ -22,6 +22,26 @@ use crate::storage;
 use crate::location_store;
 use crate::types::{Tag, Location, LocationFlags};
 
+/// Read a file with sequential-scan hints for better OS prefetch on cold reads.
+fn read_sequential(path: &str) -> std::io::Result<Vec<u8>> {
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        const FILE_FLAG_SEQUENTIAL_SCAN: u32 = 0x0800_0000;
+        let mut file = std::fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(FILE_FLAG_SEQUENTIAL_SCAN)
+            .open(path)?;
+        let mut buf = Vec::with_capacity(file.metadata()?.len() as usize);
+        std::io::Read::read_to_end(&mut file, &mut buf)?;
+        Ok(buf)
+    }
+    #[cfg(not(windows))]
+    {
+        std::fs::read(path)
+    }
+}
+
 /// Cached result from `bulk_import_preview` so `bulk_import_confirm` can
 /// skip re-parsing. Keyed by file path to detect stale caches.
 static CACHED_PARSE: Mutex<Option<CachedImport>> = Mutex::new(None);
@@ -853,7 +873,7 @@ pub async fn store_import_preview(path: String) -> AppResult<EditorImportPreview
     // thread (which the webview shares — a sync command here freezes the window).
     tokio::task::spawn_blocking(move || {
         let t0 = std::time::Instant::now();
-        let mut buf = std::fs::read(&path)?;
+        let mut buf = read_sequential(&path)?;
         let t_read = t0.elapsed();
         let parsed = parse_file(&mut buf);
         let t_parse = t0.elapsed();

@@ -311,6 +311,8 @@ const MIGRATIONS: &[(u32, &str)] = &[
             updated_at   TEXT NOT NULL
           );
           CREATE INDEX IF NOT EXISTS idx_review_sessions_map ON review_sessions(map_id, status);"),
+    (18, "DROP TABLE IF EXISTS tags;
+          DROP INDEX IF EXISTS idx_tags_map_id;"),
 ];
 
 // ---------------------------------------------------------------------------

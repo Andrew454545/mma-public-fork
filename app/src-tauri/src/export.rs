@@ -329,7 +329,7 @@ pub async fn store_export_bulk_zip() -> AppResult<String> {
                     entry.insert("extra".into(), serde_json::Value::Object(extra_meta));
                 }
 
-                let json = serde_json::to_string_pretty(&serde_json::Value::Object(entry))?;
+                let json = serde_json::to_string(&serde_json::Value::Object(entry))?;
 
                 let base = name.replace(|c: char| "<>:\"/\\|?*".contains(c), "_");
                 let mut file_name = base.clone();

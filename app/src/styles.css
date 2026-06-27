@@ -3723,7 +3723,6 @@ body.mm-tag-dragging * {
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
-	font-size: 0.875rem;
 	line-height: 2rem;
 }
 .tag-tree__count {

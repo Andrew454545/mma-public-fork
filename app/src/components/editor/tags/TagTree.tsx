@@ -235,7 +235,7 @@ export function TagTreeView({
 	};
 
 	const handleRowClick = useCallback(
-		(node: TagTreeNode, shiftKey: boolean) => {
+		(node: TagTreeNode, shiftKey: boolean, altKey: boolean) => {
 			if (draggedRef.current) {
 				draggedRef.current = false;
 				return; // suppress the click that ends a drag
@@ -247,6 +247,9 @@ export function TagTreeView({
 			if (shiftKey && anchorIdx != null && targetIdx != null && anchorIdx !== targetIdx) {
 				const ids = rangeToggleTagIds(visibleRows, anchorIdx, targetIdx);
 				if (ids.length > 0) toggleTagSelections(ids);
+			} else if (altKey && node.tag) {
+				// Solo: toggle only this node's own tag, ignoring descendants.
+				toggleTagSelections([node.tag.id]);
 			} else {
 				// Single-node select/deselect of all its descendant tags.
 				const allChildrenSelected =
@@ -351,7 +354,7 @@ function TagTreeNodeRow({
 	forceExpanded: boolean;
 	expandedPaths: Set<string>;
 	onToggleExpanded: (path: string) => void;
-	onRowClick: (node: TagTreeNode, shiftKey: boolean) => void;
+	onRowClick: (node: TagTreeNode, shiftKey: boolean, altKey: boolean) => void;
 	drag: TreeDrag;
 }) {
 	const hasChildren = node.children.length > 0;
@@ -391,7 +394,7 @@ function TagTreeNodeRow({
 							cursor: "pointer",
 						}}
 						data-drop={drag.dropTarget?.path === node.fullPath ? drag.dropTarget.position : undefined}
-						onClick={(e) => onRowClick(node, e.shiftKey)}
+						onClick={(e) => onRowClick(node, e.shiftKey, e.altKey)}
 						onMouseDown={(e) => drag.onMouseDown(e, node)}
 						onMouseMove={(e) => drag.onMouseMove(e, node, e.currentTarget)}
 					>
@@ -518,7 +521,7 @@ function TagLeafGroup({
 	tagCounts: Record<number, number>;
 	onEditTag: (tagId: number) => void;
 	onRenameTag: (tag: { id: number; name: string }) => void;
-	onRowClick: (node: TagTreeNode, shiftKey: boolean) => void;
+	onRowClick: (node: TagTreeNode, shiftKey: boolean, altKey: boolean) => void;
 	drag: TreeDrag;
 }) {
 	if (nodes.length === 0) return null;
@@ -558,7 +561,7 @@ function TagTreeLeaf({
 	tagCounts: Record<number, number>;
 	onEditTag: (tagId: number) => void;
 	onRenameTag: (tag: { id: number; name: string }) => void;
-	onRowClick: (node: TagTreeNode, shiftKey: boolean) => void;
+	onRowClick: (node: TagTreeNode, shiftKey: boolean, altKey: boolean) => void;
 	drag: TreeDrag;
 }) {
 	const tag = node.tag!;
@@ -578,7 +581,7 @@ function TagTreeLeaf({
 						cursor: "pointer",
 					}}
 					data-tag-id={tag.id}
-					onClick={(e) => onRowClick(node, e.shiftKey)}
+					onClick={(e) => onRowClick(node, e.shiftKey, e.altKey)}
 					onMouseDown={(e) => drag.onMouseDown(e, node)}
 					onMouseMove={(e) => drag.onMouseMove(e, node, e.currentTarget, true)}
 				>

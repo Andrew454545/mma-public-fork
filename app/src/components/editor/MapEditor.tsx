@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Bounds } from "@/types";
+import type { MutationResult } from "@/bindings.gen";
 import { createLocation } from "@/types";
 import {
 	useCurrentMap,
@@ -10,7 +11,7 @@ import {
 	getCurrentMap,
 	getCurrentMapId,
 	getSelectedLocationIds,
-	refreshFromExternalMutation,
+	mutate,
 	removeLocations,
 	discardOpenMap,
 	createTags,
@@ -236,10 +237,12 @@ export function MapEditor() {
 		};
 	}, [map?.meta.id]);
 
-	// Another window copied locations into this map: resync from the store.
+	// Another window mutated this map: the payload is a MutationResult, so it runs
+	// through the same mutate() flow as a local edit (Promise.resolve since it's
+	// already resolved). This window owns persistence — mutate schedules the save.
 	useEffect(() => {
-		const unlisten = listen<string>("store-external-mutation", (e) => {
-			if (e.payload === getCurrentMapId()) void refreshFromExternalMutation();
+		const unlisten = listen<MutationResult & { mapId: string }>("store-external-mutation", (e) => {
+			if (e.payload.mapId === getCurrentMapId()) void mutate(Promise.resolve(e.payload));
 		});
 		return () => {
 			unlisten.then((f) => f());

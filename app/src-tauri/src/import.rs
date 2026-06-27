@@ -935,7 +935,7 @@ pub(crate) fn add_copied_to_store(
     store: &mut location_store::Store,
     locations: Vec<Location>,
     tags: Vec<Tag>,
-) -> AppResult<()> {
+) -> AppResult<location_store::MutationResult> {
     let mut parsed = ParsedMap {
         name: String::new(),
         folder: None,
@@ -944,8 +944,7 @@ pub(crate) fn add_copied_to_store(
         fields: None,
         warnings: Vec::new(),
     };
-    add_parsed_to_store(store, &mut parsed, None)?;
-    Ok(())
+    add_parsed_to_store(store, &mut parsed, None)
 }
 
 /// Insert parsed locations into the open map's store via the overlay.

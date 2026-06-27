@@ -401,14 +401,6 @@ export function discardOpenMap() {
 	resetMapState();
 }
 
-/** Resync after another window mutated this map (store-external-mutation event):
- *  re-fetch meta and rebuild the render state from the store. */
-export async function refreshFromExternalMutation() {
-	if (!currentMapId) return;
-	currentMap = await cmd.storeGetMap(currentMapId);
-	renderDeltaBus.emit({ added: [], updated: [], removed: [], colorPatches: [], fullReset: true });
-	refreshAfterMutation();
-}
 
 export function getCurrentMapId() {
 	return currentMapId;

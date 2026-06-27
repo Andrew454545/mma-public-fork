@@ -2093,8 +2093,9 @@ pub fn store_copy_locations_to_map(
 
     if mgr.stores.contains_key(&target_map_id) {
         // Target open in some window: insert through the import path (reconcile,
-        // id alloc, counts, field defs, undo, render cells), persist its dirty
-        // state, and emit so its windows resync.
+        // id alloc, counts, field defs, undo, render cells) and emit the resulting
+        // MutationResult. The receiving window applies it via the same mutate() flow
+        // as a local edit — including the save — so we do NOT persist here.
         let target = mgr.store_for_map(&target_map_id)?;
         let t_scan = std::time::Instant::now();
         let existing = target.collect_scoped(None);
@@ -2104,19 +2105,18 @@ pub fn store_copy_locations_to_map(
         if copied > 0 {
             let tags = used_tags(&fresh);
             let t_add = std::time::Instant::now();
-            crate::import::add_copied_to_store(target, fresh, tags)?;
-            let add_ms = t_add.elapsed().as_millis();
-            target.tags.dirty = false;
-            let t_save = std::time::Instant::now();
-            persist_dirty_inner(
-                &target_map_id,
-                Some(overlay_delta_bytes(target)?),
-                target.alive_count,
-                Some(serialize_tags_json(&target.tags.all)),
-            )?;
-            log::debug!("[cmd] store_copy_locations_to_map open-target scan={}ms add={}ms save={}ms total={}ms",
-                scan_ms, add_ms, t_save.elapsed().as_millis(), _t.elapsed().as_millis());
-            crate::emit_event("store-external-mutation", &target_map_id);
+            let result = crate::import::add_copied_to_store(target, fresh, tags)?;
+            // Force tags dirty so the receiving window's autosave flushes the bumped
+            // counts even when no new tag was created.
+            target.tags.dirty = true;
+            log::debug!("[cmd] store_copy_locations_to_map open-target scan={}ms add={}ms total={}ms",
+                scan_ms, t_add.elapsed().as_millis(), _t.elapsed().as_millis());
+            // Ship the full MutationResult (+ target map id for routing) on the event.
+            let mut payload = serde_json::to_value(&result)?;
+            if let Some(obj) = payload.as_object_mut() {
+                obj.insert("mapId".into(), serde_json::Value::String(target_map_id.clone()));
+            }
+            crate::emit_event("store-external-mutation", payload);
         }
         return Ok(CopyToMapResult { copied, skipped, target_name });
     }

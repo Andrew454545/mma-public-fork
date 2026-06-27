@@ -1,5 +1,13 @@
 import { describe, it, expect } from "vitest";
-import { rangeToggleTagIds, reorderSiblingsFlatOrder } from "@/components/editor/tags/tagTreeRange";
+import {
+	rangeToggleTagIds,
+	reorderSiblingsFlatOrder,
+	buildTagTree,
+	isLeafTag,
+	sumCounts,
+	type TagTreeNode,
+} from "@/components/editor/tags/tagTreeRange";
+import type { Tag } from "@/bindings.gen";
 
 interface N {
 	fullPath: string;
@@ -83,5 +91,60 @@ describe("reorderSiblingsFlatOrder", () => {
 
 	it("returns null when source equals target", () => {
 		expect(reorderSiblingsFlatOrder(tree, "a", "a", "after")).toBeNull();
+	});
+});
+
+describe("buildTagTree", () => {
+	const mkTag = (id: number, name: string, order = id): Tag => ({
+		id,
+		name,
+		color: "#888888",
+		order,
+	});
+	const segs = (nodes: TagTreeNode[]) => nodes.map((n) => n.segment);
+
+	it("floats leaf tags above sub-branches at the root (default sort)", () => {
+		// 'Europe' becomes a branch (has France); Red/Blue are plain leaves.
+		const tags = [mkTag(1, "Europe/France"), mkTag(2, "Red"), mkTag(3, "Blue")];
+		const tree = buildTagTree(tags, "default", {});
+		expect(segs(tree)).toEqual(["Red", "Blue", "Europe"]);
+		expect(tree[2].tag).toBeNull(); // pure folder node, no bare 'Europe' tag
+		expect(segs(tree[2].children)).toEqual(["France"]);
+	});
+
+	it("floats leaf tags above sub-branches within a nested folder", () => {
+		const tags = [mkTag(1, "A/m"), mkTag(2, "A/Z/q"), mkTag(3, "A/b")];
+		const a = buildTagTree(tags, "default", {})[0];
+		expect(segs(a.children)).toEqual(["m", "b", "Z"]); // leaves m,b before branch Z
+		expect(isLeafTag(a.children[0])).toBe(true);
+		expect(isLeafTag(a.children[1])).toBe(true);
+		expect(isLeafTag(a.children[2])).toBe(false); // Z is a branch
+	});
+
+	it("keeps leaves first under name and amount sort too", () => {
+		const tags = [mkTag(1, "Europe/France"), mkTag(2, "Red"), mkTag(3, "Blue")];
+		expect(segs(buildTagTree(tags, "name", {}))).toEqual(["Blue", "Red", "Europe"]);
+		expect(segs(buildTagTree(tags, "amount", { 1: 5, 2: 10, 3: 1 }))).toEqual([
+			"Red",
+			"Blue",
+			"Europe",
+		]);
+	});
+
+	it("every childless node carries a tag, so leaf pills are always tag-backed", () => {
+		const tags = [mkTag(1, "A/B"), mkTag(2, "A/C/D"), mkTag(3, "E"), mkTag(4, "A")];
+		const tree = buildTagTree(tags, "default", {});
+		const walk = (nodes: TagTreeNode[]) => {
+			for (const n of nodes) {
+				if (n.children.length === 0) expect(n.tag).not.toBeNull();
+				walk(n.children);
+			}
+		};
+		walk(tree);
+	});
+
+	it("sumCounts totals a node's whole subtree", () => {
+		const tree = buildTagTree([mkTag(1, "A/B"), mkTag(2, "A/C")], "default", { 1: 3, 2: 4 });
+		expect(sumCounts(tree[0], { 1: 3, 2: 4 })).toBe(7);
 	});
 });

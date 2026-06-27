@@ -3750,16 +3750,7 @@ summary.button {
 }
 .tag-tree__leaves {
 	margin-top: 0.25rem;
-}
-.tag-tree__leaves .tag.is-dragging {
-	visibility: visible;
-	opacity: 0.4;
-}
-.tag-tree__leaves .tag[data-drop="before"] {
-	box-shadow: -2px 0 0 0 #4a9eff;
-}
-.tag-tree__leaves .tag[data-drop="after"] {
-	box-shadow: 2px 0 0 0 #4a9eff;
+	margin-bottom: 0.625rem;
 }
 
 .edit-tag-modal {

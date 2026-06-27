@@ -52,6 +52,7 @@ cargo run --manifest-path src-tauri/Cargo.toml --features web-serve -- --serve
 
 Then open the printed `http://127.0.0.1:1430`.
 
-## Plugins
+## More
 
-See [plugins/README.md](plugins/README.md).
+- [Migrations](scripts/migrations/README.md) - bring your data over from map-making.app
+- [Plugins](plugins/README.md) - extend the editor

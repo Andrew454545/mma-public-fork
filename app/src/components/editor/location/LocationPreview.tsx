@@ -553,10 +553,7 @@ function LocationPreviewInner() {
 					)}
 					{isFullscreen && appSettings.showFullscreenDatePicker && !appSettings.hidePanoUI && (
 						<div className="fullscreen-date-picker">
-							<PanoDatePicker
-								defaultPanoId={location.panoId}
-								onChange={handleDateChange}
-							/>
+							<PanoDatePicker onChange={handleDateChange} />
 						</div>
 					)}
 				</div>
@@ -584,10 +581,7 @@ function LocationPreviewInner() {
 						</span>
 					</span>
 					<div className="location-preview__date">
-						<PanoDatePicker
-							defaultPanoId={location.panoId}
-							onChange={handleDateChange}
-						/>
+						<PanoDatePicker onChange={handleDateChange} />
 					</div>
 					<div className="location-preview__actions">
 						<button className="button button--primary" onClick={handleSave} data-qa="location-save">

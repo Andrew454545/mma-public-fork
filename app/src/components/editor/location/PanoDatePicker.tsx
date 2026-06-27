@@ -1,12 +1,8 @@
-import { useEffect, useRef, useCallback, useMemo } from "react";
-import { useActiveLocation, useCurrentMap, getActiveLocation, getCurrentMap, patchLocationExtra } from "@/store/useMapStore";
+import { useRef, useCallback } from "react";
 import { useSetting } from "@/store/settings";
-import { useTimezone } from "@/lib/util/timezone";
-import { isFieldEnabled } from "@/lib/data/fieldDefs";
 import { dateFmt } from "@/lib/util/format";
-import { type PanoReference, parsePanoDate } from "@/lib/sv/lookup";
+import { type PanoReference } from "@/lib/sv/lookup";
 import { useCameraType } from "./useCameraType";
-import { useExactDate } from "./useExactDate";
 import { usePanoViewer } from "./PanoViewerContext";
 import * as Select from "@radix-ui/react-select";
 
@@ -44,33 +40,9 @@ function PanoOption({ pano }: { pano: PanoReference }) {
 	);
 }
 
-export function PanoDatePicker({
-	defaultPanoId,
-	onChange,
-}: {
-	defaultPanoId: string | null;
-	onChange: (panoId: string | null) => void;
-}) {
-	const { currentPano, panoDates, selectedPanoId } = usePanoViewer();
-	const location = useActiveLocation();
-	const lat = currentPano?.location?.latLng?.lat() ?? location?.lat ?? 0;
-	const lng = currentPano?.location?.latLng?.lng() ?? location?.lng ?? 0;
-	const defaultEntry = panoDates.find((d) => d.pano === defaultPanoId);
-	const resolvedEntry = currentPano?.location
-		? panoDates.find((d) => d.pano === currentPano.location!.pano)
-		: undefined;
-	const sorted = useMemo(
-		() => [...panoDates].sort((a, b) => a.date.getTime() - b.date.getTime()),
-		[panoDates],
-	);
-	const currentEntry =
-		selectedPanoId == null
-			? (defaultEntry ?? resolvedEntry)
-			: sorted.find((d) => d.pano === selectedPanoId);
-	const isDefault = selectedPanoId == null;
-	const displayDate =
-		currentEntry?.date ??
-		(isDefault && currentPano?.imageDate ? parsePanoDate(currentPano.imageDate) : null);
+export function PanoDatePicker({ onChange }: { onChange: (panoId: string | null) => void }) {
+	const { selectedPanoId, dateState, exactDate, resolvedTz } = usePanoViewer();
+	const { defaultEntry, sorted, isDefault, displayDate, triggerPanoId } = dateState;
 	const prevLabelRef = useRef("");
 	const displayLabel = displayDate
 		? isDefault
@@ -88,25 +60,9 @@ export function PanoDatePicker({
 	);
 
 	const showBadges = useSetting("showCameraBadges");
-	const currentMap = useCurrentMap();
-	const datetimeEnabled = isFieldEnabled(
-		currentMap?.meta.settings.enrichFields ?? null,
-		"datetime",
-	);
 	const exactDateFormat = useSetting("exactDateFormat");
 	const dateTimezone = useSetting("dateTimezone");
-	const triggerPanoId =
-		currentEntry?.pano ??
-		currentPano?.location?.pano ??
-		sorted[sorted.length - 1]?.pano ??
-		defaultPanoId;
 	const triggerCameraType = useCameraType(triggerPanoId);
-
-	const yearMonth = displayDate
-		? `${displayDate.getFullYear()}-${String(displayDate.getMonth() + 1).padStart(2, "0")}`
-		: null;
-	const exactDate = useExactDate(triggerPanoId, lat, lng, yearMonth, datetimeEnabled);
-	const resolvedTz = useTimezone(lat, lng, datetimeEnabled && dateTimezone === "location");
 	const tzOption = dateTimezone === "utc" ? "UTC" : (resolvedTz ?? undefined);
 	const exactLabel = exactDate.ts
 		? exactDateFormat === "datetime"
@@ -125,14 +81,6 @@ export function PanoDatePicker({
 					timeZone: tzOption,
 				})
 		: null;
-
-	useEffect(() => {
-		if (exactDate.ts == null) return;
-		if (!(getCurrentMap()?.meta.settings.enrichMetadata ?? true)) return;
-		const loc = getActiveLocation();
-		if (!loc || loc.extra?.datetime != null) return;
-		patchLocationExtra(loc, { datetime: exactDate.ts, timezone: resolvedTz });
-	}, [exactDate.ts, resolvedTz]);
 
 	if (sorted.length === 0) {
 		return (

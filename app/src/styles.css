@@ -3585,6 +3585,11 @@ summary.button {
 	z-index: 1000;
 	opacity: 0.9;
 }
+/* While a tag/folder drag is in progress, force the grabbing cursor everywhere. */
+body.mm-tag-dragging,
+body.mm-tag-dragging * {
+	cursor: grabbing !important;
+}
 .tag > label > input {
 	display: none;
 }
@@ -3714,7 +3719,6 @@ summary.button {
 	flex-shrink: 0;
 }
 .tag-tree__label {
-	flex: 1;
 	min-width: 0;
 	overflow: hidden;
 	text-overflow: ellipsis;

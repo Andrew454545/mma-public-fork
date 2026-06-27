@@ -19,7 +19,6 @@ import type { TagSortMode } from "@/types";
 import type { Tag, VirtualTag } from "@/bindings.gen";
 
 interface TreeDrag {
-	enabled: boolean;
 	dragPath: string | null;
 	dropTarget: { path: string; position: "before" | "after" } | null;
 	onMouseDown: (e: React.MouseEvent, node: TagTreeNode) => void;
@@ -164,6 +163,7 @@ export function TagTreeView({
 					draggedRef.current = true;
 					dragNodeRef.current = node;
 					document.body.style.userSelect = "none";
+					document.body.classList.add("mm-tag-dragging");
 					dragPosRef.current = { x: me.clientX, y: me.clientY };
 					setDragPath(node.fullPath);
 					if (isLeafTag(node)) {
@@ -187,6 +187,7 @@ export function TagTreeView({
 				window.removeEventListener("mousemove", onMove);
 				window.removeEventListener("mouseup", onUp);
 				document.body.style.userSelect = "";
+				document.body.classList.remove("mm-tag-dragging");
 				const dropT = dropTargetRef.current;
 				if (started && dropT) {
 					const order = reorderSiblingsFlatOrder(treeRef.current, node.fullPath, dropT.path, dropT.position);
@@ -227,7 +228,6 @@ export function TagTreeView({
 	);
 
 	const drag: TreeDrag = {
-		enabled: dragEnabled,
 		dragPath,
 		dropTarget,
 		onMouseDown: handleDragMouseDown,
@@ -388,7 +388,7 @@ function TagTreeNodeRow({
 							backgroundColor: bg,
 							color: fg,
 							marginLeft: `${depth * 1.25}rem`,
-							cursor: drag.enabled ? "grab" : "pointer",
+							cursor: "pointer",
 						}}
 						data-drop={drag.dropTarget?.path === node.fullPath ? drag.dropTarget.position : undefined}
 						onClick={(e) => onRowClick(node, e.shiftKey)}
@@ -575,7 +575,7 @@ function TagTreeLeaf({
 					style={{
 						backgroundColor: bg,
 						color: fg,
-						cursor: drag.enabled ? "grab" : "pointer",
+						cursor: "pointer",
 					}}
 					data-tag-id={tag.id}
 					onClick={(e) => onRowClick(node, e.shiftKey)}

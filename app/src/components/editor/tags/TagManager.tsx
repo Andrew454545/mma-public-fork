@@ -142,6 +142,7 @@ export function TagManager() {
 				if (!started && (Math.abs(me.clientX - startX) > 4 || Math.abs(me.clientY - startY) > 4)) {
 					started = true;
 					document.body.style.userSelect = "none";
+					document.body.classList.add("mm-tag-dragging");
 					setDrag(tagId);
 					setDrop(sortedTagsRef.current.findIndex((t) => t.id === tagId));
 				}
@@ -159,6 +160,7 @@ export function TagManager() {
 				window.removeEventListener("mouseup", onUp);
 				if (!started) return;
 				document.body.style.userSelect = "";
+				document.body.classList.remove("mm-tag-dragging");
 				suppressClickRef.current = true;
 				const dragId = dragTagIdRef.current;
 				const idx = dropIdxRef.current;
@@ -270,7 +272,6 @@ export function TagManager() {
 									count={tagCounts[tag.id] ?? 0}
 									isSelected={selectedTagIds.has(tag.id)}
 									isDragging={dragTagId === tag.id}
-									sortMode={sortMode}
 									onClick={handleTagClick}
 									onMouseDown={handleTagMouseDown}
 									onMouseMove={handleTagMouseMove}
@@ -346,7 +347,6 @@ const TagRow = memo(function TagRow({
 	count,
 	isSelected,
 	isDragging,
-	sortMode,
 	onClick,
 	onMouseDown,
 	onMouseMove,
@@ -357,7 +357,6 @@ const TagRow = memo(function TagRow({
 	count: number;
 	isSelected: boolean;
 	isDragging: boolean;
-	sortMode: TagSortMode;
 	onClick: (e: React.MouseEvent, tagId: number) => void;
 	onMouseDown: (e: React.MouseEvent, tagId: number) => void;
 	onMouseMove: (e: React.MouseEvent, tagId: number, el: HTMLElement) => void;
@@ -374,7 +373,7 @@ const TagRow = memo(function TagRow({
 					style={{
 						backgroundColor: bg,
 						color: fg,
-						cursor: sortMode === "default" ? "grab" : "pointer",
+						cursor: "pointer",
 					}}
 					data-tag-id={tag.id}
 					onClick={(e) => onClick(e, tag.id)}

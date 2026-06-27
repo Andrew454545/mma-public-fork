@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { GoogleMapsOverlay } from "@deck.gl/google-maps";
 import { google } from "@/lib/sv/opensv";
 import { resolveStackForPrefs, CUSTOM_STYLES_KEY, type CustomStyle } from "@/lib/geo/mapStack";
 import { useMapSurface } from "@/lib/render/useMapSurface";
@@ -14,6 +15,42 @@ const MINIMAP_BASE_W = 800;
 const MINIMAP_BASE_H = 600;
 const MINIMAP_CLOSE_DELAY = 500;
 
+let minimapMap: google.maps.Map | null = null;
+let minimapDiv: HTMLDivElement | null = null;
+let minimapOverlay: GoogleMapsOverlay | null = null;
+
+function ensureMinimapMap(
+	prefs: MapEmbedPrefs,
+	lat: number,
+	lng: number,
+): { map: google.maps.Map; div: HTMLDivElement; overlay: GoogleMapsOverlay } {
+	if (!minimapDiv) {
+		minimapDiv = document.createElement("div");
+		minimapDiv.style.cssText = "width:100%;height:100%";
+	}
+	if (!minimapMap) {
+		const customType = resolveStackForPrefs(prefs, {
+			useBlobby: prefs.svBlobby,
+			customStyles: getLocal<CustomStyle[]>(CUSTOM_STYLES_KEY, []),
+		}).mapType;
+		minimapMap = new google.maps.Map(minimapDiv, {
+			center: { lat, lng },
+			zoom: 14,
+			disableDefaultUI: true,
+			gestureHandling: "greedy",
+			draggableCursor: "crosshair",
+			mapTypeId: "custom",
+			mapTypeControlOptions: { mapTypeIds: ["custom"] },
+		});
+		minimapMap.mapTypes.set("custom", customType);
+	}
+	if (!minimapOverlay) {
+		minimapOverlay = new GoogleMapsOverlay({ layers: [], pickingRadius: 2 });
+		minimapOverlay.setMap(minimapMap);
+	}
+	return { map: minimapMap, div: minimapDiv, overlay: minimapOverlay };
+}
+
 export function FullscreenMiniMap({
 	lat,
 	lng,
@@ -23,12 +60,34 @@ export function FullscreenMiniMap({
 	const [expanded, setExpanded] = useState(false);
 	const closeTimer = useRef<number | null>(null);
 	const [prefs] = useLocalStorage<MapEmbedPrefs>("mapEmbedPrefs", DEFAULT_PREFS);
-	const [mapInstance, setMapInstance] = useState<google.maps.Map | null>(null);
 
-	useMapSurface(mapInstance, {
+	const { map, div, overlay } = ensureMinimapMap(prefs, lat, lng);
+
+	useMapSurface(map, {
 		prefs,
 		followActive: true,
+		overlay,
 	});
+
+	useEffect(() => {
+		if (!containerRef.current) return;
+		containerRef.current.appendChild(div);
+		google.maps.event.trigger(map, "resize");
+		return () => { div.remove(); };
+	}, [div, map]);
+
+	useEffect(() => {
+		map.setCenter({ lat, lng });
+	}, [lat, lng, map]);
+
+	useEffect(() => {
+		const customType = resolveStackForPrefs(prefs, {
+			useBlobby: prefs.svBlobby,
+			customStyles: getLocal<CustomStyle[]>(CUSTOM_STYLES_KEY, []),
+		}).mapType;
+		map.mapTypes.set("custom", customType);
+		map.setMapTypeId("custom");
+	}, [prefs, map]);
 
 	const setScale = (next: number) => {
 		const clamped = clamp(next, MINIMAP_SCALE);
@@ -54,33 +113,6 @@ export function FullscreenMiniMap({
 		return () => {
 			if (closeTimer.current !== null) clearTimeout(closeTimer.current);
 		};
-	}, []);
-	const mapRef = useRef<google.maps.Map | null>(null);
-
-	useEffect(() => {
-		if (!containerRef.current || !google?.maps) return;
-		const customType = resolveStackForPrefs(prefs, {
-			useBlobby: prefs.svBlobby,
-			customStyles: getLocal<CustomStyle[]>(CUSTOM_STYLES_KEY, []),
-		}).mapType;
-		const map = new google.maps.Map(containerRef.current, {
-			center: { lat, lng },
-			zoom: 14,
-			disableDefaultUI: true,
-			gestureHandling: "greedy",
-			draggableCursor: "crosshair",
-			mapTypeId: "custom",
-			mapTypeControlOptions: { mapTypeIds: ["custom"] },
-		});
-		map.mapTypes.set("custom", customType);
-		map.setMapTypeId("custom");
-		mapRef.current = map;
-		setMapInstance(map);
-		return () => {
-			mapRef.current = null;
-			setMapInstance(null);
-		};
-		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, []);
 
 	const sizeVars = {

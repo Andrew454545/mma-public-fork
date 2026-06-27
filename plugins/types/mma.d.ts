@@ -1714,6 +1714,7 @@ declare const MAP_LIST_FIELDS: {
 declare const GEOCODE_PROVIDERS: {
 	readonly local: "Local (offline)";
 	readonly nominatim: "Nominatim (online)";
+	readonly google: "Google (from panorama)";
 };
 declare const TAG_VIEW_MODES: {
 	readonly flat: "Flat";

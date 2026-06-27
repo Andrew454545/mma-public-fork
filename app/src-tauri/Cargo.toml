@@ -71,7 +71,6 @@ opt-level = 2
 lto = true
 codegen-units = 1
 strip = true
-panic = "abort"
 
 [features]
 e2e = ["tauri-plugin-webdriver"]

@@ -1,3 +1,20 @@
+## v0.6.7 — 2026-06-28
+- Vastly improved support for tag folders
+- Renaming a tag folder now cascades to all the tags within it
+- Alt+click a tag in the tree to isolate just that one, ignoring its sub-tags
+- Adjustable spacing between tags in the tag list
+- Minimap now stays available in fullscreen and follows the panorama outside the viewport
+- Date picker now available in fullscreen
+- Colorable map list labels
+- Import folder assignments from the web app via .mmafolders files
+- Fixed the expanded minimap pushing its controls off-screen when the window is maximized
+- Fixed 0m duplicate checks freezing on large maps
+- Fixed progress bars and live updates not working in the web version
+- Fixed copying a location to a map open in another window not updating that map's tag counts
+- Fixed manual reviews unexpectedly resuming
+- Fixed the panorama view shifting when entering fullscreen
+- Fixed memory not being freed when a bulk import is cancelled
+
 ## v0.6.6 — 2026-06-26
 - Variable marker size slider
 - iNaturalist plugin
@@ -320,4 +337,3 @@
 ## v0.2.0 — 2026-05-09
 
 Initial release.
-

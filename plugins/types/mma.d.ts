@@ -261,7 +261,6 @@ type Location$1 = {
 	lng: number;
 	heading: number;
 	pitch: number;
-	/**  Street View zoom level (0-5), not map zoom. */
 	zoom: number;
 	panoId: string | null;
 	/**  See [`LocationFlags`]. */
@@ -768,6 +767,10 @@ export type Tag = {
 	count?: number;
 };
 export type LatLng = google.maps.LatLngLiteral;
+/** A location you already hold in full, or just its id to fetch on demand.
+ *  Lets the pick -> activate path carry "materialized or not" as plain data;
+ *  `resolveLocation` (in the store) fetches only the id case. */
+export type MaybeLocation = Location$1 | number;
 declare function createLocation(partial: Partial<Location$1> & LatLng): Location$1;
 export type TagSortMode = "default" | "name" | "amount";
 export type WorkArea = "overview" | "location" | "duplicates" | "import" | "plugin" | "diff";
@@ -1579,6 +1582,12 @@ declare const COMMANDS: {
 		enabled: () => boolean;
 		execute: () => boolean;
 	};
+	"review-sessions": {
+		label: string;
+		icon: string;
+		group: "Selections";
+		execute: () => boolean;
+	};
 	"select-random": {
 		label: string;
 		icon: string;
@@ -1705,6 +1714,7 @@ declare const MAP_LIST_FIELDS: {
 declare const GEOCODE_PROVIDERS: {
 	readonly local: "Local (offline)";
 	readonly nominatim: "Nominatim (online)";
+	readonly google: "Google (from panorama)";
 };
 declare const TAG_VIEW_MODES: {
 	readonly flat: "Flat";
@@ -2099,6 +2109,7 @@ declare const mma: {
 	getAllSelections(): Selection$1[];
 	getSelections(): Selection$1[];
 	getSelectedLocationIds(): SelectedIds;
+	setSelectedLocationIds(ids: SelectedIds): void;
 	syncSelections(): Promise<{
 		ids: number[];
 	}>;
@@ -2173,7 +2184,8 @@ declare const mma: {
 	useSelectedTagIds(): Set<number>;
 	openStagedLocation(index: number): Promise<void>;
 	previewVirtualLocation(loc: Location$1): void;
-	setActiveLocation(id: number | null, checkDuplicates?: boolean): Promise<void>;
+	resolveLocation(m: MaybeLocation): Promise<Location$1 | null>;
+	setActiveLocation(target: MaybeLocation | null, checkDuplicates?: boolean): Promise<void>;
 	openDuplicateLocation(loc: Location$1): void;
 	removeDuplicate(id: number): void;
 	closeDuplicates(): void;

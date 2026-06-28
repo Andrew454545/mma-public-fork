@@ -1,3 +1,123 @@
+import type { Tag, VirtualTag } from "@/bindings.gen";
+import type { TagSortMode } from "@/types";
+
+export interface TagTreeNode {
+	segment: string;
+	fullPath: string;
+	tag: Tag | null;
+	inheritedColor: string;
+	children: TagTreeNode[];
+	descendantTagIds: number[];
+	/** Min `order` across descendant tags — used for "default" sort parity with flat mode. */
+	sortOrder: number;
+}
+
+/** A terminal tag — no children — renders as a flat pill, not a folder row. A childless
+ *  node always carries a tag (it's where some tag's path ends); the `tag` guard only
+ *  matters for the transient tagless nodes that filtering can leave behind. */
+export const isLeafTag = (n: TagTreeNode) => n.children.length === 0 && n.tag != null;
+
+export function sumCounts(node: TagTreeNode, tagCounts: Record<number, number>): number {
+	let total = node.tag ? (tagCounts[node.tag.id] ?? 0) : 0;
+	for (const child of node.children) total += sumCounts(child, tagCounts);
+	return total;
+}
+
+/** Build the nested tag tree from `/`-delimited tag names. Within each level, leaf tags
+ *  are floated above sub-branches so they render as a flat pill group above folder rows.
+ *  `virtualTags` colors folder nodes that have no underlying tag (keyed by full path). */
+export function buildTagTree(
+	tags: Tag[],
+	sortMode: TagSortMode,
+	tagCounts: Record<number, number>,
+	virtualTags: Record<string, VirtualTag> = {},
+): TagTreeNode[] {
+	const root: TagTreeNode[] = [];
+
+	for (const tag of tags) {
+		const parts = tag.name.split("/");
+		let level = root;
+		let pathSoFar = "";
+
+		for (let i = 0; i < parts.length; i++) {
+			const segment = parts[i];
+			pathSoFar = pathSoFar ? `${pathSoFar}/${segment}` : segment;
+			const isLeaf = i === parts.length - 1;
+
+			let existing = level.find((n) => n.segment === segment);
+			if (!existing) {
+				existing = {
+					segment,
+					fullPath: pathSoFar,
+					tag: isLeaf ? tag : null,
+					inheritedColor: "",
+					children: [],
+					descendantTagIds: [],
+					sortOrder: 0,
+				};
+				level.push(existing);
+			} else if (isLeaf && !existing.tag) {
+				existing.tag = tag;
+			}
+
+			level = existing.children;
+		}
+	}
+
+	function propagateColor(nodes: TagTreeNode[], parentColor: string | null) {
+		for (const node of nodes) {
+			// Real tag color wins; otherwise a virtual-tag color for this path; else inherit.
+			const ownColor = node.tag?.color ?? virtualTags[node.fullPath]?.color ?? null;
+			const effectiveColor = ownColor ?? parentColor ?? "#888888";
+			node.inheritedColor = effectiveColor;
+			propagateColor(node.children, effectiveColor);
+		}
+	}
+
+	function collectMeta(node: TagTreeNode): { ids: number[]; minOrder: number } {
+		const ids: number[] = [];
+		let minOrder = node.tag?.order ?? Number.POSITIVE_INFINITY;
+		if (node.tag) ids.push(node.tag.id);
+		for (const child of node.children) {
+			const c = collectMeta(child);
+			ids.push(...c.ids);
+			if (c.minOrder < minOrder) minOrder = c.minOrder;
+		}
+		node.descendantTagIds = ids;
+		node.sortOrder = minOrder === Number.POSITIVE_INFINITY ? 0 : minOrder;
+		return { ids, minOrder: node.sortOrder };
+	}
+
+	// Mirror flat-mode ordering (name / amount / default), recursively per level.
+	// `segment` is the name tiebreaker so output is deterministic in every mode.
+	// Then float leaf tags above sub-branches at each level: leaves render as a flat
+	// pill group and branches as folder rows below them (the userscript's structure).
+	function sortNodes(nodes: TagTreeNode[]) {
+		nodes.sort((a, b) => {
+			if (sortMode === "amount") {
+				const d = sumCounts(b, tagCounts) - sumCounts(a, tagCounts);
+				if (d !== 0) return d;
+			} else if (sortMode === "default") {
+				const d = a.sortOrder - b.sortOrder;
+				if (d !== 0) return d;
+			}
+			return a.segment.localeCompare(b.segment);
+		});
+		const leaves = nodes.filter((n) => n.children.length === 0);
+		const branches = nodes.filter((n) => n.children.length > 0);
+		if (leaves.length > 0 && branches.length > 0) {
+			nodes.splice(0, nodes.length, ...leaves, ...branches);
+		}
+		for (const node of nodes) sortNodes(node.children);
+	}
+
+	propagateColor(root, null);
+	for (const node of root) collectMeta(node);
+	sortNodes(root);
+
+	return root;
+}
+
 /** Tag ids to toggle for a shift-click range over the tree's visible rows. Unions the
  *  descendant ids of every row in the [anchor, target] span, de-duped, but excludes the
  *  anchor's own descendants — those were selected by the anchor click, and (when the anchor

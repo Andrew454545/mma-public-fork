@@ -8,7 +8,7 @@
 //! to color the selection overlay.
 
 use std::collections::{HashMap, HashSet};
-use arrow::array::{RecordBatch, StringArray, Float64Array, UInt32Array, ListArray, Array};
+use arrow_array::{RecordBatch, StringArray, Float64Array, UInt32Array, ListArray, Array};
 use roaring::RoaringBitmap;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -539,7 +539,7 @@ pub fn resolve(view: &LocView, props: &SelectionProps) -> Vec<u32> {
 
 /// Returns true if the ring involves the antimeridian — either wrapped coordinates
 /// (edge lng jump > 180) or unwrapped (any vertex lng outside [-180, 180]).
-fn ring_crosses_antimeridian(ring: &[[f64; 2]]) -> bool {
+pub(crate) fn ring_crosses_antimeridian(ring: &[[f64; 2]]) -> bool {
     let n = ring.len();
     if n < 2 { return false; }
     let mut j = n - 1;
@@ -552,14 +552,14 @@ fn ring_crosses_antimeridian(ring: &[[f64; 2]]) -> bool {
 }
 
 #[inline]
-fn normalize_lng(lng: f64) -> f64 {
+pub(crate) fn normalize_lng(lng: f64) -> f64 {
     if lng < 0.0 { lng + 360.0 } else { lng }
 }
 
 /// Ray-casting algorithm: cast a horizontal ray eastward from (lng, lat) and count
 /// edge crossings. Odd count = inside. O(V) where V = vertices.
 /// Handles antimeridian-crossing rings by shifting to [0, 360).
-fn point_in_ring(lng: f64, lat: f64, ring: &[[f64; 2]]) -> bool {
+pub(crate) fn point_in_ring(lng: f64, lat: f64, ring: &[[f64; 2]]) -> bool {
     let crosses = ring_crosses_antimeridian(ring);
     let lng = if crosses { normalize_lng(lng) } else { lng };
     let mut inside = false;
@@ -578,15 +578,24 @@ fn point_in_ring(lng: f64, lat: f64, ring: &[[f64; 2]]) -> bool {
     inside
 }
 
-/// Test point-in-polygon with holes: must be inside the outer ring (coords[0])
-/// and outside all hole rings (coords[1..]).
-fn point_in_polygon(lng: f64, lat: f64, coords: &[Vec<[f64; 2]>]) -> bool {
-    if coords.is_empty() { return false; }
-    if !point_in_ring(lng, lat, &coords[0]) { return false; }
-    for hole in coords.iter().skip(1) {
+/// Test point-in-polygon with holes over rings yielded as slices: inside the outer
+/// ring (first) and outside all hole rings (rest). The single source of truth for the
+/// outer/hole composition, shared by owned `Vec`-backed and mmap'd archived geometry.
+pub(crate) fn polygon_contains<'a>(
+    lng: f64,
+    lat: f64,
+    mut rings: impl Iterator<Item = &'a [[f64; 2]]>,
+) -> bool {
+    let Some(outer) = rings.next() else { return false; };
+    if !point_in_ring(lng, lat, outer) { return false; }
+    for hole in rings {
         if point_in_ring(lng, lat, hole) { return false; }
     }
     true
+}
+
+fn point_in_polygon(lng: f64, lat: f64, coords: &[Vec<[f64; 2]>]) -> bool {
+    polygon_contains(lng, lat, coords.iter().map(|r| r.as_slice()))
 }
 
 /// Test against the full geometry (primary polygon + extra_polygons). Any hit = true.
@@ -611,23 +620,30 @@ pub(crate) fn geometry_bbox(geom: &PolygonGeometry) -> Option<[f64; 4]> {
         .any(|ring| ring_crosses_antimeridian(ring));
     let mut bb = [f64::MAX, f64::MAX, f64::MIN, f64::MIN];
     let mut any = false;
-    let mut fold = |rings: &[Vec<[f64; 2]>]| {
-        for ring in rings {
-            for &[lng, lat] in ring {
-                let lng = if crosses { normalize_lng(lng) } else { lng };
-                if lng < bb[0] { bb[0] = lng; }
-                if lat < bb[1] { bb[1] = lat; }
-                if lng > bb[2] { bb[2] = lng; }
-                if lat > bb[3] { bb[3] = lat; }
-                any = true;
-            }
-        }
-    };
-    fold(&geom.coordinates);
+    for ring in &geom.coordinates {
+        extend_bbox_with_ring(&mut bb, &mut any, crosses, ring);
+    }
     if let Some(extras) = &geom.extra_polygons {
-        for poly in extras { fold(poly); }
+        for poly in extras {
+            for ring in poly { extend_bbox_with_ring(&mut bb, &mut any, crosses, ring); }
+        }
     }
     if any { Some(bb) } else { None }
+}
+
+/// Fold one ring's vertices into a running `[min_lng, min_lat, max_lng, max_lat]`,
+/// normalizing longitudes to [0, 360) when the geometry crosses the antimeridian.
+/// `any` flips true once at least one vertex has been seen. Shared by owned and
+/// archived bbox computation.
+pub(crate) fn extend_bbox_with_ring(bb: &mut [f64; 4], any: &mut bool, crosses: bool, ring: &[[f64; 2]]) {
+    for &[lng, lat] in ring {
+        let lng = if crosses { normalize_lng(lng) } else { lng };
+        if lng < bb[0] { bb[0] = lng; }
+        if lat < bb[1] { bb[1] = lat; }
+        if lng > bb[2] { bb[2] = lng; }
+        if lat > bb[3] { bb[3] = lat; }
+        *any = true;
+    }
 }
 
 /// `bb` is `[min_lng, min_lat, max_lng, max_lat]`.

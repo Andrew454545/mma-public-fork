@@ -31,7 +31,7 @@ float sdBox(vec2 p, vec2 b) {
 
 float sdArrow(vec2 p) {
   float head = sdTriangleIsosceles(p - vec2(0.0, -0.5), vec2(0.6, 0.6));
-  float shaft = sdBox(p - vec2(0.0, 0.35), vec2(0.2, 0.25));
+  float shaft = sdBox(p - vec2(0.0, 0.30), vec2(0.2, 0.30));
   return min(head, shaft);
 }
 

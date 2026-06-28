@@ -1,8 +1,8 @@
 use super::*;
 use crate::arrow_bridge;
 use crate::types::Location;
-use arrow::array::{Array, ArrayRef, RecordBatch, StringArray, UInt8Array, UInt32Array};
-use arrow::datatypes::{DataType, Field, Schema};
+use arrow_array::{Array, ArrayRef, RecordBatch, StringArray, UInt8Array, UInt32Array};
+use arrow_schema::{DataType, Field, Schema};
 use std::collections::HashMap;
 use std::sync::Arc;
 

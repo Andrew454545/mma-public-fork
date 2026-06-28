@@ -25,7 +25,7 @@ import { useBinding } from "@/lib/util/hotkeys";
 import { useMapKeyboardNav } from "@/lib/hooks/useMapKeyboardNav";
 import { useTrailVersion } from "@/lib/sv/svTrail";
 import { useSeenOverlayVersion } from "@/lib/seen/seenOverlay";
-import type { MapEmbedPrefs } from "@/components/editor/map/mapEmbedPrefs";
+import type { MapEmbedPrefs } from "@/store/mapEmbedPrefs";
 
 type OverlayEvent = { srcEvent?: { domEvent?: Event } };
 
@@ -42,6 +42,8 @@ export interface MapSurfaceOpts {
 	panToActiveHotkey?: boolean;
 	// Held-key pan/zoom on this map. Keyboard-driven; opt in on one surface only.
 	keyboardNav?: boolean;
+	// Pre-created overlay to reuse across mounts (won't be finalized on cleanup).
+	overlay?: GoogleMapsOverlay;
 }
 
 // The one map surface, shared by the editor map and the minimap: creates the deck overlay, builds
@@ -86,6 +88,7 @@ export function useMapSurface(
 		const layers = buildSceneLayers(getScene(), {
 			markerStyle: opts.prefs.markerStyle,
 			markerOpacity: opts.prefs.markerOpacity,
+			markerSize: opts.prefs.markerSize,
 			showPerfectScoreCircle: opts.prefs.showPerfectScoreCircle,
 			scoreMaxError,
 			svPanoramas: opts.prefs.svPanoramas,
@@ -109,6 +112,7 @@ export function useMapSurface(
 		importPreviewColor,
 		opts.prefs.markerStyle,
 		opts.prefs.markerOpacity,
+		opts.prefs.markerSize,
 		opts.prefs.showPerfectScoreCircle,
 		opts.prefs.svPanoramas,
 		panoDotColor,
@@ -123,8 +127,14 @@ export function useMapSurface(
 	// Latest rebuild, so the rAF-delayed creation paints the first frame with current values.
 	const rebuildRef = useLatestRef(rebuild);
 
+	const externalOverlay = opts.overlay ?? null;
+
 	useEffect(() => {
 		if (!map || !google?.maps) return;
+		if (externalOverlay) {
+			overlayRef.current = externalOverlay;
+			return () => { overlayRef.current = null; };
+		}
 		let cancelled = false;
 		// GoogleMapsOverlay needs a rAF delay before creation (deck.gl + Google Maps interop).
 		const raf = requestAnimationFrame(() => {
@@ -141,7 +151,7 @@ export function useMapSurface(
 			overlayRef.current?.finalize();
 			overlayRef.current = null;
 		};
-	}, [map, rebuildRef]);
+	}, [map, rebuildRef, externalOverlay]);
 
 	useEffect(() => {
 		rebuild();

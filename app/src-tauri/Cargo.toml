@@ -1,6 +1,6 @@
 [package]
 name = "map-making-app"
-version = "0.6.5"
+version = "0.6.6"
 description = "Local map-making.app clone"
 authors = ["ccmdi"]
 license = ""
@@ -18,8 +18,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2.5.6", features = [] }
 
 [dependencies]
-serde_json = "1.0"
-simd-json = "0.14"
+serde_json = { version = "1.0", features = ["preserve_order"] }
 serde = { version = "1.0", features = ["derive"] }
 log = "0.4"
 tauri = { version = "2.11.0", features = [] }
@@ -33,7 +32,13 @@ chrono = "0.4"
 chrono-tz = "0.10"
 rayon = "1.10"
 roaring = "0.10"
-arrow = { version = "54", features = ["ipc"] }
+arrow-array = "54"
+arrow-buffer = "54"
+arrow-data = "54"
+arrow-ipc = "54"
+arrow-ord = "54"
+arrow-schema = "54"
+arrow-select = "54"
 bitflags = "2"
 tokio = { version = "1", features = ["rt"] }
 zip = { version = "2", default-features = false, features = ["deflate"] }
@@ -43,6 +48,7 @@ tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
 reverse_geocoder = "4"
 memmap2 = "0.9"
+rkyv = { version = "=0.7.46", features = ["validation"] }
 bytes = "1.9"
 percent-encoding = "2"
 reqwest = { version = "0.13", default-features = false, features = ["blocking", "rustls"] }
@@ -50,6 +56,9 @@ specta = { version = "=2.0.0-rc.25", features = ["derive", "serde_json"] }
 tauri-specta = { version = "=2.0.0-rc.25", features = ["derive", "typescript"] }
 specta-typescript = "0.0.12"
 csv = "1"
+memchr = "2"
+rustc-hash = "2"
+mimalloc = "0.1"
 tauri-plugin-webserve = { path = "crates/tauri-plugin-webserve", optional = true }
 
 [profile.dev]
@@ -57,6 +66,11 @@ opt-level = 1
 
 [profile.dev.package."*"]
 opt-level = 2
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
 
 [features]
 e2e = ["tauri-plugin-webdriver"]

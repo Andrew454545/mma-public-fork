@@ -27,7 +27,7 @@ import { SearchControl } from "@/components/editor/map/SearchControl";
 import type { ParsedLocation } from "@/lib/data/importExport";
 import { MapTypeDropdown, MapSettingsDropdown } from "@/components/editor/map/MapSettingsPanel";
 import { resolveStackForPrefs, CUSTOM_STYLES_KEY, type CustomStyle } from "@/lib/geo/mapStack";
-import { type MapEmbedPrefs, DEFAULT_PREFS } from "@/components/editor/map/mapEmbedPrefs";
+import { type MapEmbedPrefs, DEFAULT_PREFS } from "@/store/mapEmbedPrefs";
 import { FpsCounter } from "@/components/editor/map/FpsCounter";
 
 export function MapEmbed({ onAddLocation }: { onAddLocation: (parsed: ParsedLocation) => void | Promise<void> }) {
@@ -156,7 +156,7 @@ export function MapEmbed({ onAddLocation }: { onAddLocation: (parsed: ParsedLoca
 				if (map.meta.locationCount > 0) {
 					cmd.storeBounds(false).then((bounds) => {
 						if (cancelled || !gMapRef.current || !bounds) return;
-						const [west, south, east, north] = bounds as [number, number, number, number];
+						const [west, south, east, north] = bounds;
 						const gm = gMapRef.current!;
 						gm.fitBounds({ west, south, east, north });
 						google.maps.event.addListenerOnce(gm, "bounds_changed", () => {
@@ -296,7 +296,7 @@ export function MapEmbed({ onAddLocation }: { onAddLocation: (parsed: ParsedLoca
 		cmd.storeBounds(false).then((bounds) => {
 			const gm = gMapRef.current;
 			if (!gm || !bounds || !google?.maps) return;
-			const [west, south, east, north] = bounds as [number, number, number, number];
+			const [west, south, east, north] = bounds;
 			gm.fitBounds({ west, south, east, north });
 			google.maps.event.addListenerOnce(gm, "bounds_changed", () => {
 				gm.moveCamera({ center: gm.getCenter()!, zoom: gm.getZoom()! });
@@ -308,7 +308,7 @@ export function MapEmbed({ onAddLocation }: { onAddLocation: (parsed: ParsedLoca
 		cmd.storeBounds(true).then((bounds) => {
 			const gm = gMapRef.current;
 			if (!gm || !bounds || !google?.maps) return;
-			const [west, south, east, north] = bounds as [number, number, number, number];
+			const [west, south, east, north] = bounds;
 			gm.fitBounds({ west, south, east, north });
 			google.maps.event.addListenerOnce(gm, "bounds_changed", () => {
 				gm.moveCamera({ center: gm.getCenter()!, zoom: gm.getZoom()! });
@@ -321,8 +321,7 @@ export function MapEmbed({ onAddLocation }: { onAddLocation: (parsed: ParsedLoca
 	return (
 		<ContextMenu.Root modal={false}>
 			<div ref={containerRef} style={{ position: "absolute", inset: 0 }} />
-			{showFps && <FpsCounter />}
-			<div className="embed-controls">
+				<div className="embed-controls">
 				{/* TopLeft: Map dropdown, Search */}
 				<div
 					className="embed-controls__control"
@@ -389,6 +388,8 @@ export function MapEmbed({ onAddLocation }: { onAddLocation: (parsed: ParsedLoca
 						settings={{
 							markerStyle,
 							setMarkerStyle: pref("markerStyle"),
+							markerSize: prefs.markerSize,
+							setMarkerSize: pref("markerSize"),
 							showPerfectScoreCircle,
 							setShowPerfectScoreCircle: pref("showPerfectScoreCircle"),
 							showSearchRadiusCursor,
@@ -461,6 +462,7 @@ export function MapEmbed({ onAddLocation }: { onAddLocation: (parsed: ParsedLoca
 				<div className="embed-controls__control" style={{ bottom: 0, left: 0 }}>
 					<div className="map-control coordinate-control">
 						<span ref={coordDisplayRef} /> · zoom {mapZoom}
+						{showFps && <><span style={{ margin: "0 4px" }}>·</span><FpsCounter /></>}
 					</div>
 				</div>
 			</div>

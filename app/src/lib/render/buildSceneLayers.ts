@@ -4,7 +4,7 @@ import SDFMarkerLayer from "@/lib/render/sdf-marker-layer/SDFMarkerLayer";
 import { baseMarkerLayers, buildMarkerLayer } from "@/lib/render/markerLayer";
 import PanoCoverageLayer from "@/lib/render/PanoCoverageLayer";
 import type { CellManager } from "@/lib/render/CellManager";
-import type { MarkerStyle } from "@/components/editor/map/mapSettingsTypes";
+import type { MarkerStyle } from "@/types";
 import type { LatLng } from "@/types";
 import { isImportPreview } from "@/types";
 import type { Location, SeenEntry } from "@/bindings.gen";
@@ -45,6 +45,7 @@ function normalizePolygonCoords<T extends number[]>(coords: T[][]): T[][] {
 interface SceneContext {
 	markerStyle: MarkerStyle;
 	markerOpacity: number;
+	markerSize: number;
 	showPerfectScoreCircle: boolean;
 	scoreMaxError: number;
 	svPanoramas: boolean;
@@ -143,7 +144,7 @@ export function buildSceneLayers(cm: CellManager, ctx: SceneContext): Layer[] {
 			}),
 		);
 
-	layers.push(...baseMarkerLayers(cm, ctx.markerStyle, ctx.markerOpacity));
+	layers.push(...baseMarkerLayers(cm, ctx.markerStyle, ctx.markerOpacity, ctx.markerSize));
 
 	if (isSeenOverlayActive()) {
 		const seen = getSeenOverlayEntries();
@@ -177,6 +178,8 @@ export function buildSceneLayers(cm: CellManager, ctx: SceneContext): Layer[] {
 				{ positions: cm.selOverlayPositions, colors: cm.selOverlayColors, angles: cm.selOverlayAngles },
 				cm.selOverlayVersion,
 				cm.selOverlayVersion,
+				undefined,
+				ctx.markerSize,
 			),
 		);
 	}
@@ -223,7 +226,7 @@ export function buildSceneLayers(cm: CellManager, ctx: SceneContext): Layer[] {
 					data: [activeLoc],
 					getPosition: (d) => [d.lng, d.lat],
 					shape: "arrow",
-					radiusPixels: 12,
+					radiusPixels: 12 * ctx.markerSize,
 					getFillColor: activeColor,
 					getAngle: (d: Location) => -d.heading,
 					pickable: true,
@@ -238,7 +241,7 @@ export function buildSceneLayers(cm: CellManager, ctx: SceneContext): Layer[] {
 					id: `${LOCATION_LAYER_ID}-current-scatter`,
 					data: [activeLoc],
 					getPosition: (d) => [d.lng, d.lat],
-					getRadius: 6,
+					getRadius: 6 * ctx.markerSize,
 					radiusUnits: "pixels",
 					radiusMinPixels: 3,
 					getFillColor: activeColor,
@@ -252,7 +255,7 @@ export function buildSceneLayers(cm: CellManager, ctx: SceneContext): Layer[] {
 					data: [activeLoc],
 					getPosition: (d) => [d.lng, d.lat],
 					shape: "pin",
-					radiusPixels: 16,
+					radiusPixels: 16 * ctx.markerSize,
 					getFillColor: activeColor,
 					pickable: true,
 				}),

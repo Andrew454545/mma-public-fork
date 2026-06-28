@@ -189,7 +189,7 @@ export function StatsForNerds({ onClose }: { onClose: () => void }) {
 									["Startup", stats.startup],
 									["Uptime", stats.uptime],
 									["User agent", stats.userAgent],
-								] as [string, string | number][]
+								]
 							).map(([label, value]) => (
 								<tr key={label}>
 									<td

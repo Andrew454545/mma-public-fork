@@ -2,11 +2,11 @@
 //! point-in-polygon tests to identify which country a coordinate falls in.
 //!
 //! Three dataset levels: "light" (bundled, sub-country splits), "medium" (~10MB,
-//! country-level), "heavy" (~46MB, country-level). Medium and heavy are downloaded
-//! on demand to `app_data_dir/borders/` and cached in memory on first use.
-//!
-//! TODO: binary format for border data (mmap + typed arrays) to eliminate
-//! the 1-2s JSON parse on first use of heavy datasets.
+//! country-level), "heavy" (~46MB, country-level). The bundled "light" set is parsed
+//! from GeoJSON on first use; the larger downloaded sets ship as rkyv archives
+//! (`borders-{level}.rkyv` in `app_data_dir/borders/`) that are memory-mapped and read
+//! zero-copy -- no JSON parse, no per-coordinate allocation. Generate the archives with
+//! the `gen_rkyv_artifacts` ignored test (see `borders.test.rs`).
 
 use crate::types::{AppError, AppResult};
 use std::collections::HashMap;
@@ -22,13 +22,45 @@ struct BorderFeature {
     geometry: PolygonGeometry,
 }
 
-struct BorderDataset {
-    features: Vec<BorderFeature>,
+/// On-disk archive schema. A dedicated type (not `PolygonGeometry`) because borders only
+/// need geometry + identity, and rkyv must own a flat, serde-free shape. Native-endian
+/// rkyv means `Archived<[f64; 2]>` is `[f64; 2]`, so archived rings deref to `&[[f64; 2]]`
+/// and feed the shared point-in-polygon core with zero copies.
+#[derive(rkyv::Archive, rkyv::Serialize)]
+#[archive(check_bytes)]
+struct ArchFeature {
+    name: String,
+    code: String,
+    /// Primary polygon: outer ring then holes.
+    rings: Vec<Vec<[f64; 2]>>,
+    /// Remaining polygons of a multipolygon (each its own outer + holes).
+    extra: Vec<Vec<Vec<[f64; 2]>>>,
 }
 
-static DATASETS: OnceLock<Mutex<HashMap<String, BorderDataset>>> = OnceLock::new();
+#[derive(rkyv::Archive, rkyv::Serialize)]
+#[archive(check_bytes)]
+struct ArchDataset {
+    features: Vec<ArchFeature>,
+}
 
-fn cache() -> &'static Mutex<HashMap<String, BorderDataset>> {
+/// A loaded dataset: either parsed-and-owned (bundled "light") or a validated mmap of an
+/// rkyv archive (downloaded levels), read zero-copy on every lookup.
+enum Dataset {
+    Owned(Vec<BorderFeature>),
+    Mapped(memmap2::Mmap),
+}
+
+impl Dataset {
+    /// SAFETY: only ever called on a `Mapped` whose bytes were validated by
+    /// `check_archived_root` at load time and are immutable while mapped.
+    fn archived(mmap: &memmap2::Mmap) -> &ArchivedArchDataset {
+        unsafe { rkyv::archived_root::<ArchDataset>(&mmap[..]) }
+    }
+}
+
+static DATASETS: OnceLock<Mutex<HashMap<String, Dataset>>> = OnceLock::new();
+
+fn cache() -> &'static Mutex<HashMap<String, Dataset>> {
     DATASETS.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
@@ -353,29 +385,94 @@ fn convert_feature(gj: GeoJsonFeature) -> Option<BorderFeature> {
     Some(BorderFeature { name, code, geometry })
 }
 
-fn parse_geojson(data: &str) -> AppResult<BorderDataset> {
+fn parse_geojson(data: &str) -> AppResult<Vec<BorderFeature>> {
     let collection: GeoJsonCollection =
         serde_json::from_str(data).map_err(|e| format!("Failed to parse border GeoJSON: {e}"))?;
-    let features = collection.features.into_iter().filter_map(convert_feature).collect();
-    Ok(BorderDataset { features })
+    Ok(collection.features.into_iter().filter_map(convert_feature).collect())
+}
+
+/// Serialize a GeoJSON border dataset into the rkyv archive bytes shipped to clients.
+/// Reproducible offline step -- see the `gen_rkyv_artifacts` test. Test-only: the app
+/// reads the prebuilt archives, it never converts at runtime.
+#[cfg(test)]
+fn convert_dataset(json: &str) -> AppResult<Vec<u8>> {
+    let features = parse_geojson(json)?
+        .into_iter()
+        .map(|f| ArchFeature {
+            name: f.name,
+            code: f.code,
+            rings: f.geometry.coordinates,
+            extra: f.geometry.extra_polygons.unwrap_or_default(),
+        })
+        .collect();
+    let dataset = ArchDataset { features };
+    let bytes = rkyv::to_bytes::<_, 1024>(&dataset)
+        .map_err(|e| format!("Failed to serialize border archive: {e:?}"))?;
+    Ok(bytes.into_vec())
 }
 
 fn load_dataset(level: &str) -> AppResult<()> {
-    let data = if level == "light" {
-        include_str!("../../public/borders.json").to_string()
+    let dataset = if level == "light" {
+        let features = parse_geojson(include_str!("../data/borders.json"))?;
+        log::info!("Loaded {} border features for level 'light'", features.len());
+        Dataset::Owned(features)
     } else {
         let path = crate::storage::app_data_dir()?
             .join("borders")
-            .join(format!("borders-{level}.json"));
-        std::fs::read_to_string(&path)
-            .map_err(|e| format!("Failed to read borders-{level}.json: {e}"))?
+            .join(format!("borders-{level}.rkyv"));
+        let file = std::fs::File::open(&path)
+            .map_err(|e| format!("Failed to open borders-{level}.rkyv: {e}"))?;
+        // SAFETY: we own the file; it is not modified while mapped.
+        let mmap = unsafe { memmap2::Mmap::map(&file) }
+            .map_err(|e| format!("Failed to mmap borders-{level}.rkyv: {e}"))?;
+        rkyv::check_archived_root::<ArchDataset>(&mmap[..])
+            .map_err(|e| format!("Corrupt border archive borders-{level}.rkyv: {e:?}"))?;
+        log::info!(
+            "Mapped {} border features for level '{level}'",
+            Dataset::archived(&mmap).features.len()
+        );
+        Dataset::Mapped(mmap)
     };
-
-    let dataset = parse_geojson(&data)?;
-    log::info!("Loaded {} border features for level '{level}'", dataset.features.len());
 
     cache().lock().unwrap().insert(level.to_string(), dataset);
     Ok(())
+}
+
+// --- Archived geometry access (zero-copy over the mmap) ---
+
+type ArchPoly = rkyv::vec::ArchivedVec<rkyv::vec::ArchivedVec<[f64; 2]>>;
+
+/// Rings of an archived polygon as `&[[f64; 2]]` slices.
+fn arch_rings(poly: &ArchPoly) -> impl Iterator<Item = &[[f64; 2]]> {
+    poly.iter().map(|r| r.as_slice())
+}
+
+fn arch_point_in_feature(lng: f64, lat: f64, f: &ArchivedArchFeature) -> bool {
+    if selections::polygon_contains(lng, lat, arch_rings(&f.rings)) { return true; }
+    f.extra.iter().any(|poly| selections::polygon_contains(lng, lat, arch_rings(poly)))
+}
+
+fn arch_feature_bbox(f: &ArchivedArchFeature) -> Option<[f64; 4]> {
+    let all_rings = || f.rings.iter().chain(f.extra.iter().flat_map(|p| p.iter()));
+    let crosses = all_rings().any(|r| selections::ring_crosses_antimeridian(r.as_slice()));
+    let mut bb = [f64::MAX, f64::MAX, f64::MIN, f64::MIN];
+    let mut any = false;
+    for r in all_rings() {
+        selections::extend_bbox_with_ring(&mut bb, &mut any, crosses, r.as_slice());
+    }
+    if any { Some(bb) } else { None }
+}
+
+/// Copy a matched archived feature back into an owned `PolygonGeometry` for the IPC reply.
+/// Only the single matched feature is cloned, so the per-coordinate copy is off the hot path.
+fn arch_to_geometry(f: &ArchivedArchFeature) -> PolygonGeometry {
+    let copy_poly = |p: &ArchPoly| p.iter().map(|r| r.as_slice().to_vec()).collect::<Vec<_>>();
+    let extra: Vec<_> = f.extra.iter().map(|p| copy_poly(p)).collect();
+    PolygonGeometry {
+        coordinates: copy_poly(&f.rings),
+        extra_polygons: if extra.is_empty() { None } else { Some(extra) },
+        properties: Some(serde_json::json!({ "name": f.name.as_str(), "code": f.code.as_str() })),
+    }
 }
 
 // --- IPC commands ---
@@ -394,7 +491,7 @@ pub fn check_border_file(level: String) -> AppResult<bool> {
     validate_border_level(&level)?;
     let path = crate::storage::app_data_dir()?
         .join("borders")
-        .join(format!("borders-{level}.json"));
+        .join(format!("borders-{level}.rkyv"));
     Ok(path.exists())
 }
 
@@ -407,7 +504,7 @@ pub fn download_border_file(level: String) -> AppResult<()> {
         .join("borders");
     std::fs::create_dir_all(&dir)?;
     let url = format!(
-        "https://raw.githubusercontent.com/ccmdi/mma/master/data/borders/borders-{level}.json"
+        "https://raw.githubusercontent.com/ccmdi/mma/master/data/borders/borders-{level}.rkyv"
     );
     let client = reqwest::blocking::Client::builder()
         .use_rustls_tls()
@@ -415,9 +512,9 @@ pub fn download_border_file(level: String) -> AppResult<()> {
         .build()?;
     let bytes = client.get(&url).send()
         .and_then(|r| r.error_for_status())
-        .map_err(|e| format!("Failed to download borders-{level}.json: {e}"))?
+        .map_err(|e| format!("Failed to download borders-{level}.rkyv: {e}"))?
         .bytes()?;
-    std::fs::write(dir.join(format!("borders-{level}.json")), &bytes)?;
+    std::fs::write(dir.join(format!("borders-{level}.rkyv")), &bytes)?;
     // Invalidate cache so next lookup reloads
     cache().lock().unwrap().remove(&level);
     Ok(())
@@ -439,14 +536,25 @@ pub fn border_lookup(lat: f64, lng: f64, level: String) -> AppResult<Option<Poly
     let datasets = cache().lock().unwrap();
     let ds = datasets.get(&level).unwrap();
 
-    for feature in &ds.features {
-        if selections::point_in_geometry(lng, lat, &feature.geometry) {
-            let mut geom = feature.geometry.clone();
-            geom.properties = Some(serde_json::json!({
-                "name": feature.name,
-                "code": feature.code,
-            }));
-            return Ok(Some(geom));
+    match ds {
+        Dataset::Owned(features) => {
+            for feature in features {
+                if selections::point_in_geometry(lng, lat, &feature.geometry) {
+                    let mut geom = feature.geometry.clone();
+                    geom.properties = Some(serde_json::json!({
+                        "name": feature.name,
+                        "code": feature.code,
+                    }));
+                    return Ok(Some(geom));
+                }
+            }
+        }
+        Dataset::Mapped(mmap) => {
+            for f in Dataset::archived(mmap).features.iter() {
+                if arch_point_in_feature(lng, lat, f) {
+                    return Ok(Some(arch_to_geometry(f)));
+                }
+            }
         }
     }
 
@@ -471,8 +579,6 @@ pub fn tally_countries(
     level: &str,
     coords: &[(f64, f64)],
 ) -> AppResult<Vec<(String, u32)>> {
-    use rayon::prelude::*;
-
     let level = if validate_border_level(level).is_ok() && ensure_loaded(level).is_ok() {
         level.to_string()
     } else {
@@ -483,35 +589,65 @@ pub fn tally_countries(
     let datasets = cache().lock().unwrap();
     let ds = datasets.get(&level).unwrap();
 
-    let feats: Vec<([f64; 4], &BorderFeature)> = ds
-        .features
-        .iter()
-        .filter_map(|f| selections::geometry_bbox(&f.geometry).map(|bb| (bb, f)))
-        .collect();
+    Ok(match ds {
+        Dataset::Owned(features) => {
+            let feats = features
+                .iter()
+                .filter_map(|f| selections::geometry_bbox(&f.geometry).map(|bb| (bb, f)))
+                .collect();
+            tally_scan(
+                feats,
+                coords,
+                |lng, lat, f| selections::point_in_geometry(lng, lat, &f.geometry),
+                |f| f.code.as_str(),
+            )
+        }
+        Dataset::Mapped(mmap) => {
+            let feats = Dataset::archived(mmap)
+                .features
+                .iter()
+                .filter_map(|f| arch_feature_bbox(f).map(|bb| (bb, f)))
+                .collect();
+            tally_scan(
+                feats,
+                coords,
+                |lng, lat, f| arch_point_in_feature(lng, lat, f),
+                |f| f.code.as_str(),
+            )
+        }
+    })
+}
 
-    let counts = coords
+/// Bbox-prefiltered parallel point-in-polygon tally, generic over the feature backend
+/// (owned `BorderFeature` or archived `ArchivedArchFeature`).
+fn tally_scan<T: Sync>(
+    feats: Vec<([f64; 4], &T)>,
+    coords: &[(f64, f64)],
+    contains: impl Fn(f64, f64, &T) -> bool + Sync,
+    code: impl Fn(&T) -> &str + Sync,
+) -> Vec<(String, u32)> {
+    use rayon::prelude::*;
+    coords
         .par_iter()
         .filter_map(|&(lat, lng)| {
             for (bb, f) in &feats {
-                if !selections::in_bbox(lng, lat, bb) {
-                    continue;
-                }
-                if selections::point_in_geometry(lng, lat, &f.geometry) {
-                    return Some(f.code.clone());
-                }
+                if !selections::in_bbox(lng, lat, bb) { continue; }
+                if contains(lng, lat, f) { return Some(code(f).to_string()); }
             }
             None
         })
-        .fold(HashMap::new, |mut m: HashMap<String, u32>, code| {
-            *m.entry(code).or_insert(0) += 1;
+        .fold(HashMap::new, |mut m: HashMap<String, u32>, c| {
+            *m.entry(c).or_insert(0) += 1;
             m
         })
         .reduce(HashMap::new, |mut a, b| {
-            for (k, v) in b {
-                *a.entry(k).or_insert(0) += v;
-            }
+            for (k, v) in b { *a.entry(k).or_insert(0) += v; }
             a
-        });
-
-    Ok(counts.into_iter().collect())
+        })
+        .into_iter()
+        .collect()
 }
+
+#[cfg(test)]
+#[path = "borders.test.rs"]
+mod tests;

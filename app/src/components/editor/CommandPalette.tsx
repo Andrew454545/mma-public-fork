@@ -1,4 +1,5 @@
-import { useState, useEffect, useCallback, useMemo, createContext, useContext } from "react";
+import { useState, useCallback, useMemo, createContext, useContext } from "react";
+import { useDomEvent } from "@/lib/hooks/useDomEvent";
 import { Command } from "cmdk";
 import * as RadixDialog from "@radix-ui/react-dialog";
 import * as VisuallyHidden from "@radix-ui/react-visually-hidden";
@@ -211,17 +212,9 @@ export function CommandPalette() {
 	const [bulkOp, setBulkOp] = useState<BulkOperation | null>(null);
 	useHotkey(useBinding("openCommandPalette"), () => setOpen((v) => !v));
 
-	useEffect(() => {
-		const handler = () => setOpen(true);
-		document.addEventListener("open-command-palette", handler);
-		return () => document.removeEventListener("open-command-palette", handler);
-	}, []);
+	useDomEvent("open-command-palette", () => setOpen(true));
 
-	useEffect(() => {
-		const handler = (e: Event) => setBulkOp((e as CustomEvent).detail as BulkOperation);
-		document.addEventListener("open-bulk-op", handler);
-		return () => document.removeEventListener("open-bulk-op", handler);
-	}, []);
+	useDomEvent("open-bulk-op", (e) => setBulkOp((e as CustomEvent).detail as BulkOperation));
 
 	return (
 		<>

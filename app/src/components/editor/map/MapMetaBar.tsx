@@ -1,4 +1,5 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
+import { useDomEvent } from "@/lib/hooks/useDomEvent";
 import { Tooltip } from "@/components/primitives/Tooltip";
 import {
 	useCurrentMap,
@@ -15,7 +16,7 @@ import { VersionHistory } from "@/components/dialogs/VersionHistory";
 import { SeenDialog } from "@/components/dialogs/SeenDialog";
 import { CopyToMapDialog } from "@/components/editor/CopyToMapDialog";
 import { QuickCopyToMapDialog } from "@/components/editor/QuickCopyToMapDialog";
-import { loadSeenPano } from "@/components/editor/location/LocationPreview";
+import { loadSeenPano } from "@/lib/sv/panoSingleton";
 import { Icon } from "@/components/primitives/Icon";
 import { mdiUndo, mdiRedo } from "@mdi/js";
 import { fmt } from "@/lib/util/format";
@@ -31,28 +32,12 @@ export function MapMetaBar() {
 	const [showCopyToMap, setShowCopyToMap] = useState(false);
 	const [showQuickCopy, setShowQuickCopy] = useState(false);
 
-	useEffect(() => {
-		const onExport = () => setShowExport(true);
-		const onImport = () => beginImportFile();
-		const onHistory = () => setShowHistory(true);
-		const onSeen = () => setShowSeen(true);
-		const onCopyToMap = () => setShowCopyToMap(true);
-		const onQuickCopy = () => setShowQuickCopy(true);
-		document.addEventListener("open-export", onExport);
-		document.addEventListener("open-import", onImport);
-		document.addEventListener("open-history", onHistory);
-		document.addEventListener("open-seen", onSeen);
-		document.addEventListener("open-copy-to-map", onCopyToMap);
-		document.addEventListener("open-quick-copy-to-map", onQuickCopy);
-		return () => {
-			document.removeEventListener("open-export", onExport);
-			document.removeEventListener("open-import", onImport);
-			document.removeEventListener("open-history", onHistory);
-			document.removeEventListener("open-seen", onSeen);
-			document.removeEventListener("open-copy-to-map", onCopyToMap);
-			document.removeEventListener("open-quick-copy-to-map", onQuickCopy);
-		};
-	}, []);
+	useDomEvent("open-export", () => setShowExport(true));
+	useDomEvent("open-import", beginImportFile);
+	useDomEvent("open-history", () => setShowHistory(true));
+	useDomEvent("open-seen", () => setShowSeen(true));
+	useDomEvent("open-copy-to-map", () => setShowCopyToMap(true));
+	useDomEvent("open-quick-copy-to-map", () => setShowQuickCopy(true));
 
 	if (!map) return null;
 

@@ -19,22 +19,5 @@ export function FpsCounter() {
 		rafId = requestAnimationFrame(tick);
 		return () => cancelAnimationFrame(rafId);
 	}, []);
-	return (
-		<div
-			ref={ref}
-			style={{
-				position: "absolute",
-				top: 8,
-				right: 8,
-				zIndex: 999,
-				background: "rgba(0,0,0,0.7)",
-				color: "#0f0",
-				padding: "2px 6px",
-				fontSize: 12,
-				fontFamily: "monospace",
-				borderRadius: 3,
-				pointerEvents: "none",
-			}}
-		/>
-	);
+	return <span ref={ref} style={{ fontWeight: 700 }} />;
 }

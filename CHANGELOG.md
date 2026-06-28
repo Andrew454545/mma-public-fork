@@ -1,3 +1,24 @@
+## v0.6.6 — 2026-06-26
+- Variable marker size slider
+- iNaturalist plugin
+- "Use latest panorama" option in bulk pin-to-pano
+- Option for Google panorama as reverse geocode provider
+- Street View thumbnail embedded in copied pano share links
+- Progress bars for long-running operations
+- Select multiple files at once in bulk import
+- Close map shortcut
+- Faster imports on large files
+- Fixed arrow markers rendering with a gap in their shape
+- Fixed tooltips staying open when hovering over them
+- Fixed country and state codes being lost during import
+- Fixed bulk export changing field order
+- Fixed checkboxes in bulk import not responding to clicks
+- Fixed review session buttons invisible on white background
+- Fixed pinned command forms not sorted by pinned order
+- Fixed scrollbar causing layout shift
+- Fixed F11 fullscreen not working in the web version
+- Fixed zip import not working in the web version
+
 ## v0.6.5 — 2026-06-24
 - Coverage dates enrichment field with array type filtering
 - Faster imports

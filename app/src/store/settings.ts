@@ -30,7 +30,13 @@ export const MAP_LIST_FIELDS = {
 export const GEOCODE_PROVIDERS = {
 	local: "Local (offline)",
 	nominatim: "Nominatim (online)",
+	google: "Google (from panorama)",
 } as const;
+export const GEOCODE_PROVIDER_LABELS: Record<keyof typeof GEOCODE_PROVIDERS, string> = {
+	local: "Local reverse geocode",
+	nominatim: "OpenStreetMap (Nominatim)",
+	google: "Google Street View",
+};
 export const TAG_VIEW_MODES = {
 	flat: "Flat",
 	tree: "Tree",
@@ -93,6 +99,7 @@ const DEFAULTS = {
 	showFullscreenMinimap: true,
 	fullscreenMinimapScale: 1,
 	showFullscreenTagbar: true,
+	showFullscreenDatePicker: true,
 	customCss: "",
 	enableSeen: true,
 	enableSeenThumbnails: true,
@@ -112,6 +119,8 @@ const DEFAULTS = {
 	panoDotScaled: false,
 	tagViewMode: "flat" as TagViewMode,
 	tagSortMode: "default" as TagSortMode,
+	/** Gap between tag pills (px), shared by flat and tree views via `--tag-gap`. */
+	tagGap: 6 as number,
 	borderDetail: "light" as BorderDetail,
 	subdivisionDetail: "off" as SubdivisionDetail,
 	previewAspectRatio: "16 / 9" as PreviewAspectRatio,
@@ -121,6 +130,7 @@ const DEFAULTS = {
 		"deselectAll",
 		"selection-delete-locations",
 		"review-selected",
+		"review-sessions",
 		"---",
 		"select-unpanned",
 		"select-untagged",
@@ -132,6 +142,12 @@ const DEFAULTS = {
 	] as PinnedEntry[],
 };
 export type AppSettings = typeof DEFAULTS;
+
+/** App settings mirrored to CSS custom properties on `:root`. Add an entry to expose a
+ *  setting to CSS; `useCssVarSettings` (App.tsx) keeps them in sync reactively. */
+export const CSS_VAR_SETTINGS: ReadonlyArray<readonly [cssVar: string, value: (s: AppSettings) => string]> = [
+	["--tag-gap", (s) => `${s.tagGap}px`],
+];
 
 
 const STORAGE_KEY = "appSettings";

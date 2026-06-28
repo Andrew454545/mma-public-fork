@@ -16,8 +16,8 @@ use crate::types::{AppError, AppResult};
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use arrow::array::{Array, ArrayRef, RecordBatch, StringArray, UInt32Array};
-use arrow::datatypes::{DataType, Field, Schema};
+use arrow_array::{Array, ArrayRef, RecordBatch, StringArray, UInt32Array};
+use arrow_schema::{DataType, Field, Schema};
 
 /// Schema-metadata key holding the on-disk format version (decimal string).
 pub const VERSION_KEY: &str = "mma_version";

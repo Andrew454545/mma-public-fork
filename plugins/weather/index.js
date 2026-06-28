@@ -1,4 +1,4 @@
-// src/index.ts
+// weather/src/index.ts
 var WEATHER_FIELDS = [
   { key: "weatherCode", param: "weather_code", label: "Weather code (WMO)" },
   { key: "cloudCover", param: "cloud_cover", label: "Cloud cover (%)" },

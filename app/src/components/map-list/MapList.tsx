@@ -12,7 +12,7 @@ import {
 } from "@/store/useMapStore";
 import { openMapWindow } from "@/lib/window";
 import { openManual } from "@/store/router";
-import { log } from "@/lib/util/log";
+import { log, fireAndForget } from "@/lib/util/log";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { cmd } from "@/lib/commands";
 import { mmaBufUrl } from "@/lib/util/util";
@@ -40,7 +40,7 @@ import type { MapMeta } from "@/bindings.gen";
 import { fmt, relativeTime, shortDateFmt } from "@/lib/util/format";
 import { useLocalStorage } from "@/lib/hooks/useLocalStorage";
 import { useSetting, type MapListField } from "@/store/settings";
-import { toast } from "@/lib/util/toast";
+import { toast, progressToast } from "@/lib/util/toast";
 
 // --- What's new (latest release notes) ---
 
@@ -617,11 +617,41 @@ interface ImportEntry {
 	tagCount: number;
 	isDuplicate: boolean;
 	selected: boolean;
+	srcPath: string;
+	localIndex: number;
 }
 
 interface ImportPreview {
 	entries: ImportEntry[];
 	warnings: string[];
+}
+
+async function applyFolderFiles(paths: string[], maps: MapMeta[]) {
+	const byName = new Map(maps.map((m) => [m.name, m]));
+	let applied = 0;
+	let skipped = 0;
+
+	for (const path of paths) {
+		let mapping: Record<string, string>;
+		try {
+			mapping = JSON.parse(await cmd.readFile(path));
+		} catch (e) {
+			log.error("[folder import] failed to read", path, e);
+			continue;
+		}
+		for (const [mapName, folder] of Object.entries(mapping)) {
+			const map = byName.get(mapName);
+			if (!map) { skipped++; continue; }
+			if (map.folder === folder) continue;
+			await moveMapToFolder(map.id, folder);
+			applied++;
+		}
+	}
+
+	const parts = [];
+	if (applied > 0) parts.push(`${applied} map${applied > 1 ? "s" : ""} assigned to folders`);
+	if (skipped > 0) parts.push(`${skipped} not found locally`);
+	if (parts.length > 0) toast(parts.join(", "));
 }
 
 function ImportPreviewModal({
@@ -680,7 +710,7 @@ function ImportPreviewModal({
 							)}
 							onClick={() => toggle(i)}
 						>
-							<input type="checkbox" checked={entry.selected} onChange={() => toggle(i)} />
+							<input type="checkbox" checked={entry.selected} readOnly />
 							<span className="import-preview__name">{entry.name}</span>
 							<span className="import-preview__meta">
 								{fmt.format(entry.locationCount)} loc
@@ -729,10 +759,15 @@ export function BulkActions() {
 	const [importing, setImporting] = useState(false);
 	const [parseStatus, setParseStatus] = useState<string | null>(null);
 	const [preview, setPreview] = useState<ImportPreview | null>(null);
-	const importPathRef = useRef<string | null>(null);
+	const importEntriesRef = useRef<ImportEntry[] | null>(null);
 
 	const handleExport = useCallback(async () => {
 		setExporting(true);
+		const progress = progressToast("Exporting maps...");
+		const unlisten = await listen<{ current: number; total: number; mapName: string }>(
+			"bulk-export-progress",
+			(e) => progress.update(e.payload.current / e.payload.total, `${e.payload.current} / ${e.payload.total}`),
+		);
 		try {
 			const path = await cmd.storeExportBulkZip();
 			const res = await fetch(mmaBufUrl(path));
@@ -743,42 +778,65 @@ export function BulkActions() {
 			a.download = `mma-backup-${new Date().toISOString().slice(0, 10)}.zip`;
 			a.click();
 			URL.revokeObjectURL(url);
+			progress.finish("Export saved");
+		} catch {
+			progress.finish();
 		} finally {
+			unlisten();
 			setExporting(false);
 		}
 	}, []);
 
 	const handleImport = useCallback(async () => {
-		const path = await openDialog({
-			multiple: false,
-			filters: [{ name: "Map data", extensions: ["json", "zip"] }],
+		const selection = await openDialog({
+			multiple: true,
+			filters: [
+				{ name: "Map data", extensions: ["json", "zip", "mmafolders"] },
+			],
 		});
-		if (!path) return;
+		if (!selection) return;
+		const paths = Array.isArray(selection) ? selection : [selection];
 
-		setParseStatus("Scanning file...");
+		const folderFiles = paths.filter((p) => p.endsWith(".mmafolders"));
+		const mapFiles = paths.filter((p) => !p.endsWith(".mmafolders"));
+
+		if (folderFiles.length > 0) {
+			await applyFolderFiles(folderFiles, maps);
+		}
+		if (mapFiles.length === 0) return;
+
+		setParseStatus(mapFiles.length > 1 ? "Scanning files..." : "Scanning file...");
 		try {
-			const entries = await cmd.bulkImportPreview(path);
-			if (entries.length === 0) {
+			const aggregated: ImportEntry[] = [];
+			const warnings: string[] = [];
+			for (const path of mapFiles) {
+				const entries = await cmd.bulkImportPreview(path);
+				entries.forEach((e, localIndex) => {
+					const isDuplicate = maps.some(
+						(existing) => existing.name === e.name && existing.locationCount === e.locationCount,
+					);
+					aggregated.push({
+						name: e.name,
+						folder: e.folder,
+						locationCount: e.locationCount,
+						tagCount: e.tagCount,
+						isDuplicate,
+						selected: !isDuplicate,
+						srcPath: path,
+						localIndex,
+					});
+					warnings.push(...e.warnings);
+				});
+			}
+
+			if (aggregated.length === 0) {
 				log.warn("[bulk import] no maps found");
 				setParseStatus(null);
 				return;
 			}
 
-			importPathRef.current = path;
-			const importEntries: ImportEntry[] = entries.map((e) => {
-				const isDuplicate = maps.some(
-					(existing) => existing.name === e.name && existing.locationCount === e.locationCount,
-				);
-				return {
-					name: e.name,
-					folder: e.folder,
-					locationCount: e.locationCount,
-					tagCount: e.tagCount,
-					isDuplicate,
-					selected: !isDuplicate,
-				};
-			});
-			setPreview({ entries: importEntries, warnings: entries.flatMap((e) => e.warnings) });
+			importEntriesRef.current = aggregated;
+			setPreview({ entries: aggregated, warnings });
 		} catch (e) {
 			log.error("[bulk import] preview failed:", e);
 		} finally {
@@ -787,25 +845,49 @@ export function BulkActions() {
 	}, [maps]);
 
 	const handleConfirm = useCallback(async (indices: number[]) => {
-		const path = importPathRef.current;
-		if (!path) return;
+		const all = importEntriesRef.current;
+		if (!all) return;
+
+		// Map each selected aggregated index back to its source file + that file's local index.
+		const byPath = new Map<string, number[]>();
+		for (const i of indices) {
+			const entry = all[i];
+			if (!entry) continue;
+			const arr = byPath.get(entry.srcPath) ?? [];
+			arr.push(entry.localIndex);
+			byPath.set(entry.srcPath, arr);
+		}
+		if (byPath.size === 0) return;
+
 		setImporting(true);
-		setParseStatus(`Importing 0 / ${indices.length}...`);
 		setPreview(null);
+		const total = indices.length;
+		let base = 0; // maps confirmed in prior files, for global progress across the per-file loop
+		const progress = progressToast("Importing maps...");
 		const unlisten = await listen<{ current: number; total: number; mapName: string }>(
 			"bulk-import-progress",
-			(e) => setParseStatus(`Importing ${e.payload.current} / ${e.payload.total}...`),
+			(e) => progress.update((base + e.payload.current) / total, `${base + e.payload.current} / ${total}`),
 		);
+		let failed = 0;
 		try {
-			await cmd.bulkImportConfirm(path, indices);
+			for (const [path, localIndices] of byPath) {
+				try {
+					await cmd.bulkImportConfirm(path, localIndices);
+				} catch (e) {
+					failed += localIndices.length;
+					log.error("[bulk import] confirm failed for", path, e);
+				}
+				base += localIndices.length;
+			}
 			await invalidateMapList();
+			progress.finish(failed ? `Imported ${total - failed}, ${failed} failed` : "Import complete");
 		} catch (e) {
 			log.error("[bulk import] confirm failed:", e);
+			progress.finish();
 		} finally {
 			unlisten();
 			setImporting(false);
-			setParseStatus(null);
-			importPathRef.current = null;
+			importEntriesRef.current = null;
 		}
 	}, []);
 
@@ -832,8 +914,9 @@ export function BulkActions() {
 					preview={preview}
 					onConfirm={handleConfirm}
 					onClose={() => {
+						fireAndForget(cmd.bulkImportCancel(), "bulkImportCancel");
 						setPreview(null);
-						importPathRef.current = null;
+						importEntriesRef.current = null;
 					}}
 				/>
 			)}

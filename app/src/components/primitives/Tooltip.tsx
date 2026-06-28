@@ -30,7 +30,7 @@ export function Tooltip({
 
 export function TooltipProvider({ children }: { children: React.ReactNode }) {
 	return (
-		<RadixTooltip.Provider delayDuration={0} skipDelayDuration={300}>
+		<RadixTooltip.Provider delayDuration={0} skipDelayDuration={300} disableHoverableContent>
 			{children}
 		</RadixTooltip.Provider>
 	);

@@ -416,6 +416,55 @@ fn finish_mutation_reports_correct_state() {
     assert_eq!(result.status.version, 1);
 }
 
+#[test]
+fn cached_bounds_tracks_adds_and_invalidates_on_remove() {
+    let mut store = setup_store_with(&[loc(1, 0.0, 0.0)]);
+    // [w,s,e,n] = [min_lng, min_lat, max_lng, max_lat]
+    assert_eq!(store.cached_bounds(), Some([0.0, 0.0, 0.0, 0.0]));
+
+    // Add outside the box -> grows incrementally, no recompute.
+    let a = loc(2, 10.0, 10.0);
+    store.overlay_add(a.clone());
+    store.update_bounds(&ChangeSet { added: vec![a], ..Default::default() });
+    assert!(!store.bounds_dirty, "add must not dirty the cache");
+    assert_eq!(store.cached_bounds(), Some([0.0, 0.0, 10.0, 10.0]));
+
+    // Add inside the box -> no change.
+    let b = loc(3, 5.0, 5.0);
+    store.overlay_add(b.clone());
+    store.update_bounds(&ChangeSet { added: vec![b], ..Default::default() });
+    assert_eq!(store.cached_bounds(), Some([0.0, 0.0, 10.0, 10.0]));
+
+    // Remove the extreme point -> invalidates, recompute shrinks the box.
+    store.overlay_remove(&[loc(2, 10.0, 10.0)]);
+    store.update_bounds(&ChangeSet { removed: vec![2], ..Default::default() });
+    assert!(store.bounds_dirty, "removal must invalidate the cache");
+    assert_eq!(store.cached_bounds(), Some([0.0, 0.0, 5.0, 5.0]));
+
+    // The cache must never diverge from a fresh O(N) compute.
+    assert_eq!(store.cached_bounds(), store.compute_bounds(None));
+}
+
+#[test]
+fn bounds_cross_antimeridian_picks_tight_box() {
+    // Straddling 180°: naive min/max would give a ~356°-wide box. The shifted
+    // framing wins, yielding the 4°-wide crossing box (west > east).
+    let mut store = setup_store_with(&[loc(1, 0.0, 178.0), loc(2, 0.0, -178.0)]);
+    let [w, s, e, n] = store.cached_bounds().unwrap();
+    assert_eq!([w, s, e, n], [178.0, 0.0, -178.0, 0.0]);
+    assert!(w > e, "antimeridian-crossing box has west > east");
+}
+
+#[test]
+fn bounds_wide_span_stays_non_crossing() {
+    // Portugal (-9) to Japan (140): 149° genuine span, no crossing — raw framing
+    // wins (149 < the 211° shifted span), so west < east as normal.
+    let mut store = setup_store_with(&[loc(1, 0.0, -9.0), loc(2, 0.0, 140.0)]);
+    let [w, s, e, n] = store.cached_bounds().unwrap();
+    assert_eq!([w, s, e, n], [-9.0, 0.0, 140.0, 0.0]);
+    assert!(w < e);
+}
+
 // -----------------------------------------------------------------------
 // Render cell tracking
 // -----------------------------------------------------------------------

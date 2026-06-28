@@ -92,3 +92,30 @@ export type Nullable<T> = { [K in keyof T]: T[K] | null };
 export type Rename<T, Map extends Record<string, string>> = {
     [K in keyof T as K extends keyof Map ? Map[K] : K]: T[K]
 };
+
+/** The member(s) of union `U` whose discriminant `D` (default `"type"`) is `V`. */
+export type Variant<U, V extends U[D], D extends keyof U = "type" & keyof U> = Extract<
+	U,
+	Record<D, V>
+>;
+
+/** Narrowing guard: is `value` one of the given variant tag(s)? */
+export function isVariant<U, const V extends U[D], D extends keyof U = "type" & keyof U>(
+	value: U,
+	tag: V | readonly V[],
+	discriminant: D = "type" as D,
+): value is Extract<U, Record<D, V>> {
+	const tags = (Array.isArray(tag) ? tag : [tag]) as readonly PropertyKey[];
+	return tags.includes(value[discriminant] as PropertyKey);
+}
+
+/**
+ * Build a readonly tuple the compiler verifies contains *every* member of union
+ * `T` (in any order). Omitting one is a type error naming the missing member.
+ */
+export const unionTuple =
+	<T extends PropertyKey>() =>
+	<const U extends readonly T[]>(
+		tuple: U & ([T] extends [U[number]] ? unknown : { readonly __missing: Exclude<T, U[number]> }),
+	): U =>
+		tuple;

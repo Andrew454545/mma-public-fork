@@ -5,7 +5,7 @@ import type { MapData, FilterOp } from "@/bindings.gen";
 import { hslToRgb } from "@/lib/util/color";
 import { getFieldDef } from "@/lib/data/fieldDefRegistry";
 import { localDateTime, utcDateTime } from "@/lib/util/format";
-import { isVariant, unionTuple, type Variant } from "@/lib/util/union";
+import { isVariant, unionTuple, type Variant } from "@/types/util";
 import { pointInPolygon } from "@/lib/geo/geo";
 
 import type { Selection, SelectionProps } from "@/bindings.gen";

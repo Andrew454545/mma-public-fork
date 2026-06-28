@@ -1,7 +1,7 @@
 {
 	"name": "map-making-app",
 	"private": true,
-	"version": "0.6.5",
+	"version": "0.6.6",
 	"type": "module",
 	"scripts": {
 		"gen:plugin-types": "node ../plugins/types/generate.js",
@@ -60,6 +60,7 @@
 	},
 	"devDependencies": {
 		"@eslint/js": "^10.0.1",
+		"@mdx-js/rollup": "^3.1.1",
 		"@tauri-apps/cli": "^2.10.1",
 		"@types/google.maps": "^3.64.0",
 		"@types/mocha": "^10.0.10",

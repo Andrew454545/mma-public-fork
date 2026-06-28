@@ -417,7 +417,6 @@ function ViewerControlsSection() {
 		{ key: "showMapLinks", label: "Map links (open in maps, copy link)" },
 		{ key: "showCoordinateDisplay", label: "Coordinate / zoom display" },
 		{ key: "showPanoMetadata", label: "Show pano metadata" },
-		{ key: "showFps", label: "Show FPS counter" },
 	];
 
 	return (
@@ -461,6 +460,14 @@ function FullscreenSection() {
 					onChange={(e) => setSetting("showFullscreenTagbar", e.target.checked)}
 				/>
 				Show tag bar in fullscreen
+			</label>
+			<label className="settings-popup__item">
+				<input
+					type="checkbox"
+					checked={s.showFullscreenDatePicker}
+					onChange={(e) => setSetting("showFullscreenDatePicker", e.target.checked)}
+				/>
+				Show date picker in fullscreen
 			</label>
 		</fieldset>
 	);
@@ -790,7 +797,6 @@ function GeocodingSection() {
 							className="input"
 							value={s.nominatimApiKey}
 							onChange={(e) => setSetting("nominatimApiKey", e.target.value)}
-							placeholder="Leave blank for keyless access"
 						/>
 					</label>
 				</>
@@ -810,6 +816,24 @@ function TagsSection() {
 			<label className="settings-popup__item">
 				View mode
 				<SettingSelect setting="tagViewMode" options={TAG_VIEW_MODES} />
+			</label>
+			<label
+				className="settings-popup__item"
+				style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}
+			>
+				Tag gap
+				<input
+					type="range"
+					min={0}
+					max={16}
+					step={1}
+					value={s.tagGap}
+					onChange={(e) => setSetting("tagGap", Number(e.target.value))}
+					style={{ flex: 1 }}
+				/>
+				<span style={{ minWidth: "2rem", textAlign: "right", fontSize: "0.85rem" }}>
+					{s.tagGap}px
+				</span>
 			</label>
 			<label
 				className="settings-popup__item"
@@ -1038,10 +1062,24 @@ function UpdateSection() {
 
 function AdvancedTab() {
 	const [showDbManager, setShowDbManager] = useState(false);
+	const showFps = useSetting("showFps");
 	return (
 		<>
 			<MapListSection />
 			<SeenSection />
+			<fieldset className="fieldset">
+				<legend className="fieldset__header">
+					Debug <span className="fieldset__divider" />
+				</legend>
+				<label className="settings-popup__item">
+					<input
+						type="checkbox"
+						checked={showFps}
+						onChange={(e) => setSetting("showFps", e.target.checked)}
+					/>
+					Show FPS counter
+				</label>
+			</fieldset>
 			<CustomCssSection />
 			<UpdateSection />
 			<fieldset className="fieldset">

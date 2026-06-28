@@ -13,9 +13,9 @@
 //! through [`register_scheme`]. Everything else is generic.
 
 use std::collections::HashMap;
-use std::io::Read;
-use std::sync::mpsc::sync_channel;
-use std::sync::{OnceLock, RwLock};
+use std::io::{Read, Write};
+use std::sync::mpsc::{channel, sync_channel, Receiver, RecvTimeoutError, Sender};
+use std::sync::{Mutex, OnceLock, RwLock};
 use std::time::Duration;
 
 use tauri::ipc::{CallbackFn, InvokeBody, InvokeError, InvokeResponse};
@@ -75,6 +75,34 @@ where
 }
 
 // ---------------------------------------------------------------------------
+// Event bridge — `app.emit` reaches the app's own webviews, but a plain browser
+// tab isn't one, so backend events never arrive there. The app forwards every
+// event it emits to [`forward_event`], which fans them out to all connected
+// browsers over Server-Sent Events (`GET /__events`). Generic over the app's
+// events: no event name is hardcoded — the app passes the serialized payload.
+// ---------------------------------------------------------------------------
+
+fn event_clients() -> &'static Mutex<Vec<Sender<Vec<u8>>>> {
+    static CLIENTS: OnceLock<Mutex<Vec<Sender<Vec<u8>>>>> = OnceLock::new();
+    CLIENTS.get_or_init(|| Mutex::new(Vec::new()))
+}
+
+/// Forward a backend event to every connected web client (SSE). No-op when no
+/// browser is connected — always the case on desktop, so the app can call this
+/// unconditionally from its emit chokepoint.
+pub fn forward_event(event: &str, payload: serde_json::Value) {
+    let Ok(mut clients) = event_clients().lock() else {
+        return;
+    };
+    if clients.is_empty() {
+        return;
+    }
+    let frame = format!("data: {}\n\n", serde_json::json!({ "event": event, "payload": payload }))
+        .into_bytes();
+    clients.retain(|tx| tx.send(frame.clone()).is_ok());
+}
+
+// ---------------------------------------------------------------------------
 // Plugin entry
 // ---------------------------------------------------------------------------
 
@@ -108,6 +136,27 @@ fn serve<R: Runtime>(handle: AppHandle<R>) {
         let path = url.split('?').next().unwrap_or("").to_string();
         let query = url.split_once('?').map(|(_, q)| q.to_string()).unwrap_or_default();
 
+        if method == Method::Post && path == "/__ipc_upload" {
+            let raw = query.strip_prefix("name=").unwrap_or("upload");
+            let name = url_decode(raw);
+            let mut body = Vec::new();
+            let _ = req.as_reader().read_to_end(&mut body);
+            let dest = std::env::temp_dir().join(format!("mma_{name}"));
+            let resp = match std::fs::write(&dest, &body) {
+                Ok(()) => {
+                    let path_str = dest.to_string_lossy().to_string();
+                    (200, serde_json::json!(path_str).to_string())
+                }
+                Err(e) => (500, err_json(&format!("write failed: {e}"))),
+            };
+            let _ = req.respond(
+                Response::from_string(resp.1)
+                    .with_status_code(resp.0)
+                    .with_header(json_header()),
+            );
+            continue;
+        }
+
         if method == Method::Post && path.starts_with("/__ipc/") {
             let cmd = path.trim_start_matches("/__ipc/").to_string();
             let mut body = String::new();
@@ -120,6 +169,15 @@ fn serve<R: Runtime>(handle: AppHandle<R>) {
                     .with_status_code(status)
                     .with_header(json_header()),
             );
+            continue;
+        }
+
+        if method == Method::Get && path == "/__events" {
+            let (tx, rx) = channel::<Vec<u8>>();
+            event_clients().lock().unwrap().push(tx);
+            // Own thread: the accept loop is single-threaded, so holding an SSE
+            // connection open here would stall every other request.
+            std::thread::spawn(move || stream_events(req, rx));
             continue;
         }
 
@@ -174,6 +232,32 @@ fn serve_scheme(
         .with_status_code(resp.status)
         .with_header(ct_header(&resp.content_type))
         .with_header(Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"*"[..]).unwrap())
+}
+
+/// Hold one browser's SSE connection open and write event frames as they arrive.
+/// Uses the raw response writer (not `Response`/chunked, which buffers until the
+/// stream ends — never, here) and flushes per frame so events deliver live. A
+/// 25s heartbeat keeps the connection alive and turns a dropped client into a
+/// write error that ends the thread; its `tx` is then pruned on the next emit.
+fn stream_events(req: tiny_http::Request, rx: Receiver<Vec<u8>>) {
+    let mut w = req.into_writer();
+    let head = "HTTP/1.1 200 OK\r\n\
+                Content-Type: text/event-stream\r\n\
+                Cache-Control: no-cache\r\n\
+                Connection: close\r\n\r\n";
+    if w.write_all(head.as_bytes()).and_then(|_| w.flush()).is_err() {
+        return;
+    }
+    loop {
+        let frame = match rx.recv_timeout(Duration::from_secs(25)) {
+            Ok(f) => f,
+            Err(RecvTimeoutError::Timeout) => b": ping\n\n".to_vec(),
+            Err(RecvTimeoutError::Disconnected) => return,
+        };
+        if w.write_all(&frame).and_then(|_| w.flush()).is_err() {
+            return;
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -313,4 +397,24 @@ fn header_value(req: &tiny_http::Request, name: &str) -> Option<String> {
         .iter()
         .find(|h| h.field.as_str().as_str().eq_ignore_ascii_case(name))
         .map(|h| h.value.as_str().to_string())
+}
+
+fn url_decode(s: &str) -> String {
+    let mut out = Vec::with_capacity(s.len());
+    let mut bytes = s.as_bytes().iter();
+    while let Some(&b) = bytes.next() {
+        if b == b'%' {
+            let hi = bytes.next().copied().unwrap_or(0);
+            let lo = bytes.next().copied().unwrap_or(0);
+            let hex = [hi, lo];
+            if let Ok(val) = u8::from_str_radix(std::str::from_utf8(&hex).unwrap_or(""), 16) {
+                out.push(val);
+            }
+        } else if b == b'+' {
+            out.push(b' ');
+        } else {
+            out.push(b);
+        }
+    }
+    String::from_utf8_lossy(&out).into_owned()
 }

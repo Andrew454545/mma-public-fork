@@ -42,6 +42,7 @@ import {
 	mdiImageOffOutline,
 	mdiContentSaveAlertOutline,
 	mdiEyeCheckOutline,
+	mdiBookOpenOutline,
 } from "@mdi/js";
 import { registerCommand, type CommandDef } from "./commands";
 import {
@@ -277,6 +278,12 @@ const COMMANDS = {
 		group: "Selections",
 		enabled: () => getSelectedLocationIds().size > 0,
 		execute: () => document.dispatchEvent(new CustomEvent("open-review-selected")),
+	},
+	"review-sessions": {
+		label: "Review sessions",
+		icon: mdiBookOpenOutline,
+		group: "Selections",
+		execute: () => document.dispatchEvent(new CustomEvent("open-review-sessions")),
 	},
 	"select-random": {
 		label: "Pick random locations from selection",

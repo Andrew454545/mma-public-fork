@@ -11,8 +11,8 @@ use std::sync::{Arc, Mutex};
 
 use roaring::RoaringBitmap;
 
-use arrow::array::RecordBatch;
-use arrow::datatypes::SchemaRef;
+use arrow_array::RecordBatch;
+use arrow_schema::SchemaRef;
 use rayon::prelude::*;
 
 use crate::arrow_bridge;
@@ -262,6 +262,11 @@ pub struct Store {
     pub(crate) selections: SelectionState,
     pub(crate) tags: TagState,
     pub(crate) edits: EditStacks,
+    /// Cached unscoped bounds accumulator. Maintained incrementally on add/update
+    /// (which can only grow it); `bounds_dirty` forces an O(N) recompute on the
+    /// next read after a removal or bulk change. Resolved to `[w,s,e,n]` on read.
+    bounds_cache: Option<BoundsAcc>,
+    bounds_dirty: bool,
 }
 
 /// One undo/redo entry. Records the locations created and removed by a single user action.
@@ -276,6 +281,71 @@ pub(crate) struct EditEntry {
 struct MembershipDelta {
     gained: Vec<(u32, [u8; 3])>,
     lost: Vec<u32>,
+}
+
+/// Everything derived from a single O(N) pass over all alive locations. Computed
+/// once on map open; add new whole-map derivations here rather than scanning again.
+struct LocationAggregates {
+    alive: usize,
+    tag_counts: HashMap<u32, usize>,
+    bounds: Option<BoundsAcc>,
+}
+
+/// Incremental bounding-box accumulator. Tracks latitude min/max plus longitude
+/// min/max in *two* framings — raw `[-180,180]` and shifted `[0,360)` — so
+/// `resolve` can pick the tighter longitude span and emit an antimeridian-crossing
+/// box (`west > east`) when the data straddles 180°. Every field is a plain
+/// min/max, so it grows in O(1) per point with no sort — the cache stays cheap.
+#[derive(Clone, Copy)]
+struct BoundsAcc {
+    s: f64, n: f64,    // latitude min / max
+    w: f64, e: f64,    // longitude min / max, raw [-180,180]
+    ws: f64, es: f64,  // longitude min / max, shifted to [0,360)
+}
+
+impl BoundsAcc {
+    fn shift(lng: f64) -> f64 { if lng < 0.0 { lng + 360.0 } else { lng } }
+
+    fn seed(lat: f64, lng: f64) -> Self {
+        let sh = Self::shift(lng);
+        BoundsAcc { s: lat, n: lat, w: lng, e: lng, ws: sh, es: sh }
+    }
+
+    fn expand(self, lat: f64, lng: f64) -> Self {
+        let sh = Self::shift(lng);
+        BoundsAcc {
+            s: self.s.min(lat), n: self.n.max(lat),
+            w: self.w.min(lng), e: self.e.max(lng),
+            ws: self.ws.min(sh), es: self.es.max(sh),
+        }
+    }
+
+    /// Fold a point into an optional accumulator (seed if empty).
+    fn fold(acc: Option<Self>, lat: f64, lng: f64) -> Self {
+        match acc { Some(a) => a.expand(lat, lng), None => Self::seed(lat, lng) }
+    }
+
+    /// `[west, south, east, north]`, choosing whichever longitude framing is
+    /// tighter. The shifted framing winning means the box crosses 180°, which
+    /// maps back to `west > east` — the form Google/deck `fitBounds` zooms to the
+    /// short way (matching the original's `east += 360` handling).
+    fn resolve(self) -> [f64; 4] {
+        if self.es - self.ws < self.e - self.w {
+            let unshift = |v: f64| if v >= 180.0 { v - 360.0 } else { v };
+            [unshift(self.ws), self.s, unshift(self.es), self.n]
+        } else {
+            [self.w, self.s, self.e, self.n]
+        }
+    }
+
+    /// Whether a point sits on any extreme — removing it might shrink the box,
+    /// forcing a recompute.
+    fn on_edge(self, lat: f64, lng: f64) -> bool {
+        let sh = Self::shift(lng);
+        lat == self.s || lat == self.n
+            || lng == self.w || lng == self.e
+            || sh == self.ws || sh == self.es
+    }
 }
 
 impl Store {
@@ -316,6 +386,8 @@ impl Store {
                 undo: Vec::new(),
                 redo: Vec::new(),
             },
+            bounds_cache: None,
+            bounds_dirty: true,
         }
     }
 
@@ -342,6 +414,7 @@ impl Store {
     /// source of truth; the render delta and selection sync are two projections of it.
     pub(crate) fn finish_mutation(&mut self, changes: ChangeSet) -> MutationResult {
         self.bump();
+        self.update_bounds(&changes);
 
         let has_selections = !self.selections.all.is_empty();
         let full_resolve = has_selections &&
@@ -649,6 +722,8 @@ impl Store {
 
     /// Adjust tag counts by `delta` (+1 for adds, -1 for removes). O(L * T) where L = locs, T = avg tags per loc.
     pub(crate) fn update_tag_counts(&mut self, locs: &[Location], delta: isize) {
+        // Pre-aggregate membership changes per tag for bulk bitmap operations.
+        let mut members: HashMap<u32, Vec<u32>> = HashMap::new();
         for loc in locs {
             for &tag_id in &loc.tags {
                 if let Some(tag) = self.tags.all.get_mut(&tag_id) {
@@ -668,12 +743,15 @@ impl Store {
                     });
                     self.tags.dirty = true;
                 }
-                // Maintain the membership index alongside counts (same choke point).
-                if delta > 0 {
-                    self.tags.sets.entry(tag_id).or_default().insert(loc.id);
-                } else if let Some(set) = self.tags.sets.get_mut(&tag_id) {
-                    set.remove(loc.id);
-                }
+                members.entry(tag_id).or_default().push(loc.id);
+            }
+        }
+        for (tag_id, mut ids) in members {
+            if delta > 0 {
+                ids.sort_unstable();
+                self.tags.sets.entry(tag_id).or_default().extend(ids);
+            } else if let Some(set) = self.tags.sets.get_mut(&tag_id) {
+                for id in ids { set.remove(id); }
             }
         }
     }
@@ -828,31 +906,72 @@ impl Store {
         }
     }
 
-    fn compute_bounds(&self, scope: Option<&RoaringBitmap>) -> Option<[f64; 4]> {
+    /// Full O(N) bounds scan, optionally scoped to a selection. Returns the raw
+    /// accumulator; callers `.resolve()` it to `[w,s,e,n]`.
+    fn scan_bounds(&self, scope: Option<&RoaringBitmap>) -> Option<BoundsAcc> {
         let view = self.loc_view();
-        let (mut w, mut s, mut e, mut n) = (f64::MAX, f64::MAX, f64::MIN, f64::MIN);
-        let mut count = 0usize;
+        let mut acc: Option<BoundsAcc> = None;
         view.for_each(|row| {
             if let Some(ids) = scope { if !ids.contains(row.id()) { return; } }
-            let (lat, lng) = (row.lat(), row.lng());
-            if lng < w { w = lng; }
-            if lat < s { s = lat; }
-            if lng > e { e = lng; }
-            if lat > n { n = lat; }
-            count += 1;
+            acc = Some(BoundsAcc::fold(acc, row.lat(), row.lng()));
         });
-        if count == 0 { None } else { Some([w, s, e, n]) }
+        acc
     }
 
-    fn count_tags(&self) -> (usize, HashMap<u32, usize>) {
+    fn compute_bounds(&self, scope: Option<&RoaringBitmap>) -> Option<[f64; 4]> {
+        self.scan_bounds(scope).map(BoundsAcc::resolve)
+    }
+
+    /// Unscoped bounding box, cached. Recomputes O(N) only when dirty (after a
+    /// removal or bulk change); otherwise O(1). The scoring UI refreshes this on
+    /// every edit, so it must not scan the whole map per mutation.
+    fn cached_bounds(&mut self) -> Option<[f64; 4]> {
+        if self.bounds_dirty {
+            self.bounds_cache = self.scan_bounds(None);
+            self.bounds_dirty = false;
+        }
+        self.bounds_cache.map(BoundsAcc::resolve)
+    }
+
+    /// Keep the cached bounds current for one mutation. Added / updated-new
+    /// positions can only grow the box (O(changed)). A removal — or an update
+    /// whose OLD position sat on an edge — can shrink it, which needs the next
+    /// extreme point, so we just mark dirty and recompute lazily on next read.
+    /// `removed` carries ids only (no coords), so any removal is conservative.
+    fn update_bounds(&mut self, changes: &ChangeSet) {
+        if self.bounds_dirty { return; }
+        if changes.full_reset || !changes.removed.is_empty() {
+            self.bounds_dirty = true;
+            return;
+        }
+        if let Some(acc) = self.bounds_cache {
+            if changes.updated.iter().any(|(old, _)| acc.on_edge(old.lat, old.lng)) {
+                self.bounds_dirty = true;
+                return;
+            }
+        }
+        for (lat, lng) in changes.added.iter().map(|l| (l.lat, l.lng))
+            .chain(changes.updated.iter().map(|(_, nw)| (nw.lat, nw.lng)))
+        {
+            self.bounds_cache = Some(BoundsAcc::fold(self.bounds_cache, lat, lng));
+        }
+    }
+
+    /// Single O(N) pass over all alive locations deriving every open-time
+    /// aggregate: alive count, tag counts, and the bounding box. Seeding the
+    /// bbox here means the first `store_bounds` after open is an O(1) cache hit
+    /// instead of a second full scan.
+    fn scan_locations(&self) -> LocationAggregates {
         let view = self.loc_view();
-        let mut counts: HashMap<u32, usize> = HashMap::new();
+        let mut tag_counts: HashMap<u32, usize> = HashMap::new();
         let mut alive = 0usize;
+        let mut bounds: Option<BoundsAcc> = None;
         view.for_each(|row| {
             alive += 1;
-            row.for_each_tag(|tid| { *counts.entry(tid).or_default() += 1; });
+            bounds = Some(BoundsAcc::fold(bounds, row.lat(), row.lng()));
+            row.for_each_tag(|tid| { *tag_counts.entry(tid).or_default() += 1; });
         });
-        (alive, counts)
+        LocationAggregates { alive, tag_counts, bounds }
     }
 
     /// Read a single location from the committed base batch by id (ignores the
@@ -1008,11 +1127,11 @@ impl Store {
                 .map(|i| i as u32)
                 .collect();
             if keep.len() < batch.num_rows() {
-                let take_idx = arrow::array::UInt32Array::from(keep);
+                let take_idx = arrow_array::UInt32Array::from(keep);
                 batch = RecordBatch::try_new(
                     batch.schema(),
                     batch.columns().iter().map(|col| {
-                        arrow::compute::take(col.as_ref(), &take_idx, None).unwrap()
+                        arrow_select::take::take(col.as_ref(), &take_idx, None).unwrap()
                     }).collect(),
                 ).unwrap();
             }
@@ -1027,7 +1146,7 @@ impl Store {
         if !self.overlay.adds.is_empty() {
             let add_batch = arrow_bridge::locations_to_batch(&self.overlay.adds);
             let s = schema();
-            batch = arrow::compute::concat_batches(&s, &[batch, add_batch])
+            batch = arrow_select::concat::concat_batches(&s, &[batch, add_batch])
                 .expect("concat failed");
         }
 
@@ -1322,11 +1441,11 @@ pub async fn store_open_map(
                 (batch, mmap_handle)
             } else {
                 log::info!("[store_open] migrating unsorted Arrow file to sorted ID order");
-                let sort_idx = arrow::compute::sort_to_indices(ids, None, None)?;
+                let sort_idx = arrow_ord::sort::sort_to_indices(ids, None, None)?;
                 let sorted_batch = RecordBatch::try_new(
                     batch.schema(),
                     batch.columns().iter().map(|col| {
-                        arrow::compute::take(col.as_ref(), &sort_idx, None).unwrap()
+                        arrow_select::take::take(col.as_ref(), &sort_idx, None).unwrap()
                     }).collect(),
                 ).unwrap();
                 drop(batch);
@@ -1367,8 +1486,10 @@ pub async fn store_open_map(
     }
     store.next_id = seed_next_id(max_id, &store.overlay.adds, &undo, &redo);
 
-    let (alive, tag_counts) = store.count_tags();
+    let LocationAggregates { alive, tag_counts, bounds } = store.scan_locations();
     store.alive_count = alive;
+    store.bounds_cache = bounds;
+    store.bounds_dirty = false;
     {
         let conn = storage::open_db()?;
         conn.execute("UPDATE maps SET location_count = ?1 WHERE id = ?2",
@@ -1972,8 +2093,9 @@ pub fn store_copy_locations_to_map(
 
     if mgr.stores.contains_key(&target_map_id) {
         // Target open in some window: insert through the import path (reconcile,
-        // id alloc, counts, field defs, undo, render cells), persist its dirty
-        // state, and emit so its windows resync.
+        // id alloc, counts, field defs, undo, render cells) and emit the resulting
+        // MutationResult. The receiving window applies it via the same mutate() flow
+        // as a local edit — including the save — so we do NOT persist here.
         let target = mgr.store_for_map(&target_map_id)?;
         let t_scan = std::time::Instant::now();
         let existing = target.collect_scoped(None);
@@ -1983,19 +2105,18 @@ pub fn store_copy_locations_to_map(
         if copied > 0 {
             let tags = used_tags(&fresh);
             let t_add = std::time::Instant::now();
-            crate::import::add_copied_to_store(target, fresh, tags)?;
-            let add_ms = t_add.elapsed().as_millis();
-            target.tags.dirty = false;
-            let t_save = std::time::Instant::now();
-            persist_dirty_inner(
-                &target_map_id,
-                Some(overlay_delta_bytes(target)?),
-                target.alive_count,
-                Some(serialize_tags_json(&target.tags.all)),
-            )?;
-            log::debug!("[cmd] store_copy_locations_to_map open-target scan={}ms add={}ms save={}ms total={}ms",
-                scan_ms, add_ms, t_save.elapsed().as_millis(), _t.elapsed().as_millis());
-            crate::emit_event("store-external-mutation", &target_map_id);
+            let result = crate::import::add_copied_to_store(target, fresh, tags)?;
+            // Force tags dirty so the receiving window's autosave flushes the bumped
+            // counts even when no new tag was created.
+            target.tags.dirty = true;
+            log::debug!("[cmd] store_copy_locations_to_map open-target scan={}ms add={}ms total={}ms",
+                scan_ms, t_add.elapsed().as_millis(), _t.elapsed().as_millis());
+            // Ship the full MutationResult (+ target map id for routing) on the event.
+            let mut payload = serde_json::to_value(&result)?;
+            if let Some(obj) = payload.as_object_mut() {
+                obj.insert("mapId".into(), serde_json::Value::String(target_map_id.clone()));
+            }
+            crate::emit_event("store-external-mutation", payload);
         }
         return Ok(CopyToMapResult { copied, skipped, target_name });
     }
@@ -2696,10 +2817,15 @@ pub fn store_reorder_tags(
 /// When `selected_only` is true, restricts to the current selection.
 #[tauri::command]
 #[specta::specta]
-pub fn store_bounds(webview: tauri::Webview, state: tauri::State<'_, StoreState>, selected_only: bool) -> AppResult<Option<[f64; 4]>> {
+pub async fn store_bounds(webview: tauri::Webview, state: tauri::State<'_, StoreState>, selected_only: bool) -> AppResult<Option<[f64; 4]>> {
     with_store!(webview, state, |store| {
-        let scope = if selected_only { Some(&store.selections.ids) } else { None };
-        Ok(store.compute_bounds(scope))
+        // Selection-scoped bounds change with the selection, so they stay O(N)
+        // (zoom-to-selection hotkey, infrequent). The unscoped box is cached.
+        if selected_only {
+            Ok(store.compute_bounds(Some(&store.selections.ids)))
+        } else {
+            Ok(store.cached_bounds())
+        }
     })
 }
 

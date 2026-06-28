@@ -18,9 +18,19 @@
 		return id;
 	}
 
-	// --- in-tab event bus (plugin:event) ---
+	// --- event bus (plugin:event) ---
+	// In-tab emit() and backend events (delivered over SSE — see below) share one
+	// fan-out into the registered listeners.
 	let eventId = 0;
 	const listeners = []; // { event, cbId, id }
+
+	function dispatch(evt, payload) {
+		for (const l of listeners.slice()) {
+			if (l.event !== evt) continue;
+			const cb = callbacks.get(l.cbId);
+			if (cb) cb({ event: evt, id: l.id, payload });
+		}
+	}
 
 	function eventInvoke(name, args) {
 		if (name === "listen") {
@@ -34,13 +44,7 @@
 			return null;
 		}
 		if (name === "emit" || name === "emit_to") {
-			const evt = args.event;
-			const payload = args.payload;
-			for (const l of listeners.slice()) {
-				if (l.event !== evt) continue;
-				const cb = callbacks.get(l.cbId);
-				if (cb) cb({ event: evt, id: l.id, payload });
-			}
+			dispatch(args.event, args.payload);
 			return null;
 		}
 		return null;
@@ -59,11 +63,18 @@
 				input.onchange = async () => {
 					const file = input.files && input.files[0];
 					if (!file) return resolve(null);
-					const text = await file.text();
-					const path = await realInvoke("write_temp_file", {
-						name: file.name,
-						content: text,
-					});
+					var isBinary = !/\.(json|csv|geojson|txt)$/i.test(file.name);
+					var path;
+					if (isBinary) {
+						var buf = await file.arrayBuffer();
+						var r = await _fetch("/__ipc_upload?name=" + encodeURIComponent(file.name), {
+							method: "POST",
+							body: buf,
+						});
+						path = await r.json();
+					} else {
+						path = await realInvoke("write_temp_file", { name: file.name, content: await file.text() });
+					}
 					resolve(opts.multiple ? [path] : path);
 				};
 				input.click();
@@ -182,6 +193,20 @@
 	};
 	if ("serviceWorker" in navigator) {
 		navigator.serviceWorker.register("/__webserve/sw.js").catch(() => {});
+	}
+
+	// Backend events (Rust app.emit) arrive over SSE and feed the same listener
+	// bus as in-tab emit. EventSource auto-reconnects, so transient drops self-heal.
+	if (typeof EventSource !== "undefined") {
+		const es = new EventSource("/__events");
+		es.onmessage = (m) => {
+			try {
+				const data = JSON.parse(m.data);
+				dispatch(data.event, data.payload);
+			} catch (e) {
+				/* ignore malformed frame */
+			}
+		};
 	}
 
 	window.__TAURI_INTERNALS__ = {

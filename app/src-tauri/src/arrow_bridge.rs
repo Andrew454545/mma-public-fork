@@ -5,11 +5,12 @@
 
 use std::sync::Arc;
 
-use arrow::array::{
-    Array, ArrayRef, Float64Array, GenericListBuilder, ListArray, RecordBatch,
-    StringArray, UInt32Array, UInt32Builder, UInt8Array,
+use arrow_array::{
+    builder::{GenericListBuilder, UInt32Builder},
+    Array, ArrayRef, Float64Array, ListArray, RecordBatch,
+    StringArray, UInt32Array, UInt8Array,
 };
-use arrow::datatypes::{DataType, Field, Schema};
+use arrow_schema::{DataType, Field, Schema};
 
 use crate::types::{Location, LocationFlags};
 
@@ -298,7 +299,7 @@ pub const OP_CREATED: u8 = 1;
 /// Schema for a VCS delta file: the location columns plus a trailing `op` column
 /// (`OP_REMOVED`/`OP_CREATED`) distinguishing the two sides of the delta.
 pub fn delta_schema() -> Schema {
-    let mut fields: Vec<arrow::datatypes::FieldRef> = location_schema().fields().iter().cloned().collect();
+    let mut fields: Vec<arrow_schema::FieldRef> = location_schema().fields().iter().cloned().collect();
     fields.push(Arc::new(Field::new("op", DataType::UInt8, false)));
     Schema::new_with_metadata(fields, crate::arrow_migrate::version_metadata())
 }

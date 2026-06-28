@@ -1,6 +1,6 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
-import type { WorkArea, LatLng } from "@/types";
-import { isVirtualLocation, isImportPreview, LocationFlag } from "@/types";
+import type { WorkArea, LatLng, MaybeLocation } from "@/types";
+import { isVirtualLocation, isImportPreview, LocationFlag, locId, bboxTupleToBounds } from "@/types";
 import type { Location, MapData, MapMeta, Tag, ExtraFieldDef, FilterOp, KeySpec, Scope, CommitDiff, PartitionBucket, EditorImportPreview } from "@/bindings.gen";
 import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
 import { emit as tauriEmit, listen } from "@tauri-apps/api/event";
@@ -401,14 +401,6 @@ export function discardOpenMap() {
 	resetMapState();
 }
 
-/** Resync after another window mutated this map (store-external-mutation event):
- *  re-fetch meta and rebuild the render state from the store. */
-export async function refreshFromExternalMutation() {
-	if (!currentMapId) return;
-	currentMap = await cmd.storeGetMap(currentMapId);
-	renderDeltaBus.emit({ added: [], updated: [], removed: [], colorPatches: [], fullReset: true });
-	refreshAfterMutation();
-}
 
 export function getCurrentMapId() {
 	return currentMapId;
@@ -457,6 +449,10 @@ export function getSelections() {
 
 export function getSelectedLocationIds() {
 	return selectedLocationIds;
+}
+
+export function setSelectedLocationIds(ids: SelectedIds) {
+	selectedLocationIds = ids;
 }
 
 /** @internal Test-only. Forces a full selection re-resolve in Rust and returns
@@ -1183,8 +1179,14 @@ export function previewVirtualLocation(loc: Location) {
 	emitEvent("active:change", null);
 }
 
-export async function setActiveLocation(id: number | null, checkDuplicates = true) {
+/** Materialize a `MaybeLocation`. */
+export async function resolveLocation(m: MaybeLocation): Promise<Location | null> {
+	return typeof m === "number" ? await cmd.storeGetLocation(m) : m;
+}
+
+export async function setActiveLocation(target: MaybeLocation | null, checkDuplicates = true) {
 	const t = trace("setActive");
+	const id = target == null ? null : locId(target);
 	if (cachedActiveLocation && isVirtualLocation(cachedActiveLocation)) {
 		importMarkerVersion++;
 		const wasStaged = isImportPreview(cachedActiveLocation);
@@ -1202,7 +1204,7 @@ export async function setActiveLocation(id: number | null, checkDuplicates = tru
 	activeLocationId = id;
 	fireAndForget(cmd.storeSetActive(id), "setActive");
 	if (id) {
-		const loc = await cmd.storeGetLocation(id);
+		const loc = await resolveLocation(target!);
 		t.step("ipc");
 		if (checkDuplicates && loc) {
 			const nearby = await cmd.storeFindNearby(loc.lat, loc.lng, 2.0);
@@ -1367,7 +1369,7 @@ async function setImportStaging(preview: EditorImportPreview, source: "file" | "
 	importMarkerVersion++;
 	workArea = "import";
 	bump();
-	if (getSettings().panToImported) fitMapToBounds(preview.bounds, 100);
+	if (getSettings().panToImported) fitMapToBounds(bboxTupleToBounds(preview.bounds), 100);
 }
 
 /** Import from a known file path. Used by file picker and drag-and-drop. */
@@ -1544,7 +1546,7 @@ export async function beginCommitDiffPreview(commit: CommitInfo) {
 			if (l.lat < south) south = l.lat;
 			if (l.lat > north) north = l.lat;
 		}
-		fitMapToBounds([west, south, east, north], 100);
+		fitMapToBounds({ west, south, east, north }, 100);
 	}
 }
 

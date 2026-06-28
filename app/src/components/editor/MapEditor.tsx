@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import type { Bounds } from "@/types";
+import type { MutationResult } from "@/bindings.gen";
 import { createLocation } from "@/types";
 import {
 	useCurrentMap,
@@ -9,7 +11,7 @@ import {
 	getCurrentMap,
 	getCurrentMapId,
 	getSelectedLocationIds,
-	refreshFromExternalMutation,
+	mutate,
 	removeLocations,
 	discardOpenMap,
 	createTags,
@@ -47,7 +49,7 @@ import { useDeletePolygon } from "@/lib/map/useDeletePolygon";
 import { useMapKeyBindings } from "@/lib/map/mapKeyBindings";
 import { range, clamp } from "@/types/util"
 
-function zoomToPasted(bounds: [number, number, number, number] | null, padding = 0) {
+function zoomToPasted(bounds: Bounds | null, padding = 0) {
 	if (!getSettings().panToImported) return;
 	fitMapToBounds(bounds, padding);
 }
@@ -66,7 +68,7 @@ async function addParsedLocations(parsed: ParsedLocation[]) {
 	setActiveLocation(locs[locs.length - 1].id);
 	const lats = locs.map((l) => l.lat);
 	const lngs = locs.map((l) => l.lng);
-	zoomToPasted([Math.min(...lngs), Math.min(...lats), Math.max(...lngs), Math.max(...lats)]);
+	zoomToPasted({ west: Math.min(...lngs), south: Math.min(...lats), east: Math.max(...lngs), north: Math.max(...lats) });
 }
 
 function usePasteHandler() {
@@ -235,10 +237,12 @@ export function MapEditor() {
 		};
 	}, [map?.meta.id]);
 
-	// Another window copied locations into this map: resync from the store.
+	// Another window mutated this map: the payload is a MutationResult, so it runs
+	// through the same mutate() flow as a local edit (Promise.resolve since it's
+	// already resolved). This window owns persistence — mutate schedules the save.
 	useEffect(() => {
-		const unlisten = listen<string>("store-external-mutation", (e) => {
-			if (e.payload === getCurrentMapId()) void refreshFromExternalMutation();
+		const unlisten = listen<MutationResult & { mapId: string }>("store-external-mutation", (e) => {
+			if (e.payload.mapId === getCurrentMapId()) void mutate(Promise.resolve(e.payload));
 		});
 		return () => {
 			unlisten.then((f) => f());

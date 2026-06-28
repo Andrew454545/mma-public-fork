@@ -112,8 +112,14 @@ pub(crate) fn run_migrations() -> AppResult<()> {
         if *version == 16 { wiped_blobs = true; }
     }
 
-    // The delta-chain migration (v16) retires the geohash blob store. Reclaim its disk
-    // once, when v16 first applies.
+    // auto_vacuum must be set before the DB has data, or toggled with a one-time VACUUM.
+    let auto_vacuum: i32 = conn.pragma_query_value(None, "auto_vacuum", |r| r.get(0))?;
+    if auto_vacuum != 1 {
+        log::info!("[migrations] enabling auto_vacuum");
+        conn.pragma_update(None, "auto_vacuum", 1)?;
+        conn.execute_batch("VACUUM")?;
+    }
+
     if wiped_blobs {
         let blobs = arrow_dir()?.join("blobs");
         if blobs.exists() {
@@ -305,6 +311,8 @@ const MIGRATIONS: &[(u32, &str)] = &[
             updated_at   TEXT NOT NULL
           );
           CREATE INDEX IF NOT EXISTS idx_review_sessions_map ON review_sessions(map_id, status);"),
+    (18, "DROP TABLE IF EXISTS tags;
+          DROP INDEX IF EXISTS idx_tags_map_id;"),
 ];
 
 // ---------------------------------------------------------------------------
@@ -352,10 +360,10 @@ pub(crate) fn commit_delta_path(map_id: &str, commit_id: &str) -> AppResult<std:
 /// Uses a 1 MB `BufWriter` (unbuffered writes are ~15x slower on Windows).
 /// The write targets a `.tmp` sibling then renames, so readers never see
 /// a partial file.
-pub(crate) fn write_arrow_ipc(path: &std::path::Path, batch: &arrow::array::RecordBatch) -> AppResult<()> {
+pub(crate) fn write_arrow_ipc(path: &std::path::Path, batch: &arrow_array::RecordBatch) -> AppResult<()> {
     atomic_write(path, |file| {
         let buf = std::io::BufWriter::with_capacity(1 << 20, file);
-        let mut writer = arrow::ipc::writer::FileWriter::try_new(buf, &batch.schema())?;
+        let mut writer = arrow_ipc::writer::FileWriter::try_new(buf, &batch.schema())?;
         writer.write(batch)?;
         writer.finish()?;
         Ok(())
@@ -376,15 +384,15 @@ pub(crate) fn atomic_write(path: &std::path::Path, write_fn: impl FnOnce(std::fs
 ///
 /// If the file contains multiple batches they are concatenated. An empty or
 /// missing-batch file returns an empty batch with the location schema.
-pub(crate) fn read_arrow_ipc(path: &std::path::Path) -> AppResult<arrow::array::RecordBatch> {
+pub(crate) fn read_arrow_ipc(path: &std::path::Path) -> AppResult<arrow_array::RecordBatch> {
     let file = std::fs::File::open(path)?;
-    let reader = arrow::ipc::reader::FileReader::try_new(file, None)?;
+    let reader = arrow_ipc::reader::FileReader::try_new(file, None)?;
     let mut batches = Vec::new();
     for batch in reader {
         batches.push(crate::arrow_migrate::migrate(batch?)?);
     }
     if batches.is_empty() {
-        return Ok(arrow::array::RecordBatch::new_empty(std::sync::Arc::new(
+        return Ok(arrow_array::RecordBatch::new_empty(std::sync::Arc::new(
             arrow_bridge::location_schema(),
         )));
     }
@@ -392,12 +400,12 @@ pub(crate) fn read_arrow_ipc(path: &std::path::Path) -> AppResult<arrow::array::
         return Ok(batches.into_iter().next().unwrap());
     }
     let schema = std::sync::Arc::new(arrow_bridge::location_schema());
-    arrow::compute::concat_batches(&schema, &batches).map_err(AppError::from)
+    arrow_select::concat::concat_batches(&schema, &batches).map_err(AppError::from)
 }
 
 /// Keeps the mmap alive for as long as the RecordBatch references it.
 pub(crate) struct MmapHandle {
-    _buffer: arrow::buffer::Buffer,
+    _buffer: arrow_buffer::Buffer,
 }
 
 /// Zero-copy Arrow IPC read via memory-mapped file.
@@ -406,10 +414,10 @@ pub(crate) struct MmapHandle {
 /// as long as any array data from the batch is referenced. Parses the IPC
 /// footer and record-batch blocks directly from the mmap buffer, avoiding
 /// any heap allocation for the raw column data.
-pub(crate) fn read_arrow_ipc_mmap(path: &std::path::Path) -> AppResult<(arrow::array::RecordBatch, MmapHandle)> {
-    use arrow::buffer::Buffer;
-    use arrow::ipc::reader::{FileDecoder, read_footer_length};
-    use arrow::ipc::{root_as_footer, convert::fb_to_schema};
+pub(crate) fn read_arrow_ipc_mmap(path: &std::path::Path) -> AppResult<(arrow_array::RecordBatch, MmapHandle)> {
+    use arrow_buffer::Buffer;
+    use arrow_ipc::reader::{FileDecoder, read_footer_length};
+    use arrow_ipc::{root_as_footer, convert::fb_to_schema};
     use std::sync::Arc;
 
     let file = std::fs::File::open(path)?;
@@ -422,7 +430,7 @@ pub(crate) fn read_arrow_ipc_mmap(path: &std::path::Path) -> AppResult<(arrow::a
     if buf_len < 10 {
         let schema = Arc::new(arrow_bridge::location_schema());
         return Ok((
-            arrow::array::RecordBatch::new_empty(schema),
+            arrow_array::RecordBatch::new_empty(schema),
             MmapHandle { _buffer: buffer },
         ));
     }
@@ -444,7 +452,7 @@ pub(crate) fn read_arrow_ipc_mmap(path: &std::path::Path) -> AppResult<(arrow::a
     let blocks = blocks.as_ref();
     if blocks.map_or(true, |b| b.is_empty()) {
         return Ok((
-            arrow::array::RecordBatch::new_empty(schema),
+            arrow_array::RecordBatch::new_empty(schema),
             MmapHandle { _buffer: buffer },
         ));
     }
@@ -455,7 +463,7 @@ pub(crate) fn read_arrow_ipc_mmap(path: &std::path::Path) -> AppResult<(arrow::a
         let block_len = block.bodyLength() as usize + block.metaDataLength() as usize;
         let data = buffer.slice_with_length(block.offset() as usize, block_len);
         let batch = decoder.read_record_batch(&block, &data)?
-            .unwrap_or_else(|| arrow::array::RecordBatch::new_empty(schema));
+            .unwrap_or_else(|| arrow_array::RecordBatch::new_empty(schema));
         Ok((crate::arrow_migrate::migrate(batch)?, MmapHandle { _buffer: buffer }))
     } else {
         let mut batches = Vec::with_capacity(blocks.len());
@@ -467,7 +475,7 @@ pub(crate) fn read_arrow_ipc_mmap(path: &std::path::Path) -> AppResult<(arrow::a
                 batches.push(batch);
             }
         }
-        let merged = arrow::compute::concat_batches(&schema, &batches)?;
+        let merged = arrow_select::concat::concat_batches(&schema, &batches)?;
         Ok((crate::arrow_migrate::migrate(merged)?, MmapHandle { _buffer: buffer }))
     }
 }

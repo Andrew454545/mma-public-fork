@@ -29,7 +29,7 @@ import { getGoogleMap, waitForGoogleMap } from "@/lib/map/mapState";
 import { subscribe, type EditorEvent, type EventHandler } from "@/lib/events";
 import { setSetting, getSettings } from "@/store/settings";
 import { getSeenEntries, getSeenCount, clearSeen } from "@/lib/seen/seen";
-import { loadSeenPano } from "@/components/editor/location/LocationPreview";
+import { loadSeenPano } from "@/lib/sv/panoSingleton";
 import { enrichAll, needsEnrichment } from "@/lib/sv/enrich";
 import { bulkPinToPano } from "@/lib/sv/pinPano";
 import { validateLocations } from "@/lib/sv/validate";
@@ -87,7 +87,7 @@ async function createLocationStore(): Promise<LocationStore> {
 }
 
 const mma = {
-	ready: false as boolean,
+	ready: false,
 
 	// --- Store ---
 	...store,

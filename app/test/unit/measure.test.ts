@@ -2,7 +2,8 @@
 import { describe, it, expect, vi } from "vitest";
 
 vi.mock("measuretool-googlemaps-v3", () => ({ default: class {} }));
-vi.mock("@/types", () => ({
+vi.mock("@/types", async (importOriginal) => ({
+	...(await importOriginal<typeof import("@/types")>()),
 	Location: {},
 }));
 vi.mock("@/lib/util/syncStore", async (importOriginal) => importOriginal());
@@ -19,9 +20,10 @@ import {
 	resolveScoreMaxError,
 	resolveScoreMaxErrorFromBounds,
 	WORLD_MAX_ERROR,
-	WORLD_BOUNDS,
-	isWorldBounds,
 } from "@/lib/sv/measure";
+import { isWorldBounds } from "@/types";
+
+const WORLD_BOUNDS = { south: -90, west: -180, north: 90, east: 180 };
 
 describe("formatDistance", () => {
 	it("formats 500 meters as '500 m'", () => {
@@ -134,12 +136,12 @@ describe("bboxToMaxError", () => {
 describe("isWorldBounds", () => {
 	it("recognises the canonical world rectangle", () => {
 		expect(isWorldBounds(WORLD_BOUNDS)).toBe(true);
-		expect(isWorldBounds([-90, -180, 90, 180])).toBe(true);
+		expect(isWorldBounds({ south: -90, west: -180, north: 90, east: 180 })).toBe(true);
 	});
 
 	it("rejects any other rectangle", () => {
-		expect(isWorldBounds([0, 0, 1, 1])).toBe(false);
-		expect(isWorldBounds([-89, -180, 90, 180])).toBe(false);
+		expect(isWorldBounds({ south: 0, west: 0, north: 1, east: 1 })).toBe(false);
+		expect(isWorldBounds({ south: -89, west: -180, north: 90, east: 180 })).toBe(false);
 	});
 });
 
@@ -161,9 +163,8 @@ describe("resolveScoreMaxError", () => {
 		expect(resolveScoreMaxError(WORLD_BOUNDS, [])).toBe(WORLD_MAX_ERROR);
 	});
 
-	it("converts stored [south, west, north, east] to GeoJSON order for fixed bounds", () => {
-		// [south=40, west=-74, north=41, east=-73] -> GeoJSON [-74, 40, -73, 41]
-		const err = resolveScoreMaxError([40, -74, 41, -73], []);
+	it("converts fixed bounds to GeoJSON order", () => {
+		const err = resolveScoreMaxError({ south: 40, west: -74, north: 41, east: -73 }, []);
 		expect(err).toBeCloseTo(1.3969278547109607, 9);
 	});
 });
@@ -183,6 +184,23 @@ describe("padBbox", () => {
 
 	it("is consistent with locationsBbox for a single point", () => {
 		expect(padBbox([10, 5, 10, 5])).toEqual(locationsBbox([{ lat: 5, lng: 10 }]));
+	});
+
+	it("unwraps an antimeridian-crossing box (west > east) instead of collapsing it", () => {
+		// store_bounds returns the 4°-wide crossing box as [178, 0, -178, 0]. The
+		// midpoint must stay at 180, not snap to longitude 0 and squash the span.
+		const b = padBbox([178, 0, -178, 0]);
+		expect(b[0]).toBe(178);
+		expect(b[2]).toBe(182); // -178 unwrapped past 180
+		// haversine sees a real 4° longitude span, not ~0.
+		expect(bboxToMaxError(b)).toBeCloseTo(bboxToMaxError(padBbox([178, 0, 182, 0])), 9);
+	});
+
+	it("spreading points across the IDL loosens the score, never tightens it", () => {
+		// A wider crossing span must not produce a stricter (smaller) max error.
+		const near = resolveScoreMaxErrorFromBounds("auto", [179, 0, -179, 0]); // 2° apart
+		const far = resolveScoreMaxErrorFromBounds("auto", [170, 0, -170, 0]); // 20° apart
+		expect(far).toBeGreaterThan(near);
 	});
 });
 
@@ -210,8 +228,9 @@ describe("resolveScoreMaxErrorFromBounds", () => {
 	});
 
 	it("resolves fixed bounds identically to resolveScoreMaxError", () => {
-		expect(resolveScoreMaxErrorFromBounds([40, -74, 41, -73], null)).toBeCloseTo(
-			resolveScoreMaxError([40, -74, 41, -73], []),
+		const fixed = { south: 40, west: -74, north: 41, east: -73 };
+		expect(resolveScoreMaxErrorFromBounds(fixed, null)).toBeCloseTo(
+			resolveScoreMaxError(fixed, []),
 			9,
 		);
 	});

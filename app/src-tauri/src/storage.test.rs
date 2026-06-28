@@ -86,7 +86,7 @@ fn sha256_hex_differs_for_different_input() {
 // Arrow IPC mmap round-trip
 // -----------------------------------------------------------------------
 
-fn make_test_batch(ids: &[u32]) -> arrow::array::RecordBatch {
+fn make_test_batch(ids: &[u32]) -> arrow_array::RecordBatch {
     let locs: Vec<Location> = ids.iter().map(|&id| Location {
         id, lat: id as f64, lng: id as f64 * 2.0,
         heading: 0.0, pitch: 0.0, zoom: 1.0,
@@ -109,11 +109,11 @@ fn mmap_round_trip_preserves_data() {
     let (loaded, _handle) = read_arrow_ipc_mmap(&path).unwrap();
 
     assert_eq!(loaded.num_rows(), 3);
-    let ids = loaded.column(0).as_any().downcast_ref::<arrow::array::UInt32Array>().unwrap();
+    let ids = loaded.column(0).as_any().downcast_ref::<arrow_array::UInt32Array>().unwrap();
     assert_eq!(ids.value(0), 1);
     assert_eq!(ids.value(1), 2);
     assert_eq!(ids.value(2), 3);
-    let lats = loaded.column(1).as_any().downcast_ref::<arrow::array::Float64Array>().unwrap();
+    let lats = loaded.column(1).as_any().downcast_ref::<arrow_array::Float64Array>().unwrap();
     assert_eq!(lats.value(0), 1.0);
     assert_eq!(lats.value(1), 2.0);
     assert_eq!(lats.value(2), 3.0);
@@ -202,11 +202,11 @@ fn mmap_preserves_nullable_fields() {
 
     // Verify nullable columns preserved via the raw column (Array trait)
     assert!(loaded.column(6).is_null(0));
-    let pano_col = loaded.column(6).as_any().downcast_ref::<arrow::array::StringArray>().unwrap();
+    let pano_col = loaded.column(6).as_any().downcast_ref::<arrow_array::StringArray>().unwrap();
     assert_eq!(pano_col.value(1), "abc");
 
     assert!(loaded.column(9).is_null(0));
-    let extra_col = loaded.column(9).as_any().downcast_ref::<arrow::array::StringArray>().unwrap();
+    let extra_col = loaded.column(9).as_any().downcast_ref::<arrow_array::StringArray>().unwrap();
     assert!(extra_col.value(1).contains("key"));
 
     let _ = std::fs::remove_dir_all(&dir);

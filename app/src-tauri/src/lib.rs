@@ -7,6 +7,9 @@
 use crate::types::{AppError, AppResult};
 use tauri::Manager;
 
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 #[cfg(debug_assertions)]
 pub fn promote_serialize_bindings(path: &std::path::Path) {
     let src = std::fs::read_to_string(path).expect("read bindings");
@@ -55,6 +58,12 @@ static APP_HANDLE: std::sync::OnceLock<tauri::AppHandle> = std::sync::OnceLock::
 /// Emit an app-wide event to all windows. No-op before setup completes.
 pub(crate) fn emit_event(event: &str, payload: impl serde::Serialize + Clone) {
     use tauri::Emitter;
+    // Browser tabs aren't app webviews, so app.emit can't reach them — bridge the
+    // event to the web-serve SSE channel (no-op when no browser is connected).
+    #[cfg(feature = "web-serve")]
+    if let Ok(value) = serde_json::to_value(&payload) {
+        tauri_plugin_webserve::forward_event(event, value);
+    }
     if let Some(app) = APP_HANDLE.get() {
         let _ = app.emit(event, payload);
     }
@@ -427,6 +436,7 @@ pub fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             // --- Import / export ---
             import::bulk_import_preview,
             import::bulk_import_confirm,
+            import::bulk_import_cancel,
             import::store_import_preview,
             import::store_import_paste_preview,
             import::store_import_staged_location,

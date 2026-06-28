@@ -1,8 +1,6 @@
 import { useState, type ReactNode } from "react";
 import { Icon } from "@/components/primitives/Icon";
 import { mdiArrowLeft, mdiChevronDown, mdiChevronRight } from "@mdi/js";
-import "./sidebar.css";
-
 export function Sidebar({
 	title,
 	onBack,

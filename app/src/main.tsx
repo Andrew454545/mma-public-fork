@@ -50,8 +50,10 @@ async function boot() {
 
 	document.addEventListener("keydown", (e) => {
 		if (e.key === "F11") {
-			e.preventDefault();
 			win.isFullscreen().then((fs) => win.setFullscreen(!fs));
+		}
+		if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "p") {
+			e.preventDefault();
 		}
 	});
 

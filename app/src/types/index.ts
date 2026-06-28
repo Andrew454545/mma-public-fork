@@ -5,6 +5,24 @@ import { nowUnix } from "@/lib/util/format";
 export type LocationPOV = Pick<Location, "heading" | "pitch" | "zoom">;
 
 export type LatLng = google.maps.LatLngLiteral;
+export type Bounds = google.maps.LatLngBoundsLiteral;
+
+export function isWorldBounds(b: Bounds): boolean {
+	return b.south === -90 && b.west === -180 && b.north === 90 && b.east === 180;
+}
+
+export function scoreTupleToBounds([s, w, n, e]: [number, number, number, number]): Bounds {
+	return { south: s, west: w, north: n, east: e };
+}
+
+export function bboxTupleToBounds(t: [number, number, number, number] | null): Bounds | null {
+	if (!t) return null;
+	return { south: t[1], west: t[0], north: t[3], east: t[2] };
+}
+
+export function boundsToScoreTuple(b: Bounds): [number, number, number, number] {
+	return [b.south, b.west, b.north, b.east];
+}
 
 export const enum LocationFlag {
 	None = 0,
@@ -46,6 +64,15 @@ export function isVirtualLocation(loc: { id: number }): boolean {
 	return loc.id < 0;
 }
 
+/** A location you already hold in full, or just its id to fetch on demand.
+ *  Lets the pick -> activate path carry "materialized or not" as plain data;
+ *  `resolveLocation` (in the store) fetches only the id case. */
+export type MaybeLocation = Location | number;
+
+export function locId(m: MaybeLocation): number {
+	return typeof m === "number" ? m : m.id;
+}
+
 export function isImportPreview(loc: Location): boolean {
 	return (loc.flags & LocationFlag.ImportPreview) !== 0;
 }
@@ -76,3 +103,25 @@ export type SortMode = "name" | "created" | "opened" | "amount";
 export type TagSortMode = "default" | "name" | "amount";
 
 export type WorkArea = "overview" | "location" | "duplicates" | "import" | "plugin" | "diff";
+
+export const SV_COLORS = [
+	"red",
+	"pink",
+	"purple",
+	"violet",
+	"indigo",
+	"blue",
+	"cyan",
+	"teal",
+	"green",
+	"lime",
+	"yellow",
+	"orange",
+	"choco",
+] as const;
+export type SvColor = (typeof SV_COLORS)[number];
+
+export type MapTypeKey = "map" | "satellite" | "osm";
+export type SvCoverageType = "official" | "unofficial" | "default";
+export type SvThickness = "default" | "high";
+export type MarkerStyle = "pin" | "circle" | "arrow";

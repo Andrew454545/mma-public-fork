@@ -1,8 +1,6 @@
 import { useId } from "react";
 import type { ScopeController } from "@/store/useMapStore";
 import { fmt } from "@/lib/util/format";
-import "./scope-selector.css";
-
 // Radio picker for a ScopeController (from useScope). One shared affordance for
 // "operate on all locations vs the current selection", used by core and plugins.
 export function ScopeSelector({ ctl, className }: { ctl: ScopeController; className?: string }) {

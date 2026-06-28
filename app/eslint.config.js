@@ -5,6 +5,7 @@ import reactRefresh from "eslint-plugin-react-refresh";
 import tseslint from "typescript-eslint";
 import { defineConfig, globalIgnores } from "eslint/config";
 import noDuplicateCommandIcons from "./eslint-rules/no-duplicate-command-icons.js";
+import noIpcInLoop from "./eslint-rules/no-ipc-in-loop.js";
 
 export default defineConfig([
 	globalIgnores(["dist", "src/bindings.gen.ts", "src/components/manual/manual-img-dims.gen.ts"]),
@@ -16,6 +17,14 @@ export default defineConfig([
 			reactHooks.configs.flat.recommended,
 			reactRefresh.configs.vite,
 		],
+		plugins: {
+			local: {
+				rules: {
+					"no-ipc-in-loop": noIpcInLoop,
+					"no-duplicate-command-icons": noDuplicateCommandIcons,
+				},
+			},
+		},
 		languageOptions: {
 			globals: globals.browser,
 		},
@@ -25,6 +34,7 @@ export default defineConfig([
 			"react-hooks/immutability": "off",
 			"react-hooks/preserve-manual-memoization": "off",
 			"no-console": "error",
+			"local/no-ipc-in-loop": "warn",
 			"@typescript-eslint/no-unused-vars": [
 				"error",
 				{
@@ -38,7 +48,6 @@ export default defineConfig([
 	},
 	{
 		files: ["src/store/commandDefs.ts"],
-		plugins: { local: { rules: { "no-duplicate-command-icons": noDuplicateCommandIcons } } },
 		rules: { "local/no-duplicate-command-icons": "error" },
 	},
 	{

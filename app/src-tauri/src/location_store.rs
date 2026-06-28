@@ -1731,7 +1731,7 @@ pub struct Update<P> {
 
 /// Patchable fields of a `Tag`. Subset by design: id/count/visible aren't editable here.
 #[derive(serde::Deserialize, specta::Type, Default)]
-#[serde(rename_all = "camelCase")]
+#[serde(default, rename_all = "camelCase")]
 pub struct TagPatch {
     pub name: Option<String>,
     pub color: Option<String>,

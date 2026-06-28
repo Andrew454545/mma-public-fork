@@ -27,7 +27,7 @@ import {
 	rewriteSelectionFields,
 	type MergeWinner,
 } from "@/lib/data/fieldOps";
-import type { LocationPatch_Deserialize as LocationPatch, Update, TagPatch_Deserialize as TagPatch } from "@/bindings.gen";
+import type { LocationPatch_Deserialize as LocationPatch, Update, TagPatch } from "@/bindings.gen";
 import { getSavedSelections, rewriteSavedSelectionFields } from "./savedSelections";
 import type { RenderDelta } from "@/bindings.gen";
 import { SelectedIds, decodeSelectionBitmask, type ReadonlyIdSet, type SelCellEntry } from "@/lib/render/CellManager";

@@ -956,6 +956,7 @@ pub struct EditorImportResult {
     /// True when the import was large enough to autocommit; the caller commits it.
     pub auto_commit: bool,
     /// Settings carried by the import (`extra.settings`)
+    #[specta(type = std::collections::HashMap<String, specta_typescript::Any>)]
     pub settings: serde_json::Map<String, Value>,
 }
 

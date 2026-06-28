@@ -730,6 +730,27 @@ fn for_pairs_within<S>(
 ) {
     if n < 2 { return; }
     let cell_deg = distance_m / 111_000.0 * 1.5;
+    // Degenerate radius (distance == 0, or a non-finite cell size): "within 0 m" means
+    // exact-coordinate equality. The grid would divide by zero, saturate every point to
+    // one cell, and collapse to O(n^2). Hash on exact coords instead — O(n). (#69)
+    if !(cell_deg > 0.0) {
+        let mut groups: HashMap<(u64, u64), Vec<usize>> = HashMap::new();
+        for i in 0..n {
+            let (lat, lng) = pos(i);
+            if !lat.is_finite() || !lng.is_finite() { continue; }
+            // `+ 0.0` folds -0.0 into +0.0 so the two compare equal.
+            groups.entry(((lat + 0.0).to_bits(), (lng + 0.0).to_bits())).or_default().push(i);
+        }
+        for idxs in groups.values() {
+            for (a, &pi) in idxs.iter().enumerate() {
+                if skip_anchor(state, pi) { continue; }
+                for &pj in &idxs[a + 1..] {
+                    pair(state, pi, pj);
+                }
+            }
+        }
+        return;
+    }
     let cells: Vec<(i32, i32)> = (0..n)
         .map(|i| {
             let (lat, lng) = pos(i);
@@ -745,12 +766,15 @@ fn for_pairs_within<S>(
         let cos_lat = lat.to_radians().cos();
         for dx in -1..=1 {
             for dy in -1..=1 {
-                for &pj in grid.bucket(cx + dx, cy + dy) {
+                // saturating: a stray non-finite coord can floor to i32::MAX/MIN; a plain
+                // add would overflow (panic in debug, wrap in release).
+                let (nx, ny) = (cx.saturating_add(dx), cy.saturating_add(dy));
+                for &pj in grid.bucket(nx, ny) {
                     let pj = pj as usize;
                     if pj <= pi { continue; }
                     // Bucket may hold points from collided cells; the cell-coord check
                     // keeps us to the true 3x3 neighborhood. Then the distance test.
-                    if cells[pj] != (cx + dx, cy + dy) { continue; }
+                    if cells[pj] != (nx, ny) { continue; }
                     let (plat, plng) = pos(pj);
                     if equirect_m2(lat, lng, plat, plng, cos_lat) <= thresh_m2 {
                         pair(state, pi, pj);

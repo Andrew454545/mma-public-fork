@@ -770,6 +770,41 @@ fn duplicates_finds_nearby() {
     assert!(!ids.contains(&3));
 }
 
+// distance == 0 means exact-coordinate duplicates. Must not overflow (debug) and must
+// match only locations at the identical coordinate. (#69)
+#[test]
+fn duplicates_zero_distance_is_exact_match() {
+    let dead = HashSet::new();
+    let patches = HashMap::new();
+    let adds = vec![
+        loc(1, 51.5000, -0.1000),
+        loc(2, 51.5000, -0.1000), // exact same -> dup of 1
+        loc(3, 51.5000, -0.1001), // 1 m off -> not a 0 m dup
+    ];
+    let view = make_view(None, &dead, &patches, &adds);
+    let ids = resolve(&view, &SelectionProps::Duplicates { distance: 0.0 });
+    assert!(ids.contains(&1));
+    assert!(ids.contains(&2));
+    assert!(!ids.contains(&3));
+}
+
+// A non-finite coordinate floors to i32::MAX; the neighbor key must not overflow.
+#[test]
+fn duplicates_non_finite_coord_does_not_overflow() {
+    let dead = HashSet::new();
+    let patches = HashMap::new();
+    let adds = vec![
+        loc(1, 51.5, -0.1),
+        loc(2, 51.5, -0.1),
+        loc(3, f64::INFINITY, 0.0),
+    ];
+    let view = make_view(None, &dead, &patches, &adds);
+    let ids = resolve(&view, &SelectionProps::Duplicates { distance: 10.0 });
+    assert!(ids.contains(&1));
+    assert!(ids.contains(&2));
+    assert!(!ids.contains(&3));
+}
+
 // 0.00001 deg latitude ~= 1.11 m. Three points spaced one step apart chain pairwise
 // (1-2, 2-3) but 1-3 (~2.22 m) exceeds a 2 m threshold: only transitivity unites them.
 #[test]

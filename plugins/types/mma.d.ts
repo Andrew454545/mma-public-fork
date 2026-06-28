@@ -299,11 +299,15 @@ export type LocationPatch_Deserialize = {
 	createdAt?: number | null;
 	modifiedAt?: number | null;
 };
-/**  A location ID paired with a partial patch, sent from JS for updates. */
-/**  A location ID paired with a partial patch, sent from JS for updates. */
-export type LocationUpdate_Deserialize = {
+/** Generic `{id, patch}` update envelope, parameterized by the patch type. */
+export type Update<P> = {
 	id: number;
-	patch: LocationPatch_Deserialize;
+	patch: P;
+};
+/** Patchable fields of a `Tag` (input variant). Subset by design; omit to leave unchanged. */
+export type TagPatch_Deserialize = {
+	name?: string | null;
+	color?: string | null;
 };
 export type MapData = {
 	meta: MapMeta;
@@ -1339,12 +1343,10 @@ declare function save(options?: SaveDialogOptions): Promise<string | null>;
 declare const EVENT_DEFS: {
 	"location:add": Location$1[];
 	"location:remove": number[];
-	"location:update": LocationUpdate_Deserialize[];
+	"location:update": Update<LocationPatch_Deserialize>[];
 	"tag:add": Tag[];
 	"tag:remove": number[];
-	"tag:update": (Partial<Tag> & {
-		id: number;
-	})[];
+	"tag:update": Update<TagPatch_Deserialize>[];
 	"selection:change": Selection$1[];
 	"active:change": number | null;
 	"map:open": MapData;
@@ -1730,7 +1732,7 @@ declare const MAP_LIST_FIELDS: {
 };
 declare const GEOCODE_PROVIDERS: {
 	readonly local: "Local (offline)";
-	readonly nominatim: "Nominatim (online)";
+	readonly nominatim: "Nominatim";
 	readonly google: "Google (from panorama)";
 };
 declare const TAG_VIEW_MODES: {
@@ -1897,7 +1899,7 @@ declare const mma: {
 		storeDbTableInfo: () => Promise<DbTableInfo[]>;
 		storeAddLocations: (locations: Location$1[]) => Promise<MutationResult>;
 		storeRemoveLocations: (ids: number[]) => Promise<MutationResult>;
-		storeUpdateLocations: (updates: LocationUpdate_Deserialize[], recordUndo: boolean | null) => Promise<MutationResult>;
+		storeUpdateLocations: (updates: Update<LocationPatch_Deserialize>[], recordUndo: boolean | null) => Promise<MutationResult>;
 		storeSetActive: (id: number | null) => Promise<null>;
 		storeGetLocation: (id: number) => Promise<Location$1 | null>;
 		storeGetLocationsByIds: (ids: number[]) => Promise<Location$1[]>;
@@ -1916,7 +1918,7 @@ declare const mma: {
 		storeFindNearby: (lat: number, lng: number, radiusM: number) => Promise<Location$1[]>;
 		storeExtraFieldValues: (field: string) => Promise<string[]>;
 		storeCreateTags: (names: string[]) => Promise<MutationResult>;
-		storeUpdateTag: (tagId: number, name: string | null, color: string | null) => Promise<MutationResult>;
+		storeUpdateTags: (updates: Update<TagPatch_Deserialize>[]) => Promise<MutationResult>;
 		storeDeleteTags: (tagIds: number[]) => Promise<MutationResult>;
 		storeReorderTags: (orderedIds: number[]) => Promise<MutationResult>;
 		storeUndo: () => Promise<MutationResult>;
@@ -2160,7 +2162,7 @@ declare const mma: {
 	}): Promise<void>;
 	duplicateLocation(id: number): Promise<number | null>;
 	removeLocations(ids: ReadonlyIdSet): Promise<void>;
-	updateLocations(updates: LocationUpdate_Deserialize[], opts?: {
+	updateLocations(updates: Update<LocationPatch_Deserialize>[], opts?: {
 		undoable?: boolean;
 	}): Promise<void>;
 	renameField(from: string, to: string, winner?: MergeWinner): Promise<void>;
@@ -2219,10 +2221,7 @@ declare const mma: {
 	setPluginMode(pluginId: string): void;
 	exitPluginMode(): void;
 	createTags(names: string[]): Promise<Tag[]>;
-	updateTags(patches: {
-		id: number;
-		patch: Partial<Tag>;
-	}[]): Promise<void>;
+	updateTags(updates: Update<TagPatch_Deserialize>[]): Promise<void>;
 	deleteTags(tagIds: number[]): Promise<void>;
 	reorderTags(orderedIds: number[]): Promise<void>;
 	addTagToLocations(tagId: number, locationIds: number[]): Promise<void>;

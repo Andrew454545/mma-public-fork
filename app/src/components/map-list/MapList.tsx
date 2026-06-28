@@ -39,7 +39,9 @@ import type { SortMode } from "@/types";
 import type { MapMeta } from "@/bindings.gen";
 import { fmt, relativeTime, shortDateFmt } from "@/lib/util/format";
 import { useLocalStorage } from "@/lib/hooks/useLocalStorage";
-import { useSetting, type MapListField } from "@/store/settings";
+import { useSetting, setSetting, getSettings, type MapListField } from "@/store/settings";
+import { ColorPicker } from "@/components/primitives/ColorPicker";
+import { labelColor, rgbToHex, hexToRgb, textColorFor } from "@/lib/util/color";
 import { toast, progressToast } from "@/lib/util/toast";
 
 // --- What's new (latest release notes) ---
@@ -352,8 +354,12 @@ function RenameForm({ name, onRename }: { name: string; onRename?: (from: string
 
 function MapEditForm({ id, name, labels }: { id: string; name: string; labels: string[] }) {
 	const close = useCloseDialog();
+	const labelColors = useSetting("labelColors");
 	const [currentLabels, setCurrentLabels] = useState(labels);
 	const [labelInput, setLabelInput] = useState("");
+
+	const setLabelColor = (label: string, hex: string) =>
+		setSetting("labelColors", { ...getSettings().labelColors, [label.toLowerCase()]: hex });
 
 	const addLabel = () => {
 		const val = labelInput.trim().toLowerCase();
@@ -389,18 +395,26 @@ function MapEditForm({ id, name, labels }: { id: string; name: string; labels: s
 			<div className="map-edit-labels">
 				<div className="map-edit-labels__label">Labels</div>
 				<div className="map-edit-labels__list">
-					{currentLabels.map((l) => (
-						<span key={l} className="map-label">
-							{l}
-							<button
-								type="button"
-								className="map-label__remove"
-								onClick={() => setCurrentLabels(currentLabels.filter((x) => x !== l))}
-							>
-								<Icon path={mdiClose} size={12} />
-							</button>
-						</span>
-					))}
+					{currentLabels.map((l) => {
+						const [r, g, b] = hexToRgb(labelColor(l, labelColors));
+						return (
+							<span key={l} className="map-label map-label--editable">
+								<ColorPicker
+									color={{ r, g, b }}
+									onChange={(rgb) => setLabelColor(l, rgbToHex(rgb))}
+									ariaLabel={`Color for ${l}`}
+								/>
+								{l}
+								<button
+									type="button"
+									className="map-label__remove"
+									onClick={() => setCurrentLabels(currentLabels.filter((x) => x !== l))}
+								>
+									<Icon path={mdiClose} size={12} />
+								</button>
+							</span>
+						);
+					})}
 					<input
 						type="text"
 						className="map-edit-labels__input"
@@ -454,6 +468,7 @@ const MapEntry = React.memo(function MapEntry({
 	onAction: (action: MapAction) => void;
 	fields: MapListField[];
 }) {
+	const labelColors = useSetting("labelColors");
 	const metaParts: React.ReactNode[] = [];
 	for (const f of fields) {
 		const node = FIELD_RENDERERS[f](meta);
@@ -499,11 +514,18 @@ const MapEntry = React.memo(function MapEntry({
 					))}
 				</span>
 			)}
-			{meta.labels.map((l) => (
-				<span key={l} className="map-label map-label--inline">
-					{l}
-				</span>
-			))}
+			{meta.labels.map((l) => {
+				const hex = labelColor(l, labelColors);
+				return (
+					<span
+						key={l}
+						className="map-label map-label--inline"
+						style={{ backgroundColor: hex, color: textColorFor(hex) }}
+					>
+						{l}
+					</span>
+				);
+			})}
 			<button
 				className="map-list__edit icon-button"
 				aria-label="Edit map"

@@ -1304,8 +1304,16 @@ summary.button {
 	color: #000;
 	border: 1px solid #0002;
 }
-.map-edit-labels .map-label__remove {
-	color: #000;
+.map-label--editable {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.3em;
+}
+.map-label--editable .color-picker__swatch {
+	width: 14px;
+	height: 14px;
+	border-radius: 3px;
+	border-color: #0003;
 }
 .map-edit-labels__input {
 	all: unset;

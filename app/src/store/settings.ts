@@ -109,6 +109,8 @@ const DEFAULTS = {
 	slowModifier: 4,
 	showFps: false,
 	mapListFields: ["locationCount"] as MapListField[],
+	/** Per-label color overrides (hex), keyed by lowercased label name. Shared across all maps. */
+	labelColors: {} as Record<string, string>,
 	geocodeProvider: "local" as GeocodeProvider,
 	nominatimApiKey: "",
 	panToImported: true,

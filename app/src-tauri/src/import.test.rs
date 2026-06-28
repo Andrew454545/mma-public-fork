@@ -362,3 +362,48 @@ fn staged_location_fetch_by_index() {
     *EDITOR_IMPORT_CACHE.lock().unwrap() = None;
     assert!(store_import_staged_location(0).is_err());
 }
+
+// -----------------------------------------------------------------------
+// Cross-map copy producer (add_copied_to_store): the core of the open-target
+// branch of store_copy_locations_to_map. The cross-window event ships exactly
+// this MutationResult for the receiving window's mutate(), so it must carry the
+// copied locations with allocated ids, name-reconciled tags, and bumped counts.
+// (The open-target branch is two-window-only, unreachable from a single webview,
+// so this is its sole regression guard. e2e covers the closed-target branch.)
+// -----------------------------------------------------------------------
+
+#[test]
+fn add_copied_reconciles_tags_and_reports_counts() {
+    // Target already defines "Shared" (id 5). The copies reference the *source*
+    // map's own tag ids (1 = Shared, 2 = Unique), as a real cross-map copy would.
+    let mut store = store_with_tags(&[tag(5, "Shared")]);
+    let copies = vec![loc_with_tags(1, vec![1]), loc_with_tags(2, vec![1, 2])];
+    let source_tags = vec![tag(1, "Shared"), tag(2, "Unique")];
+
+    let r = add_copied_to_store(&mut store, copies, source_tags).unwrap();
+
+    // Both copies landed in the target store.
+    assert_eq!(r.status.location_count, 2);
+    let stored = store.collect_scoped(None);
+    assert_eq!(stored.len(), 2);
+
+    // "Shared" reconciled to the target's existing id 5 (no duplicate tag created).
+    let shared: Vec<_> = store.tags.all.values().filter(|t| t.name == "Shared").collect();
+    assert_eq!(shared.len(), 1);
+    assert_eq!(shared[0].id, 5);
+    // "Unique" created fresh, not reusing the source id.
+    let unique = store.tags.all.values().find(|t| t.name == "Unique").expect("Unique created");
+    assert_ne!(unique.id, 2);
+
+    // Copies carry the reconciled *target* tag ids, not the source ids.
+    let two_tag = stored.iter().find(|l| l.tags.len() == 2).unwrap();
+    assert!(two_tag.tags.contains(&5));
+    assert!(two_tag.tags.contains(&unique.id));
+
+    // Counts in the result match membership: Shared on both copies, Unique on one.
+    assert_eq!(r.status.tag_counts[&5], 2);
+    assert_eq!(r.status.tag_counts[&unique.id], 1);
+
+    // The new tag def is shipped on the result (the receiver needs it to render).
+    assert!(r.tags.as_ref().and_then(|m| m.get(&unique.id)).is_some());
+}

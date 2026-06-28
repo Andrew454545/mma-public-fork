@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useRef, useCallback, memo } from "react";
+import { useState, useMemo, useEffect, useRef, useCallback, memo, useOptimistic, startTransition } from "react";
 import { createPortal } from "react-dom";
 import { cmd } from "@/lib/commands";
 import { HslColorPicker } from "react-colorful";
@@ -30,7 +30,7 @@ import { useMapSetting } from "@/store/useMapSetting";
 import { HotkeyInput } from "@/components/primitives/HotkeyInput";
 import { getConflicts } from "@/lib/util/hotkeys";
 import { getTagBindingKey, withTagKeyBinding } from "@/lib/map/mapKeyBindings";
-import { TagTreeView } from "./TagTree";
+import { TagTreeView, type TagTreeHandle } from "./TagTree";
 import { cascadeRename } from "./tagTreeRange";
 
 export function TagManager() {
@@ -46,6 +46,7 @@ export function TagManager() {
 	// rename; flat-mode edits stay on editingTagId (no folder context).
 	const [editingTreeTag, setEditingTreeTag] = useState<{ tag: Tag; descendantCount: number } | null>(null);
 	const [editingVirtualPath, setEditingVirtualPath] = useState<string | null>(null);
+	const treeRef = useRef<TagTreeHandle>(null);
 	const [renamingTag, setRenamingTag] = useState<{ id: number; name: string } | null>(null);
 	const [collapsed, setCollapsed] = useState(false);
 	const [dragTagId, setDragTagId] = useState<number | null>(null);
@@ -58,7 +59,54 @@ export function TagManager() {
 	// New array identity only when the map object changes (mutations), NOT on selection
 	// toggles -- keeps sortedTags stable so memoized rows can skip re-rendering.
 	// eslint-disable-next-line react-hooks/exhaustive-deps
-	const tags = useMemo(() => getVisibleTags(), [map]);
+	const storeTags = useMemo(() => getVisibleTags(), [map]);
+	// Optimistic overlay: `commitTags` applies pending name/color patches over the store tags
+	// for the lifetime of the mutation; React drops them once the transition settles (by which
+	// point the store reflects the change), so a rename/recolor renders in the same frame as the
+	// virtualTags/expansion updates
+	const [tags, addOptimisticTags] = useOptimistic(
+		storeTags,
+		(cur: Tag[], updates: { id: number; patch: { name?: string | null; color?: string | null } }[]) =>
+			cur.map((t) => {
+				const u = updates.find((x) => x.id === t.id);
+				if (!u) return t;
+				return {
+					...t,
+					...(u.patch.name != null ? { name: u.patch.name } : {}),
+					...(u.patch.color != null ? { color: u.patch.color } : {}),
+				};
+			}),
+	);
+	const commitTags = useCallback(
+		(updates: { id: number; patch: { name?: string | null; color?: string | null } }[]) => {
+			startTransition(async () => {
+				addOptimisticTags(updates);
+				await updateTags(updates);
+			});
+		},
+		[addOptimisticTags],
+	);
+
+	// Stamp `color` onto every tag AND folder node at or under `root` (overrides existing
+	// colors, so it works even when descendants already have their own).
+	const applyColorToSubtree = (root: string, color: string) => {
+		const tagUpdates: { id: number; patch: { color: string } }[] = [];
+		const folders = new Set<string>();
+		for (const t of tags) {
+			if (t.name !== root && !t.name.startsWith(`${root}/`)) continue;
+			tagUpdates.push({ id: t.id, patch: { color } });
+			const parts = t.name.split("/");
+			let p = "";
+			for (let i = 0; i < parts.length - 1; i++) {
+				p = p ? `${p}/${parts[i]}` : parts[i];
+				if (p === root || p.startsWith(`${root}/`)) folders.add(p);
+			}
+		}
+		commitTags(tagUpdates);
+		const nextVT = { ...(virtualTags ?? {}) };
+		for (const f of folders) nextVT[f] = { color };
+		setVirtualTags(nextVT);
+	};
 	const lastShiftClickRef = useRef<number | null>(null);
 
 	const sortedTags = useMemo(() => {
@@ -256,6 +304,7 @@ export function TagManager() {
 			>
 				{tagViewMode === "tree" ? (
 					<TagTreeView
+						ref={treeRef}
 						tags={tags}
 						selectedTagIds={selectedTagIds}
 						tagCounts={tagCounts}
@@ -318,11 +367,14 @@ export function TagManager() {
 					document.body,
 				)}
 
-			{editingTag && <EditTagDialog tag={editingTag} onClose={() => setEditingTagId(null)} />}
+			{editingTag && (
+				<EditTagDialog tag={editingTag} commit={commitTags} onClose={() => setEditingTagId(null)} />
+			)}
 
 			{editingTreeTag && (
 				<EditTagDialog
 					tag={editingTreeTag.tag}
+					commit={commitTags}
 					cascade={
 						editingTreeTag.descendantCount > 0
 							? {
@@ -330,6 +382,8 @@ export function TagManager() {
 									tags,
 									virtualTags: virtualTags ?? {},
 									setVirtualTags,
+									onRenamed: (o, n) => treeRef.current?.remapExpanded(o, n),
+										onApplyColor: (color) => applyColorToSubtree(editingTreeTag.tag.name, color),
 								}
 							: undefined
 					}
@@ -341,7 +395,12 @@ export function TagManager() {
 				<VirtualTagDialog
 					path={editingVirtualPath}
 					color={(virtualTags ?? {})[editingVirtualPath]?.color ?? null}
+					descendantCount={tags.filter((t) => t.name.startsWith(`${editingVirtualPath}/`)).length}
 					onClose={() => setEditingVirtualPath(null)}
+					onApplyColor={(color) => {
+						applyColorToSubtree(editingVirtualPath, color);
+						setEditingVirtualPath(null);
+					}}
 					onSave={(color, newSegment) => {
 						const vt = virtualTags ?? {};
 						const i = editingVirtualPath.lastIndexOf("/");
@@ -355,9 +414,10 @@ export function TagManager() {
 								vt,
 							);
 							if (tagRenames.length)
-								updateTags(tagRenames.map((r) => ({ id: r.id, patch: { name: r.name } })));
+								commitTags(tagRenames.map((r) => ({ id: r.id, patch: { name: r.name } })));
 							nextVT[newPath] = { color };
 							setVirtualTags(nextVT);
+							treeRef.current?.remapExpanded(editingVirtualPath, newPath);
 						} else {
 							setVirtualTags({ ...vt, [editingVirtualPath]: { color } });
 						}
@@ -373,7 +433,11 @@ export function TagManager() {
 			)}
 
 			{renamingTag && (
-				<RenameInSelectionDialog tag={renamingTag} onClose={() => setRenamingTag(null)} />
+				<RenameInSelectionDialog
+					tag={renamingTag}
+					commit={commitTags}
+					onClose={() => setRenamingTag(null)}
+				/>
 			)}
 		</>
 	);
@@ -506,15 +570,17 @@ export function TagContextMenuContent({
 function RenameInSelectionDialog({
 	tag,
 	onClose,
+	commit,
 }: {
 	tag: { id: number; name: string };
 	onClose: () => void;
+	commit: (updates: { id: number; patch: { name?: string | null; color?: string | null } }[]) => void;
 }) {
 	const [name, setName] = useState(tag.name);
 
 	const handleSubmit = () => {
 		const trimmed = name.trim();
-		if (trimmed && trimmed !== tag.name) updateTags([{ id: tag.id, patch: { name: trimmed } }]);
+		if (trimmed && trimmed !== tag.name) commit([{ id: tag.id, patch: { name: trimmed } }]);
 		onClose();
 	};
 
@@ -552,16 +618,21 @@ function RenameInSelectionDialog({
 function EditTagDialog({
 	tag,
 	onClose,
+	commit,
 	cascade,
 }: {
 	tag: { id: number; name: string; color: string };
 	onClose: () => void;
+	/** Routes tag updates through the optimistic overlay. */
+	commit: (updates: { id: number; patch: { name?: string | null; color?: string | null } }[]) => void;
 	/** Present for a tree folder node with descendants: lets the rename cascade down. */
 	cascade?: {
 		descendantCount: number;
 		tags: Tag[];
 		virtualTags: Record<string, VirtualTag>;
 		setVirtualTags: (v: Record<string, VirtualTag>) => void;
+		onRenamed: (oldPrefix: string, newPrefix: string) => void;
+		onApplyColor: (color: string) => void;
 	};
 }) {
 	const [name, setName] = useState(tag.name);
@@ -595,15 +666,16 @@ function EditTagDialog({
 				cascade.tags,
 				cascade.virtualTags,
 			);
-			updateTags(
+			commit(
 				tagRenames.map((r) => ({
 					id: r.id,
 					patch: r.id === tag.id ? { name: r.name, color: hexValue } : { name: r.name },
 				})),
 			);
 			cascade.setVirtualTags(nextVT);
+			cascade.onRenamed(tag.name, newName);
 		} else {
-			updateTags([{ id: tag.id, patch: { name: newName, color: hexValue } }]);
+			commit([{ id: tag.id, patch: { name: newName, color: hexValue } }]);
 		}
 		const cur = bindings ?? [];
 		if ((getTagBindingKey(cur, tag.id) ?? "") !== hotkey) {
@@ -666,6 +738,18 @@ function EditTagDialog({
 							color={hsl}
 							onChange={setHsl}
 						/>
+						{cascade && cascade.descendantCount > 0 && (
+							<button
+								type="button"
+								className="button edit-tag-modal__apply-color"
+								onClick={() => {
+									cascade.onApplyColor(hexValue);
+									onClose();
+								}}
+							>
+								Apply to {cascade.descendantCount} tag{cascade.descendantCount === 1 ? "" : "s"} inside
+							</button>
+						)}
 					</div>
 					<div className="edit-tag-modal__hotkey">
 						<span>Hotkey:</span>
@@ -711,14 +795,18 @@ function EditTagDialog({
 function VirtualTagDialog({
 	path,
 	color,
+	descendantCount,
 	onClose,
 	onSave,
+	onApplyColor,
 	onReset,
 }: {
 	path: string;
 	color: string | null;
+	descendantCount: number;
 	onClose: () => void;
 	onSave: (color: string, newSegment: string) => void;
+	onApplyColor: (color: string) => void;
 	onReset: () => void;
 }) {
 	const [hsl, setHsl] = useState(() => hexToHsl(color ?? "#888888"));
@@ -763,6 +851,15 @@ function VirtualTagDialog({
 							color={hsl}
 							onChange={setHsl}
 						/>
+						{descendantCount > 0 && (
+							<button
+								type="button"
+								className="button edit-tag-modal__apply-color"
+								onClick={() => onApplyColor(hexValue)}
+							>
+								Apply to {descendantCount} tag{descendantCount === 1 ? "" : "s"} inside
+							</button>
+						)}
 					</div>
 					<div className="edit-tag-modal__actions">
 						<button

@@ -5,7 +5,13 @@ import type {
 	GenerationCallbacks,
 } from "./types";
 import { randomPointInBounds, getBoundingBox, pointInGeoJsonGeometry } from "./geo";
-import { passesInitialFilters, passesDateFilters, isPanoGood, computeHeading } from "./filters";
+import {
+	passesInitialFilters,
+	passesDateFilters,
+	isPanoGood,
+	computeHeading,
+	resolveRoadName,
+} from "./filters";
 import { distMeters } from "@/lib/geo/geo";
 import { searchCoverage } from "../searchCoverage";
 import type { LatLng } from "@/types";
@@ -183,7 +189,11 @@ export class GenerationEngine {
 	private async generateRegion(region: GeneratorRegion): Promise<void> {
 		const [west, south, east, north] = getBoundingBox(region.feature);
 
-		while (region.found.length < region.target && this.running && !this.cancelledRegions.has(region.id)) {
+		while (
+			region.found.length < region.target &&
+			this.running &&
+			!this.cancelledRegions.has(region.id)
+		) {
 			await this.waitIfPaused();
 			if (!this.running || this.cancelledRegions.has(region.id)) return;
 
@@ -205,7 +215,11 @@ export class GenerationEngine {
 
 			const batchSize = this.settings.findRegions ? 1 : 75;
 			for (const batch of chunk(randomCoords, batchSize)) {
-				if (!this.running || this.cancelledRegions.has(region.id) || region.found.length >= region.target)
+				if (
+					!this.running ||
+					this.cancelledRegions.has(region.id) ||
+					region.found.length >= region.target
+				)
 					break;
 				await this.waitIfPaused();
 				await Promise.allSettled(batch.map((coord) => this.getLoc(coord, region)));
@@ -238,62 +252,73 @@ export class GenerationEngine {
 					}
 					const pano = data as google.maps.StreetViewResolvedPanoramaData;
 
-					if (!passesInitialFilters(pano, s)) {
-						resolve();
-						return;
-					}
+					void (async () => {
+						if (s.rejectRoadName && (await resolveRoadName(pano.location))) {
+							resolve();
+							return;
+						}
 
-					if (s.findRegions) {
-						for (const found of region.found) {
-							if (distMeters(found, coord) < s.regionRadius * 1000) {
-								resolve();
-								return;
+						if (!passesInitialFilters(pano, s)) {
+							resolve();
+							return;
+						}
+
+						if (s.findRegions) {
+							for (const found of region.found) {
+								if (distMeters(found, coord) < s.regionRadius * 1000) {
+									resolve();
+									return;
+								}
 							}
 						}
-					}
 
-					const dateResult = passesDateFilters(pano, s);
-					if (dateResult === false) {
-						resolve();
-						return;
-					}
-
-					if (s.randomInTimeline && pano.time?.length) {
-						const idx = Math.floor(Math.random() * pano.time.length);
-						const entry = pano.time[idx];
-						const d = Object.values(entry).find((v): v is Date => v instanceof Date);
-						if (d) {
-							const ym = d.getFullYear() + "-" + (d.getMonth() > 8 ? "" : "0") + (d.getMonth() + 1);
-							if (
-								Date.parse(ym) < Date.parse(s.fromDate) ||
-								Date.parse(ym) > Date.parse(s.toDate)
-							) {
-								resolve();
-								return;
-							}
+						const dateResult = passesDateFilters(pano, s);
+						if (dateResult === false) {
+							resolve();
+							return;
 						}
-						this.getPanoDeep(entry.pano, region, 0);
-						resolve();
-						return;
-					}
 
-					if (dateResult === "checkAll" && pano.time) {
-						const fromDate = Date.parse(s.fromDate);
-						const toDate = Date.parse(s.toDate);
-						for (const entry of pano.time) {
-							if (s.rejectUnofficial && entry.pano.length !== 22) continue;
+						if (s.randomInTimeline && pano.time?.length) {
+							const idx = Math.floor(Math.random() * pano.time.length);
+							const entry = pano.time[idx];
 							const d = Object.values(entry).find((v): v is Date => v instanceof Date);
-							if (!d) continue;
-							const ym = d.getFullYear() + "-" + (d.getMonth() > 8 ? "" : "0") + (d.getMonth() + 1);
-							if (Date.parse(ym) >= fromDate && Date.parse(ym) <= toDate) {
-								this.getPanoDeep(entry.pano, region, 0);
+							if (d) {
+								const ym =
+									d.getFullYear() + "-" + (d.getMonth() > 8 ? "" : "0") + (d.getMonth() + 1);
+								if (
+									Date.parse(ym) < Date.parse(s.fromDate) ||
+									Date.parse(ym) > Date.parse(s.toDate)
+								) {
+									resolve();
+									return;
+								}
 							}
+							this.getPanoDeep(entry.pano, region, 0);
+							resolve();
+							return;
 						}
-					} else {
-						this.getPanoDeep(pano.location.pano, region, 0);
-					}
 
-					resolve();
+						if (dateResult === "checkAll" && pano.time) {
+							const fromDate = Date.parse(s.fromDate);
+							const toDate = Date.parse(s.toDate);
+							for (const entry of pano.time) {
+								if (s.rejectUnofficial && entry.pano.length !== 22) continue;
+								const d = Object.values(entry).find((v): v is Date => v instanceof Date);
+								if (!d) continue;
+								const ym =
+									d.getFullYear() + "-" + (d.getMonth() > 8 ? "" : "0") + (d.getMonth() + 1);
+								if (Date.parse(ym) >= fromDate && Date.parse(ym) <= toDate) {
+									this.getPanoDeep(entry.pano, region, 0);
+								}
+							}
+						} else {
+							this.getPanoDeep(pano.location.pano, region, 0);
+						}
+
+						resolve();
+					})().catch(() => {
+						resolve();
+					});
 				},
 			);
 		});
@@ -319,39 +344,45 @@ export class GenerationEngine {
 				if (status !== "OK" || !data) return;
 				const pano = data as google.maps.StreetViewResolvedPanoramaData;
 
-				const inRegion = pointInGeoJsonGeometry(
-					pano.location.latLng.lng(),
-					pano.location.latLng.lat(),
-					region.feature.geometry,
-				);
-				const good = isPanoGood(pano, s) && inRegion;
+				void (async () => {
+					if (s.rejectRoadName) await resolveRoadName(pano.location);
 
-				if (s.checkAllDates && !s.selectMonths && pano.time) {
-					const fromDate = Date.parse(s.fromDate);
-					const toDate = Date.parse(s.toDate);
-					for (const entry of pano.time) {
-						if (s.rejectUnofficial && entry.pano.length !== 22) continue;
-						const d = Object.values(entry).find((v): v is Date => v instanceof Date);
-						if (!d) continue;
-						const ym = d.getFullYear() + "-" + (d.getMonth() > 8 ? "" : "0") + (d.getMonth() + 1);
-						if (Date.parse(ym) >= fromDate && Date.parse(ym) <= toDate) {
+					const inRegion = pointInGeoJsonGeometry(
+						pano.location.latLng.lng(),
+						pano.location.latLng.lat(),
+						region.feature.geometry,
+					);
+					const good = isPanoGood(pano, s) && inRegion;
+
+					if (s.checkAllDates && !s.selectMonths && pano.time) {
+						const fromDate = Date.parse(s.fromDate);
+						const toDate = Date.parse(s.toDate);
+						for (const entry of pano.time) {
+							if (s.rejectUnofficial && entry.pano.length !== 22) continue;
+							const d = Object.values(entry).find((v): v is Date => v instanceof Date);
+							if (!d) continue;
+							const ym = d.getFullYear() + "-" + (d.getMonth() > 8 ? "" : "0") + (d.getMonth() + 1);
+							if (Date.parse(ym) >= fromDate && Date.parse(ym) <= toDate) {
+								this.getPanoDeep(entry.pano, region, good ? 1 : depth + 1);
+							}
+						}
+					}
+
+					if (s.checkLinks && pano.links) {
+						for (const link of pano.links) {
+							if (link.pano) this.getPanoDeep(link.pano, region, good ? 1 : depth + 1);
+						}
+					}
+					if (s.checkLinks && pano.time) {
+						for (const entry of pano.time) {
 							this.getPanoDeep(entry.pano, region, good ? 1 : depth + 1);
 						}
 					}
-				}
 
-				if (s.checkLinks && pano.links) {
-					for (const link of pano.links) {
-						if (link.pano) this.getPanoDeep(link.pano, region, good ? 1 : depth + 1);
-					}
-				}
-				if (s.checkLinks && pano.time) {
-					for (const entry of pano.time) {
-						this.getPanoDeep(entry.pano, region, good ? 1 : depth + 1);
-					}
-				}
-
-				if (good) this.finalizeLoc(pano, region);
+					if (good) this.finalizeLoc(pano, region);
+				})().catch(() => {
+					// Drop this candidate on metadata errors; the generator will keep probing.
+				});
 			},
 		);
 	}

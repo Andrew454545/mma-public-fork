@@ -30,9 +30,36 @@ static TEMP_DIR: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::
 /// Resolve and cache the data/temp directories. Called once from `setup()`,
 /// before anything touches disk.
 pub(crate) fn init_paths(app: &tauri::AppHandle) -> AppResult<()> {
-    let _ = APP_DATA_DIR.set(app.path().app_data_dir().map_err(AppError::from)?);
+    let data_dir = match std::env::var("MMA_DATA_DIR") {
+        Ok(path) if !path.trim().is_empty() => std::path::PathBuf::from(expand_tilde(&path)),
+        _ => app.path().app_data_dir().map_err(AppError::from)?,
+    };
+    let _ = APP_DATA_DIR.set(data_dir);
     let _ = TEMP_DIR.set(app.path().temp_dir().map_err(AppError::from)?);
     Ok(())
+}
+
+/// Resolve paths for command-line import jobs that run without a Tauri app.
+pub(crate) fn init_paths_headless() -> AppResult<()> {
+    let data_dir = std::env::var("MMA_DATA_DIR")
+        .ok()
+        .filter(|path| !path.trim().is_empty())
+        .ok_or_else(|| AppError::from("MMA_DATA_DIR must be set for headless commands".to_string()))?;
+    let _ = APP_DATA_DIR.set(std::path::PathBuf::from(expand_tilde(&data_dir)));
+    let _ = TEMP_DIR.set(std::env::temp_dir());
+    Ok(())
+}
+
+fn expand_tilde(path: &str) -> String {
+    if path == "~" {
+        std::env::var("HOME").unwrap_or_else(|_| path.to_string())
+    } else if let Some(rest) = path.strip_prefix("~/") {
+        std::env::var("HOME")
+            .map(|home| format!("{home}/{rest}"))
+            .unwrap_or_else(|_| path.to_string())
+    } else {
+        path.to_string()
+    }
 }
 
 /// The app data directory. Errors if `init_paths` has not run.

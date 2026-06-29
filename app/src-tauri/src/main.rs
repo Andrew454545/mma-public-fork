@@ -16,6 +16,18 @@ fn main() {
     app_lib::serve::run_server();
     return;
   }
+  // `--import-zip <path>` imports map JSON/ZIP data into the profile selected
+  // by MMA_DATA_DIR, then exits.
+  {
+    let args: Vec<String> = std::env::args().collect();
+    if let Some(pos) = args.iter().position(|a| a == "--import-zip") {
+      let path = args
+        .get(pos + 1)
+        .expect("--import-zip requires a path argument");
+      app_lib::import_zip_cli(path).expect("import failed");
+      return;
+    }
+  }
   // `--export-bindings` regenerates ../src/bindings.gen.ts and exits, without
   // launching the app. Breaks the deadlock when broken bindings block the frontend build.
   #[cfg(debug_assertions)]

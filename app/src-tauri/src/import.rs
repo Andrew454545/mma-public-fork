@@ -694,6 +694,28 @@ fn write_map_to_db(conn: &Connection, mut map: ParsedMap) -> AppResult<ImportedM
     })
 }
 
+/// Headless import entry point used by the Desktop account-pull script.
+pub fn import_zip_headless(path: &str) -> AppResult<Vec<ImportedMapInfo>> {
+    let entries = if path.ends_with(".zip") {
+        read_zip_entries(path)?
+    } else {
+        read_single_json(path)?
+    };
+    let maps: Vec<ParsedMap> = entries
+        .par_iter()
+        .map(|(_, text)| parse_single_json(text))
+        .collect();
+
+    let conn = storage::open_db()?;
+    conn.execute_batch("PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL;")?;
+
+    let mut results = Vec::with_capacity(maps.len());
+    for map in maps {
+        results.push(write_map_to_db(&conn, map)?);
+    }
+    Ok(results)
+}
+
 // ---------------------------------------------------------------------------
 // Tauri commands
 // ---------------------------------------------------------------------------

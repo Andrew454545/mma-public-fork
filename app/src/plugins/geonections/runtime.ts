@@ -56,6 +56,7 @@ let autoplayTimer: ReturnType<typeof setInterval> | null = null;
 let autoplayBusy = false;
 let status: GeonectionsStatus = { message: "Ready", busy: false };
 const listeners = new Set<() => void>();
+let modePill: HTMLButtonElement | null = null;
 
 function buildSnapshot(): GeonectionsSnapshot {
 	return {
@@ -74,6 +75,7 @@ function delay(ms: number) {
 
 function notify() {
 	snapshot = buildSnapshot();
+	updateModePill();
 	for (const listener of listeners) listener();
 }
 
@@ -109,6 +111,33 @@ export function setAutoplayEnabled(enabled: boolean) {
 	autoplayEnabled = enabled && modeEnabled;
 	restartAutoplay();
 	notify();
+}
+
+function updateModePill() {
+	if (!modePill) return;
+	let text = modeEnabled ? "Geonections Mode: ON" : "Geonections Mode: Off";
+	if (modeEnabled && autoplayEnabled) {
+		const seconds = Math.round(autoplayDelayMs / 1000);
+		text += seconds >= 60 ? ` · ${seconds / 60}m` : ` · ${seconds}s`;
+	}
+	modePill.textContent = text;
+	modePill.classList.toggle("geonections-pill--on", modeEnabled);
+	modePill.setAttribute("aria-pressed", String(modeEnabled));
+}
+
+function mountModePill() {
+	document.querySelectorAll(".geonections-pill").forEach((el) => el.remove());
+	modePill = document.createElement("button");
+	modePill.type = "button";
+	modePill.className = "geonections-pill";
+	modePill.addEventListener("click", () => setGeonectionsMode(!modeEnabled));
+	document.body.appendChild(modePill);
+	updateModePill();
+}
+
+function unmountModePill() {
+	modePill?.remove();
+	modePill = null;
 }
 
 function restartAutoplay() {
@@ -347,7 +376,10 @@ function extractCountryCodeFromRpcJson(data: unknown): string | null {
 	return typeof code === "string" ? code : null;
 }
 
-async function fetchGoogleRpc(mode: "GetMetadata" | "SingleImageSearch", payload: string): Promise<unknown | null> {
+async function fetchGoogleRpc(
+	mode: "GetMetadata" | "SingleImageSearch",
+	payload: string,
+): Promise<unknown | null> {
 	try {
 		const response = await fetch(
 			`https://maps.googleapis.com/$rpc/google.internal.maps.mapsjs.v1.MapsJsInternalService/${mode}`,
@@ -496,9 +528,7 @@ export async function tagRoadNamesForScope(): Promise<RoadTagSummary> {
 
 export async function tagMissingPanoIds(): Promise<number> {
 	const locs = await getScopedLocations();
-	const ids = locs
-		.filter((loc) => !loc.panoId?.trim())
-		.map((loc) => loc.id);
+	const ids = locs.filter((loc) => !loc.panoId?.trim()).map((loc) => loc.id);
 	const tagged = await addTagsToLocations(ids, ["Missing pano ID"]);
 	setStatus(tagged ? `Tagged ${tagged} missing pano ID` : "All scoped locations have pano IDs");
 	toast(tagged ? `Tagged ${tagged} missing pano ID` : "All scoped locations have pano IDs");
@@ -509,8 +539,12 @@ export async function tagMissingDifficulty(): Promise<number> {
 	const locs = await getScopedLocations();
 	const ids = locs.filter((loc) => !hasDifficultyTag(loc)).map((loc) => loc.id);
 	const tagged = await addTagsToLocations(ids, ["Missing difficulty"]);
-	setStatus(tagged ? `Tagged ${tagged} missing difficulty` : "All scoped locations have difficulty tags");
-	toast(tagged ? `Tagged ${tagged} missing difficulty` : "All scoped locations have difficulty tags");
+	setStatus(
+		tagged ? `Tagged ${tagged} missing difficulty` : "All scoped locations have difficulty tags",
+	);
+	toast(
+		tagged ? `Tagged ${tagged} missing difficulty` : "All scoped locations have difficulty tags",
+	);
 	return tagged;
 }
 
@@ -587,12 +621,19 @@ function updateDelayFromKey(event: KeyboardEvent): boolean {
 }
 
 export function activateGeonectionsRuntime(): () => void {
+	mountModePill();
 	const onKeyDown = (event: KeyboardEvent) => {
 		if (!modeEnabled || isEditableTarget(event.target)) return;
 		// Command shortcuts are registered with the app, so they appear in both the
 		// command palette and shortcut settings. Delay keys are intentionally dynamic:
 		// while autoplay is running, 1-9 and the shifted variants choose its interval.
-		if (!event.metaKey && !event.ctrlKey && !event.altKey && autoplayEnabled && updateDelayFromKey(event)) {
+		if (
+			!event.metaKey &&
+			!event.ctrlKey &&
+			!event.altKey &&
+			autoplayEnabled &&
+			updateDelayFromKey(event)
+		) {
 			toast(`Autoplay delay ${Math.round(autoplayDelayMs / 1000)}s`);
 			event.preventDefault();
 			event.stopPropagation();
@@ -602,6 +643,7 @@ export function activateGeonectionsRuntime(): () => void {
 	return () => {
 		window.removeEventListener("keydown", onKeyDown, true);
 		setAutoplayEnabled(false);
+		unmountModePill();
 	};
 }
 

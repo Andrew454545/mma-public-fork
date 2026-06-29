@@ -107,6 +107,17 @@ fn open_data_folder() -> AppResult<()> {
     Ok(())
 }
 
+pub fn import_zip_cli(path: &str) -> AppResult<Vec<import::ImportedMapInfo>> {
+    storage::init_paths_headless()?;
+    storage::run_migrations()?;
+    let results = import::import_zip_headless(path)?;
+    println!("imported {} map(s) from {}", results.len(), path);
+    for map in &results {
+        println!("{}: {} locations", map.name, map.location_count);
+    }
+    Ok(results)
+}
+
 /// Metadata for a user-installed plugin, read from `plugins/{id}/manifest.json`.
 #[derive(serde::Serialize, specta::Type)]
 struct PluginManifest {

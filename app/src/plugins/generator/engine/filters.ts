@@ -23,8 +23,66 @@ function sectionMatch(text: string, target: string): boolean {
 	return pattern.test(normalized);
 }
 
-function hasRoadName(loc: google.maps.StreetViewLocation): boolean {
+const GOOGLE_RPC_BASE =
+	"https://maps.googleapis.com/$rpc/google.internal.maps.mapsjs.v1.MapsJsInternalService";
+const roadNameCache = new Map<string, Promise<string | null>>();
+
+export function hasRoadName(loc: google.maps.StreetViewLocation): boolean {
 	return !!loc.road?.trim();
+}
+
+function googleMapsGetMetadataPayload(pano: string) {
+	const panoType = pano.startsWith("CIHM") || pano.length !== 22 ? 10 : 2;
+	return JSON.stringify([
+		["apiv3", null, null, null, "US", null, null, null, null, null, [[0]]],
+		["en", "US"],
+		[[[panoType, pano]]],
+		[[1, 2, 3, 4, 8, 6]],
+	]);
+}
+
+function extractRoadFromGetMetadataJson(data: unknown): string | null {
+	const root = Array.isArray(data) ? data[1]?.[0] : null;
+	const meta = root?.[5]?.[0];
+	const road = meta?.[12]?.[0]?.[0]?.[0]?.[2]?.[0];
+	return typeof road === "string" && road.trim() ? road : null;
+}
+
+async function fetchRoadNameFromGetMetadata(panoId: string): Promise<string | null> {
+	try {
+		const response = await fetch(`${GOOGLE_RPC_BASE}/GetMetadata`, {
+			method: "POST",
+			headers: {
+				"content-type": "application/json+protobuf",
+				"x-user-agent": "grpc-web-javascript/0.1",
+			},
+			body: googleMapsGetMetadataPayload(panoId),
+			mode: "cors",
+			credentials: "omit",
+		});
+		if (!response.ok) return null;
+		return extractRoadFromGetMetadataJson(await response.json());
+	} catch {
+		return null;
+	}
+}
+
+/** Resolve Google's hidden road-name field for official panos. This mirrors the
+ * VirtualStreets generator: reject if `pano.location.road` is present, with the
+ * GetMetadata road path used to populate that field when StreetViewService omits it. */
+export async function resolveRoadName(loc: google.maps.StreetViewLocation): Promise<boolean> {
+	if (hasRoadName(loc)) return true;
+	const panoId = loc.pano?.trim();
+	if (!panoId || panoId.length !== 22 || panoId.startsWith("CIHM")) return false;
+	let lookup = roadNameCache.get(panoId);
+	if (!lookup) {
+		lookup = fetchRoadNameFromGetMetadata(panoId);
+		roadNameCache.set(panoId, lookup);
+	}
+	const road = await lookup;
+	if (!road) return false;
+	loc.road = road;
+	return true;
 }
 
 /** Match a found pano's description against the user's search terms. Mirrors the
@@ -174,10 +232,7 @@ export function isPanoGood(
 
 	if (s.rejectUnofficial && !s.rejectOfficial) {
 		if (pano.location.pano.length !== 22) return false;
-		if (
-			s.filterByLinks &&
-			(pano.links.length < s.minLinks || pano.links.length > s.maxLinks)
-		)
+		if (s.filterByLinks && (pano.links.length < s.minLinks || pano.links.length > s.maxLinks))
 			return false;
 		if (
 			s.rejectNoDescription &&

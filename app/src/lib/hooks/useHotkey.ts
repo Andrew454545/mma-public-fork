@@ -207,7 +207,9 @@ export function useCommandHotkeys() {
 				}
 			}
 		}
-		document.addEventListener("keydown", handler, true);
-		return () => document.removeEventListener("keydown", handler, true);
+		// Command shortcuts are global commands. Register at window capture so they
+		// can intentionally take precedence over lower-level pano/map navigation.
+		window.addEventListener("keydown", handler, true);
+		return () => window.removeEventListener("keydown", handler, true);
 	}, []);
 }

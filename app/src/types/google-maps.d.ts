@@ -30,6 +30,11 @@ declare namespace google.maps {
 		extra?: SvExtra;
 	}
 
+	interface StreetViewLocation {
+		/** Undocumented road label surfaced on some Google-owned panoramas. */
+		road?: string | null;
+	}
+
 	interface StreetViewTileData {
 		originHeading?: number;
 		originPitch?: number;

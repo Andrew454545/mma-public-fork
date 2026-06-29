@@ -17,7 +17,8 @@ export type HotkeyGroup =
 	| "Map Navigation"
 	| "Location Editor"
 	| "Quicktag"
-	| "Review";
+	| "Review"
+	| "Geonections";
 
 export interface HotkeyDef {
 	action: HotkeyAction;
@@ -286,7 +287,7 @@ export function getAllBindings(): HotkeyDef[] {
 	const commandDefs: HotkeyDef[] = getCommands().map((cmd) => ({
 		action: cmd.id as HotkeyAction,
 		label: cmd.label,
-		group: "Commands",
+		group: cmd.group === "Geonections" ? "Geonections" : "Commands",
 		defaultBinding: cmd.defaultBinding ?? "",
 	}));
 	return [...commandDefs, ...RAW_HOTKEY_DEFS];

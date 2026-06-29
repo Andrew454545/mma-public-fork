@@ -238,6 +238,7 @@ const GROUPS: HotkeyGroup[] = [
 	"Location Editor",
 	"Quicktag",
 	"Review",
+	"Geonections",
 ];
 
 function KeyboardShortcutsSection() {

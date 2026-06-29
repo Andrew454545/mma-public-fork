@@ -1,4 +1,4 @@
-export type CommandGroup = "Map" | "Selections" | "Bulk Operations" | "Tags";
+export type CommandGroup = "Map" | "Selections" | "Bulk Operations" | "Tags" | "Geonections";
 
 export interface CommandDef {
 	label: string;

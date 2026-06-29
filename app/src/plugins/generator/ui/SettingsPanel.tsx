@@ -200,6 +200,11 @@ export function SettingsPanel({
 							checked={settings.pinpointSearch}
 							onChange={(v) => set("pinpointSearch", v)}
 						/>
+						<Check
+							label="Reject locations with Road name"
+							checked={settings.rejectRoadName}
+							onChange={(v) => set("rejectRoadName", v)}
+						/>
 						{settings.pinpointSearch && (
 							<NumberInput
 								label="Pinpointable angle"

@@ -94,7 +94,7 @@ function formatBinding(binding: string): string {
 		.replace("ArrowDown", "↓");
 }
 
-const COMMAND_GROUPS: CommandGroup[] = ["Map", "Bulk Operations", "Selections", "Tags"];
+const COMMAND_GROUPS: CommandGroup[] = ["Map", "Bulk Operations", "Selections", "Tags", "Geonections"];
 
 function MainCommands() {
 	const ctx = useContext(Ctx);

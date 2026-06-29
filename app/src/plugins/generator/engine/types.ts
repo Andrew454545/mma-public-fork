@@ -6,6 +6,7 @@ export interface GeneratorSettings {
 	rejectOfficial: boolean;
 	rejectNoDescription: boolean;
 	rejectDescription: boolean;
+	rejectRoadName: boolean;
 	rejectDateless: boolean;
 	adjustHeading: boolean;
 	headingReference: "link" | "forward" | "backward";
@@ -59,6 +60,7 @@ export const DEFAULT_SETTINGS: GeneratorSettings = {
 	rejectOfficial: false,
 	rejectNoDescription: true,
 	rejectDescription: false,
+	rejectRoadName: false,
 	rejectDateless: true,
 	adjustHeading: true,
 	headingReference: "link",

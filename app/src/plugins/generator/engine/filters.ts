@@ -23,6 +23,10 @@ function sectionMatch(text: string, target: string): boolean {
 	return pattern.test(normalized);
 }
 
+function hasRoadName(loc: google.maps.StreetViewLocation): boolean {
+	return !!loc.road?.trim();
+}
+
 /** Match a found pano's description against the user's search terms. Mirrors the
  *  reference generator's "search in panorama description" filter. */
 export function passesDescriptionSearch(
@@ -91,6 +95,8 @@ export function passesInitialFilters(
 	res: google.maps.StreetViewResolvedPanoramaData,
 	s: GeneratorSettings,
 ): boolean {
+	if (s.rejectRoadName && hasRoadName(res.location)) return false;
+
 	if (s.rejectUnofficial && !s.rejectOfficial) {
 		if (
 			s.rejectNoDescription &&
@@ -164,6 +170,7 @@ export function isPanoGood(
 	s: GeneratorSettings,
 ): boolean {
 	if (!passesDescriptionSearch(pano.location, s)) return false;
+	if (s.rejectRoadName && hasRoadName(pano.location)) return false;
 
 	if (s.rejectUnofficial && !s.rejectOfficial) {
 		if (pano.location.pano.length !== 22) return false;

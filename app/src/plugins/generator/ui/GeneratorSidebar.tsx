@@ -125,6 +125,7 @@ function summarizeSettings(s: GeneratorSettings): string {
 	// Search strategy
 	if (s.getIntersection) parts.push("intersections");
 	if (s.pinpointSearch) parts.push(`curves >${s.pinpointAngle}°`);
+	if (s.rejectRoadName) parts.push("no road names");
 	if (s.checkLinks) parts.push(`checking ${s.linksDepth} link hops`);
 	if (s.findRegions) parts.push(`${s.regionRadius}km from existing`);
 	if (s.filterByLinks) parts.push(`${s.minLinks}–${s.maxLinks} links`);

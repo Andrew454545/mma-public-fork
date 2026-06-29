@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { textColorFor, hexToHsl, hslToHex, hslToRgb, rgbCss } from "@/lib/util/color";
+import { textColorFor, hexToHsl, hslToHex, hslToRgb, rgbCss, rgbToHex, labelColor, colorForName } from "@/lib/util/color";
 
 describe("textColorFor", () => {
 	it("returns black for light backgrounds", () => {
@@ -100,5 +100,22 @@ describe("hslToRgb", () => {
 describe("rgbCss", () => {
 	it("formats RGB tuple as CSS string", () => {
 		expect(rgbCss([255, 128, 0])).toBe("rgb(255, 128, 0)");
+	});
+});
+
+describe("rgbToHex", () => {
+	it("formats an RGB object as a hex string", () => {
+		expect(rgbToHex({ r: 255, g: 128, b: 0 })).toBe("#ff8000");
+		expect(rgbToHex({ r: 0, g: 0, b: 0 })).toBe("#000000");
+	});
+});
+
+describe("labelColor", () => {
+	it("uses the override when one is set (keyed by lowercased name)", () => {
+		expect(labelColor("WIP", { wip: "#ff0000" })).toBe("#ff0000");
+	});
+
+	it("falls back to the deterministic name color when unset", () => {
+		expect(labelColor("europe", {})).toBe(colorForName("europe"));
 	});
 });

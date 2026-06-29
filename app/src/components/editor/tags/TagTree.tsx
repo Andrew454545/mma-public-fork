@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback, useRef } from "react";
+import { useState, useMemo, useCallback, useRef, forwardRef, useImperativeHandle } from "react";
 import { createPortal } from "react-dom";
 import * as ContextMenu from "@radix-ui/react-context-menu";
 import { Icon } from "@/components/primitives/Icon";
@@ -39,19 +39,24 @@ function saveExpanded(set: Set<string>) {
 	localStorage.setItem(EXPANDED_KEY, JSON.stringify([...set]));
 }
 
+export interface TagTreeHandle {
+	/** Rewrite expanded-folder paths after a cascade rename so the renamed folder stays open. */
+	remapExpanded: (oldPrefix: string, newPrefix: string) => void;
+}
+
 interface TagTreeViewProps {
 	tags: Tag[];
 	selectedTagIds: Set<number>;
 	tagCounts: Record<number, number>;
 	sortMode: TagSortMode;
 	virtualTags: Record<string, VirtualTag>;
-	onEditTag: (tagId: number) => void;
+	onEditTag: (node: TagTreeNode) => void;
 	onEditVirtual: (fullPath: string) => void;
 	onRenameTag: (tag: { id: number; name: string }) => void;
 	filterText: string;
 }
 
-export function TagTreeView({
+export const TagTreeView = forwardRef<TagTreeHandle, TagTreeViewProps>(function TagTreeView({
 	tags,
 	selectedTagIds,
 	tagCounts,
@@ -61,7 +66,7 @@ export function TagTreeView({
 	onEditVirtual,
 	onRenameTag,
 	filterText,
-}: TagTreeViewProps) {
+}: TagTreeViewProps, ref) {
 	const tree = useMemo(
 		() => buildTagTree(tags, sortMode, tagCounts, virtualTags),
 		[tags, sortMode, tagCounts, virtualTags],
@@ -77,6 +82,26 @@ export function TagTreeView({
 			return next;
 		});
 	}, []);
+
+	useImperativeHandle(
+		ref,
+		() => ({
+			remapExpanded(oldPrefix, newPrefix) {
+				if (oldPrefix === newPrefix) return;
+				setExpandedPaths((prev) => {
+					const next = new Set<string>();
+					for (const p of prev) {
+						if (p === oldPrefix) next.add(newPrefix);
+						else if (p.startsWith(`${oldPrefix}/`)) next.add(newPrefix + p.slice(oldPrefix.length));
+						else next.add(p);
+					}
+					saveExpanded(next);
+					return next;
+				});
+			},
+		}),
+		[],
+	);
 
 	const filteredTree = useMemo(() => {
 		if (!filterText) return tree;
@@ -285,7 +310,7 @@ export function TagTreeView({
 				<ul className="tag-tree">
 					{rootRows.map((node) => (
 						<TagTreeNodeRow
-							key={node.fullPath}
+							key={node.tag?.id ?? node.fullPath}
 							node={node}
 							depth={0}
 							selectedTagIds={selectedTagIds}
@@ -328,7 +353,7 @@ export function TagTreeView({
 				)}
 		</>
 	);
-}
+});
 
 function TagTreeNodeRow({
 	node,
@@ -348,7 +373,7 @@ function TagTreeNodeRow({
 	depth: number;
 	selectedTagIds: Set<number>;
 	tagCounts: Record<number, number>;
-	onEditTag: (tagId: number) => void;
+	onEditTag: (node: TagTreeNode) => void;
 	onEditVirtual: (fullPath: string) => void;
 	onRenameTag: (tag: { id: number; name: string }) => void;
 	forceExpanded: boolean;
@@ -423,7 +448,7 @@ function TagTreeNodeRow({
 							className="button tag-tree__edit"
 							onClick={(e) => {
 								e.stopPropagation();
-								if (node.tag) onEditTag(node.tag.id);
+								if (node.tag) onEditTag(node);
 								else onEditVirtual(node.fullPath);
 							}}
 							type="button"
@@ -461,7 +486,7 @@ function TagTreeNodeRow({
 						<ul className="tag-tree__children">
 							{childRows.map((child) => (
 								<TagTreeNodeRow
-									key={child.fullPath}
+									key={child.tag?.id ?? child.fullPath}
 									node={child}
 									depth={depth + 1}
 									selectedTagIds={selectedTagIds}
@@ -519,7 +544,7 @@ function TagLeafGroup({
 	depth: number;
 	selectedTagIds: Set<number>;
 	tagCounts: Record<number, number>;
-	onEditTag: (tagId: number) => void;
+	onEditTag: (node: TagTreeNode) => void;
 	onRenameTag: (tag: { id: number; name: string }) => void;
 	onRowClick: (node: TagTreeNode, shiftKey: boolean, altKey: boolean) => void;
 	drag: TreeDrag;
@@ -533,7 +558,7 @@ function TagLeafGroup({
 		>
 			{display.map((node) => (
 				<TagTreeLeaf
-					key={node.fullPath}
+					key={node.tag?.id ?? node.fullPath}
 					node={node}
 					selectedTagIds={selectedTagIds}
 					tagCounts={tagCounts}
@@ -559,7 +584,7 @@ function TagTreeLeaf({
 	node: TagTreeNode;
 	selectedTagIds: Set<number>;
 	tagCounts: Record<number, number>;
-	onEditTag: (tagId: number) => void;
+	onEditTag: (node: TagTreeNode) => void;
 	onRenameTag: (tag: { id: number; name: string }) => void;
 	onRowClick: (node: TagTreeNode, shiftKey: boolean, altKey: boolean) => void;
 	drag: TreeDrag;
@@ -589,7 +614,7 @@ function TagTreeLeaf({
 						className="button tag__button tag__button--edit"
 						onClick={(e) => {
 							e.stopPropagation();
-							onEditTag(tag.id);
+							onEditTag(node);
 						}}
 						type="button"
 					>

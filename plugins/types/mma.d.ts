@@ -152,6 +152,11 @@ export type EditorImportResult = {
 	warnings: string[];
 	/**  True when the import was large enough to autocommit; the caller commits it. */
 	autoCommit: boolean;
+	/**
+	 *  Settings carried by the import (`extra.settings`), a partial overlay for the
+	 *  JS caller to merge into the open map's settings via `updateMapMeta`.
+	 */
+	settings: any;
 } & MutationResult;
 /**
  *  Configuration for JSON export. Controls which fields are included and
@@ -294,11 +299,15 @@ export type LocationPatch_Deserialize = {
 	createdAt?: number | null;
 	modifiedAt?: number | null;
 };
-/**  A location ID paired with a partial patch, sent from JS for updates. */
-/**  A location ID paired with a partial patch, sent from JS for updates. */
-export type LocationUpdate_Deserialize = {
+/** Generic `{id, patch}` update envelope, parameterized by the patch type. */
+export type Update<P> = {
 	id: number;
-	patch: LocationPatch_Deserialize;
+	patch: P;
+};
+/** Patchable fields of a `Tag` (input variant). Subset by design; omit to leave unchanged. */
+export type TagPatch_Deserialize = {
+	name?: string | null;
+	color?: string | null;
 };
 export type MapData = {
 	meta: MapMeta;
@@ -390,6 +399,10 @@ export type MapSettings = {
 	enrichMetadata?: boolean;
 	enrichFields?: string[] | null;
 	keyBindings?: MapKeyBinding[];
+	/**  Virtual tag-tree nodes keyed by full slash path. Tree-view only. */
+	virtualTags?: {
+		[key in string]: VirtualTag;
+	};
 };
 /**
  *  Unified response for every mutation IPC. Bundles the store status, render delta,
@@ -765,6 +778,14 @@ export type Tag = {
 	 *  fast sidebar display -- kept in sync by callers after batch edits.
 	 */
 	count?: number;
+};
+/**
+ *  Per-map config for a virtual tag-tree node — a folder node with no underlying
+ *  tag (e.g. "a" when only "a/b" and "a/c" exist). Keyed by the node's full slash
+ *  path in `MapSettings::virtual_tags`. Tree-view only; never creates a real tag.
+ */
+export type VirtualTag = {
+	color?: string | null;
 };
 export type LatLng = google.maps.LatLngLiteral;
 /** A location you already hold in full, or just its id to fetch on demand.
@@ -1322,12 +1343,10 @@ declare function save(options?: SaveDialogOptions): Promise<string | null>;
 declare const EVENT_DEFS: {
 	"location:add": Location$1[];
 	"location:remove": number[];
-	"location:update": LocationUpdate_Deserialize[];
+	"location:update": Update<LocationPatch_Deserialize>[];
 	"tag:add": Tag[];
 	"tag:remove": number[];
-	"tag:update": (Partial<Tag> & {
-		id: number;
-	})[];
+	"tag:update": Update<TagPatch_Deserialize>[];
 	"selection:change": Selection$1[];
 	"active:change": number | null;
 	"map:open": MapData;
@@ -1713,7 +1732,7 @@ declare const MAP_LIST_FIELDS: {
 };
 declare const GEOCODE_PROVIDERS: {
 	readonly local: "Local (offline)";
-	readonly nominatim: "Nominatim (online)";
+	readonly nominatim: "Nominatim";
 	readonly google: "Google (from panorama)";
 };
 declare const TAG_VIEW_MODES: {
@@ -1773,6 +1792,7 @@ declare const DEFAULTS: {
 	showFullscreenMinimap: boolean;
 	fullscreenMinimapScale: number;
 	showFullscreenTagbar: boolean;
+	showFullscreenDatePicker: boolean;
 	customCss: string;
 	enableSeen: boolean;
 	enableSeenThumbnails: boolean;
@@ -1782,6 +1802,8 @@ declare const DEFAULTS: {
 	slowModifier: number;
 	showFps: boolean;
 	mapListFields: MapListField[];
+	/** Per-label color overrides (hex), keyed by lowercased label name. Shared across all maps. */
+	labelColors: Record<string, string>;
 	geocodeProvider: GeocodeProvider;
 	nominatimApiKey: string;
 	panToImported: boolean;
@@ -1804,6 +1826,8 @@ declare const DEFAULTS: {
 	panoDotScaled: boolean;
 	tagViewMode: TagViewMode;
 	tagSortMode: TagSortMode;
+	/** Gap between tag pills (px), shared by flat and tree views via `--tag-gap`. */
+	tagGap: number;
 	borderDetail: BorderDetail;
 	subdivisionDetail: SubdivisionDetail;
 	previewAspectRatio: PreviewAspectRatio;
@@ -1875,7 +1899,7 @@ declare const mma: {
 		storeDbTableInfo: () => Promise<DbTableInfo[]>;
 		storeAddLocations: (locations: Location$1[]) => Promise<MutationResult>;
 		storeRemoveLocations: (ids: number[]) => Promise<MutationResult>;
-		storeUpdateLocations: (updates: LocationUpdate_Deserialize[], recordUndo: boolean | null) => Promise<MutationResult>;
+		storeUpdateLocations: (updates: Update<LocationPatch_Deserialize>[], recordUndo: boolean | null) => Promise<MutationResult>;
 		storeSetActive: (id: number | null) => Promise<null>;
 		storeGetLocation: (id: number) => Promise<Location$1 | null>;
 		storeGetLocationsByIds: (ids: number[]) => Promise<Location$1[]>;
@@ -1894,7 +1918,7 @@ declare const mma: {
 		storeFindNearby: (lat: number, lng: number, radiusM: number) => Promise<Location$1[]>;
 		storeExtraFieldValues: (field: string) => Promise<string[]>;
 		storeCreateTags: (names: string[]) => Promise<MutationResult>;
-		storeUpdateTag: (tagId: number, name: string | null, color: string | null) => Promise<MutationResult>;
+		storeUpdateTags: (updates: Update<TagPatch_Deserialize>[]) => Promise<MutationResult>;
 		storeDeleteTags: (tagIds: number[]) => Promise<MutationResult>;
 		storeReorderTags: (orderedIds: number[]) => Promise<MutationResult>;
 		storeUndo: () => Promise<MutationResult>;
@@ -1916,6 +1940,7 @@ declare const mma: {
 		storeResolvePick: (cell: string, cellIndex: number) => Promise<number | null>;
 		bulkImportPreview: (path: string) => Promise<ImportPreviewEntry[]>;
 		bulkImportConfirm: (path: string, selectedIndices: number[]) => Promise<ImportedMapInfo[]>;
+		bulkImportCancel: () => Promise<null>;
 		storeImportPreview: (path: string) => Promise<EditorImportPreview>;
 		storeImportPastePreview: (text: string) => Promise<EditorImportPreview>;
 		storeImportStagedLocation: (index: number) => Promise<Location$1>;
@@ -1999,6 +2024,7 @@ declare const mma: {
 		showFullscreenMinimap: boolean;
 		fullscreenMinimapScale: number;
 		showFullscreenTagbar: boolean;
+		showFullscreenDatePicker: boolean;
 		customCss: string;
 		enableSeen: boolean;
 		enableSeenThumbnails: boolean;
@@ -2008,6 +2034,7 @@ declare const mma: {
 		slowModifier: number;
 		showFps: boolean;
 		mapListFields: MapListField[];
+		labelColors: Record<string, string>;
 		geocodeProvider: GeocodeProvider;
 		nominatimApiKey: string;
 		panToImported: boolean;
@@ -2030,6 +2057,7 @@ declare const mma: {
 		panoDotScaled: boolean;
 		tagViewMode: TagViewMode;
 		tagSortMode: TagSortMode;
+		tagGap: number;
 		borderDetail: BorderDetail;
 		subdivisionDetail: SubdivisionDetail;
 		previewAspectRatio: PreviewAspectRatio;
@@ -2098,7 +2126,6 @@ declare const mma: {
 	openMap(id: string): Promise<void>;
 	closeMap(): Promise<void>;
 	discardOpenMap(): void;
-	refreshFromExternalMutation(): Promise<void>;
 	getCurrentMapId(): string | null;
 	getCurrentMap(): MapData | null;
 	getKnownFieldKeys(): ReadonlySet<string>;
@@ -2135,7 +2162,7 @@ declare const mma: {
 	}): Promise<void>;
 	duplicateLocation(id: number): Promise<number | null>;
 	removeLocations(ids: ReadonlyIdSet): Promise<void>;
-	updateLocations(updates: LocationUpdate_Deserialize[], opts?: {
+	updateLocations(updates: Update<LocationPatch_Deserialize>[], opts?: {
 		undoable?: boolean;
 	}): Promise<void>;
 	renameField(from: string, to: string, winner?: MergeWinner): Promise<void>;
@@ -2194,10 +2221,7 @@ declare const mma: {
 	setPluginMode(pluginId: string): void;
 	exitPluginMode(): void;
 	createTags(names: string[]): Promise<Tag[]>;
-	updateTags(patches: {
-		id: number;
-		patch: Partial<Tag>;
-	}[]): Promise<void>;
+	updateTags(updates: Update<TagPatch_Deserialize>[]): Promise<void>;
 	deleteTags(tagIds: number[]): Promise<void>;
 	reorderTags(orderedIds: number[]): Promise<void>;
 	addTagToLocations(tagId: number, locationIds: number[]): Promise<void>;

@@ -70,3 +70,13 @@ export function colorForName(name: string): string {
 export function rgbCss([r, g, b]: [number, number, number]): string {
 	return `rgb(${r}, ${g}, ${b})`;
 }
+
+export function rgbToHex({ r, g, b }: { r: number; g: number; b: number }): string {
+	const h = (n: number) => Math.round(n).toString(16).padStart(2, "0");
+	return `#${h(r)}${h(g)}${h(b)}`;
+}
+
+/** A label's color: a user override if set, else a deterministic color from its name. */
+export function labelColor(name: string, overrides: Record<string, string>): string {
+	return overrides[name.toLowerCase()] ?? colorForName(name);
+}

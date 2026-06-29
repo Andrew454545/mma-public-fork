@@ -189,12 +189,20 @@
 	fill: #111111e6;
 }
 @keyframes tooltip-fade-in {
-	from { opacity: 0; }
-	to { opacity: 1; }
+	from {
+		opacity: 0;
+	}
+	to {
+		opacity: 1;
+	}
 }
 @keyframes tooltip-fade-out {
-	from { opacity: 1; }
-	to { opacity: 0; }
+	from {
+		opacity: 1;
+	}
+	to {
+		opacity: 0;
+	}
 }
 
 :where(html) {
@@ -1304,8 +1312,16 @@ summary.button {
 	color: #000;
 	border: 1px solid #0002;
 }
-.map-edit-labels .map-label__remove {
-	color: #000;
+.map-label--editable {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.3em;
+}
+.map-label--editable .color-picker__swatch {
+	width: 14px;
+	height: 14px;
+	border-radius: 3px;
+	border-color: #0003;
 }
 .map-edit-labels__input {
 	all: unset;
@@ -3760,6 +3776,21 @@ body.mm-tag-dragging * {
 .edit-tag-modal__name {
 	grid-area: name;
 }
+.edit-tag-modal__cascade {
+	display: flex;
+	align-items: center;
+	gap: 0.4rem;
+	margin-top: 0.4rem;
+	font-size: 0.85em;
+}
+.edit-tag-modal__cascade input {
+	margin: 0;
+}
+.edit-tag-modal__apply-color {
+	width: 100%;
+	margin-top: 0.4rem;
+	font-size: 0.85em;
+}
 .edit-tag-modal__hotkey {
 	grid-gap: 0.25rem;
 	grid-area: hotkey;
@@ -5082,7 +5113,7 @@ body {
 	height: 200px;
 	border: 2px solid rgba(255, 255, 255, 0.4);
 	border-radius: 4px;
-	z-index: 10;
+	z-index: 12;
 	pointer-events: auto;
 	transition:
 		width 0.2s,
@@ -5090,8 +5121,8 @@ body {
 	overflow: hidden;
 }
 .fullscreen-minimap.is-expanded {
-	width: var(--fs-minimap-w, 800px);
-	height: var(--fs-minimap-h, 600px);
+	width: min(var(--fs-minimap-w, 800px), calc(100vw - 16px));
+	height: min(var(--fs-minimap-h, 600px), calc(100vh - var(--fs-tray-h, 0px) - 16px));
 }
 .fullscreen-minimap__map {
 	position: absolute;
@@ -5139,7 +5170,7 @@ body {
 	right: 0;
 	display: flex;
 	flex-direction: column;
-	z-index: 10;
+	z-index: 13;
 }
 
 /* Fullscreen tag bar */
@@ -5222,9 +5253,16 @@ body {
 }
 
 /* Hide all pano UI (Google close button, attribution, etc.) when toggled */
-.location-preview__embed.hide-pano-ui .gm-style > div > div > div > div > button,
-.location-preview__embed.hide-pano-ui .gm-style > div > div > div > div > a {
-	display: none !important;
+.location-preview__panorama.hide-pano-ui .gm-style > div > div > div > div > button,
+.location-preview__panorama.hide-pano-ui .gm-style > div > div > div > div > a {
+	visibility: hidden !important;
+}
+.location-preview__panorama.hide-pano-ui .embed-controls,
+.location-preview__panorama.hide-pano-ui .viewport-lock-badge,
+.location-preview__panorama.hide-pano-ui .fullscreen-minimap,
+.location-preview__panorama.hide-pano-ui .fullscreen-bottom-tray,
+.location-preview__panorama.hide-pano-ui .fullscreen-date-picker {
+	visibility: hidden !important;
 }
 
 .tag-find-replace-modal {

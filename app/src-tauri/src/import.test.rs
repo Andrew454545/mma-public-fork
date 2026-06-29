@@ -108,10 +108,15 @@ fn reconcile_location_tags_remapped_correctly() {
     assert!(loc.tags.contains(&remap[&2]), "Rural should map to new ID");
 }
 
+/// Scan `extra` from a buffer and pull tag meta, as the parse path does internally.
+fn tag_meta(buf: &[u8]) -> HashMap<String, ExtraTagMeta> {
+    find_top_level_extra(buf, 0, 0).as_ref().map(tag_meta_from_extra).unwrap_or_default()
+}
+
 #[test]
-fn extract_tag_meta_reads_color_and_order() {
+fn tag_meta_reads_color_and_order() {
     let json = br#"{"customCoordinates":[],"extra":{"tags":{"Roof":{"color":[255,0,0],"order":3},"Wall":{"color":[0,128,255],"order":1}}}}"#;
-    let meta = extract_tag_meta(json, 0, 0);
+    let meta = tag_meta(json);
     assert_eq!(meta.len(), 2);
 
     let roof = &meta["Roof"];
@@ -124,28 +129,78 @@ fn extract_tag_meta_reads_color_and_order() {
 }
 
 #[test]
-fn extract_tag_meta_missing_order() {
+fn tag_meta_missing_order() {
     let json = br#"{"extra":{"tags":{"NoOrder":{"color":[10,20,30]}}}}"#;
-    let meta = extract_tag_meta(json, 0, 0);
+    let meta = tag_meta(json);
     let tag = &meta["NoOrder"];
     assert_eq!(tag.color.as_deref(), Some("#0a141e"));
     assert_eq!(tag.order, None);
 }
 
 #[test]
-fn extract_tag_meta_missing_color() {
+fn tag_meta_missing_color() {
     let json = br#"{"extra":{"tags":{"OnlyOrder":{"order":5}}}}"#;
-    let meta = extract_tag_meta(json, 0, 0);
+    let meta = tag_meta(json);
     let tag = &meta["OnlyOrder"];
     assert_eq!(tag.color, None);
     assert_eq!(tag.order, Some(5));
 }
 
 #[test]
-fn extract_tag_meta_no_extra() {
+fn tag_meta_no_extra() {
     let json = br#"{"customCoordinates":[]}"#;
-    let meta = extract_tag_meta(json, 0, 0);
+    let meta = tag_meta(json);
     assert!(meta.is_empty());
+}
+
+// -----------------------------------------------------------------------
+// Map settings carried through import (extra.settings)
+// -----------------------------------------------------------------------
+
+#[test]
+fn parse_captures_settings_overlay() {
+    let json = br##"{"customCoordinates":[
+        {"lat":1,"lng":2,"extra":{"tags":["Europe/France/Paris"]}}
+    ],"extra":{"tags":{"Europe/France/Paris":{"color":[1,2,3]}},"settings":{"virtualTags":{"Europe":{"color":"#c0f0f8"},"Europe/France":{"color":"#183848"}}}}}"##;
+    let mut buf = json.to_vec();
+    let parsed = parse_single_json_mut(&mut buf);
+    assert!(parsed.settings.contains_key("virtualTags"));
+
+    let merged = merge_settings(crate::map_meta::MapSettings::default(), &parsed.settings);
+    assert_eq!(merged.virtual_tags["Europe"].color.as_deref(), Some("#c0f0f8"));
+    assert_eq!(merged.virtual_tags["Europe/France"].color.as_deref(), Some("#183848"));
+}
+
+#[test]
+fn parse_no_settings_is_empty() {
+    let json = br#"{"customCoordinates":[],"extra":{"tags":{}}}"#;
+    let mut buf = json.to_vec();
+    let parsed = parse_single_json_mut(&mut buf);
+    assert!(parsed.settings.is_empty());
+}
+
+#[test]
+fn merge_settings_overlays_present_keys_only() {
+    let json = br##"{"customCoordinates":[{"lat":1,"lng":2}],"extra":{"settings":{"virtualTags":{"Asia":{"color":"#asia"}}}}}"##;
+    let mut buf = json.to_vec();
+    let parsed = parse_single_json_mut(&mut buf);
+
+    let mut base = crate::map_meta::MapSettings::default();
+    base.point_along_road = false; // non-default, unrelated key
+    base.virtual_tags.insert("Europe".into(), crate::map_meta::VirtualTag { color: Some("#existing".into()) });
+
+    let merged = merge_settings(base, &parsed.settings);
+    assert!(!merged.point_along_road, "key absent from the overlay keeps its base value");
+    assert_eq!(merged.virtual_tags["Asia"].color.as_deref(), Some("#asia"), "imported key applied");
+    // A present key replaces wholesale (shallow overlay), so base's Europe is gone.
+    assert!(!merged.virtual_tags.contains_key("Europe"), "present key replaces the whole value");
+}
+
+#[test]
+fn merge_settings_empty_overlay_is_base() {
+    let base = crate::map_meta::MapSettings::default();
+    let merged = merge_settings(base, &serde_json::Map::new());
+    assert!(merged.point_along_road, "empty overlay leaves defaults untouched");
 }
 
 // -----------------------------------------------------------------------
@@ -306,4 +361,49 @@ fn staged_location_fetch_by_index() {
 
     *EDITOR_IMPORT_CACHE.lock().unwrap() = None;
     assert!(store_import_staged_location(0).is_err());
+}
+
+// -----------------------------------------------------------------------
+// Cross-map copy producer (add_copied_to_store): the core of the open-target
+// branch of store_copy_locations_to_map. The cross-window event ships exactly
+// this MutationResult for the receiving window's mutate(), so it must carry the
+// copied locations with allocated ids, name-reconciled tags, and bumped counts.
+// (The open-target branch is two-window-only, unreachable from a single webview,
+// so this is its sole regression guard. e2e covers the closed-target branch.)
+// -----------------------------------------------------------------------
+
+#[test]
+fn add_copied_reconciles_tags_and_reports_counts() {
+    // Target already defines "Shared" (id 5). The copies reference the *source*
+    // map's own tag ids (1 = Shared, 2 = Unique), as a real cross-map copy would.
+    let mut store = store_with_tags(&[tag(5, "Shared")]);
+    let copies = vec![loc_with_tags(1, vec![1]), loc_with_tags(2, vec![1, 2])];
+    let source_tags = vec![tag(1, "Shared"), tag(2, "Unique")];
+
+    let r = add_copied_to_store(&mut store, copies, source_tags).unwrap();
+
+    // Both copies landed in the target store.
+    assert_eq!(r.status.location_count, 2);
+    let stored = store.collect_scoped(None);
+    assert_eq!(stored.len(), 2);
+
+    // "Shared" reconciled to the target's existing id 5 (no duplicate tag created).
+    let shared: Vec<_> = store.tags.all.values().filter(|t| t.name == "Shared").collect();
+    assert_eq!(shared.len(), 1);
+    assert_eq!(shared[0].id, 5);
+    // "Unique" created fresh, not reusing the source id.
+    let unique = store.tags.all.values().find(|t| t.name == "Unique").expect("Unique created");
+    assert_ne!(unique.id, 2);
+
+    // Copies carry the reconciled *target* tag ids, not the source ids.
+    let two_tag = stored.iter().find(|l| l.tags.len() == 2).unwrap();
+    assert!(two_tag.tags.contains(&5));
+    assert!(two_tag.tags.contains(&unique.id));
+
+    // Counts in the result match membership: Shared on both copies, Unique on one.
+    assert_eq!(r.status.tag_counts[&5], 2);
+    assert_eq!(r.status.tag_counts[&unique.id], 1);
+
+    // The new tag def is shipped on the result (the receiver needs it to render).
+    assert!(r.tags.as_ref().and_then(|m| m.get(&unique.id)).is_some());
 }

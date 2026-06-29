@@ -27,7 +27,7 @@ import {
 	rewriteSelectionFields,
 	type MergeWinner,
 } from "@/lib/data/fieldOps";
-import type { LocationUpdate_Deserialize as LocationUpdate } from "@/bindings.gen";
+import type { LocationPatch_Deserialize as LocationPatch, Update, TagPatch } from "@/bindings.gen";
 import { getSavedSelections, rewriteSavedSelectionFields } from "./savedSelections";
 import type { RenderDelta } from "@/bindings.gen";
 import { SelectedIds, decodeSelectionBitmask, type ReadonlyIdSet, type SelCellEntry } from "@/lib/render/CellManager";
@@ -741,7 +741,7 @@ export async function removeLocations(ids: ReadonlyIdSet) {
 }
 
 export async function updateLocations(
-	updates: LocationUpdate[],
+	updates: Update<LocationPatch>[],
 	opts?: { undoable?: boolean }
 ) {
 	if (!currentMap || updates.length === 0) return;
@@ -1297,16 +1297,14 @@ export async function createTags(names: string[]): Promise<Tag[]> {
 /** Rename or recolor tags. If a rename collides with an existing tag name
  *  (case-insensitive), the two tags are merged — all locations are remapped
  *  to the survivor. */
-export async function updateTags(patches: { id: number; patch: Partial<Tag> }[]) {
-	if (!currentMapId || !currentMap || patches.length === 0) return;
-	for (const { id, patch } of patches) {
-		await mutate(cmd.storeUpdateTag(id, patch.name ?? null, patch.color ?? null));
-	}
-	emitEvent("tag:update", patches.map(({ id, patch }) => ({ id, ...patch })));
+export async function updateTags(updates: Update<TagPatch>[]) {
+	if (!currentMapId || !currentMap || updates.length === 0) return;
+	await mutate(cmd.storeUpdateTags(updates));
+	emitEvent("tag:update", updates);
 	if (
 		selections.some((s) => {
 			const p = s.props;
-			return p.type === "Tag" && patches.some((q) => q.id === p.tagId);
+			return p.type === "Tag" && updates.some((q) => q.id === p.tagId);
 		})
 	) {
 		applySelectionUpdate((sels) => sels);
@@ -1330,7 +1328,7 @@ export async function reorderTags(orderedIds: number[]) {
 export async function addTagToLocations(tagId: number, locationIds: number[]) {
 	if (!currentMap || locationIds.length === 0) return;
 	const locs = await cmd.storeGetLocationsByIds(locationIds);
-	const updates: LocationUpdate[] = locs
+	const updates: Update<LocationPatch>[] = locs
 		.filter((l) => !l.tags.includes(tagId))
 		.map((l) => ({ id: l.id, patch: { tags: [...l.tags, tagId] } }));
 	if (updates.length === 0) return;
@@ -1340,7 +1338,7 @@ export async function addTagToLocations(tagId: number, locationIds: number[]) {
 export async function removeTagFromLocations(tagId: number, locationIds: number[]) {
 	if (!currentMap || locationIds.length === 0) return;
 	const locs = await cmd.storeGetLocationsByIds(locationIds);
-	const updates: LocationUpdate[] = locs
+	const updates: Update<LocationPatch>[] = locs
 		.filter((l) => l.tags.includes(tagId))
 		.map((l) => ({ id: l.id, patch: { tags: l.tags.filter((t: number) => t !== tagId) } }));
 	if (updates.length === 0) return;
@@ -1400,6 +1398,11 @@ export async function confirmImport(droppedFields: string[], tagName?: string) {
 	const r = await cmd.storeImportFile(droppedFields, tagName?.trim() || null);
 	cancelImport();
 	await mutate(Promise.resolve(r));
+	// Overlay any settings the import carried (extra.settings) onto the open map's
+	// settings. Generic: imported keys win, untouched keys are preserved.
+	if (currentMap && r.settings && Object.keys(r.settings).length) {
+		await updateMapMeta({ settings: { ...currentMap.meta.settings, ...r.settings } });
+	}
 	// Large imports skip the undo stack (Rust); commit them so the baseline advances
 	// with a recorded history entry instead of silently diverging from HEAD. Use the
 	// single-pass commit+bake (builds the Arrow batch once) instead of commitMap.

@@ -10,6 +10,9 @@ export interface TagTreeNode {
 	descendantTagIds: number[];
 	/** Min `order` across descendant tags — used for "default" sort parity with flat mode. */
 	sortOrder: number;
+	/** A synthetic leaf placing a real tag at a second tree location. Reuses `tag`, but is
+	 *  not draggable and never contributes its id to reorder (the real leaf owns that). */
+	isAlias: boolean;
 }
 
 /** A terminal tag — no children — renders as a flat pill, not a folder row. A childless
@@ -31,6 +34,7 @@ export function buildTagTree(
 	sortMode: TagSortMode,
 	tagCounts: Record<number, number>,
 	virtualTags: Record<string, VirtualTag> = {},
+	aliases: Record<string, number> = {},
 ): TagTreeNode[] {
 	const root: TagTreeNode[] = [];
 
@@ -54,12 +58,55 @@ export function buildTagTree(
 					children: [],
 					descendantTagIds: [],
 					sortOrder: 0,
+					isAlias: false,
 				};
 				level.push(existing);
 			} else if (isLeaf && !existing.tag) {
 				existing.tag = tag;
 			}
 
+			level = existing.children;
+		}
+	}
+
+	// Insert alias leaves: a real tag placed at a second path. Skip a dangling alias
+	// (tag deleted) or one whose path is already occupied by any real node — an alias only
+	// fills a free leaf slot, never clobbers (and never leaves a stray empty folder).
+	const tagById = new Map(tags.map((t) => [t.id, t]));
+	const resolve = (path: string): TagTreeNode | null => {
+		let level = root;
+		let found: TagTreeNode | null = null;
+		for (const segment of path.split("/")) {
+			found = level.find((n) => n.segment === segment) ?? null;
+			if (!found) return null;
+			level = found.children;
+		}
+		return found;
+	};
+	for (const [aliasPath, tagId] of Object.entries(aliases)) {
+		const tag = tagById.get(tagId);
+		if (!tag || resolve(aliasPath)) continue;
+		const parts = aliasPath.split("/");
+		let level = root;
+		let pathSoFar = "";
+		for (let i = 0; i < parts.length; i++) {
+			const segment = parts[i];
+			pathSoFar = pathSoFar ? `${pathSoFar}/${segment}` : segment;
+			const isLeaf = i === parts.length - 1;
+			let existing = level.find((n) => n.segment === segment);
+			if (!existing) {
+				existing = {
+					segment,
+					fullPath: pathSoFar,
+					tag: isLeaf ? tag : null,
+					inheritedColor: "",
+					children: [],
+					descendantTagIds: [],
+					sortOrder: 0,
+					isAlias: isLeaf,
+				};
+				level.push(existing);
+			}
 			level = existing.children;
 		}
 	}
@@ -139,9 +186,61 @@ export function rangeToggleTagIds(
 	return [...ids];
 }
 
+/** Map each `/`-delimited name to the shortest trailing path-segment run that uniquely
+ *  identifies it within `names`. A name with no collision collapses to its last segment;
+ *  one whose suffix is shared widens until distinct, falling back to the full path. */
+export function shortestUniqueSuffixes(names: string[]): Map<string, string> {
+	const parts = names.map((n) => n.split("/"));
+	const out = new Map<string, string>();
+	for (let i = 0; i < names.length; i++) {
+		const p = parts[i];
+		let depth = 1;
+		let suffix = p.slice(-depth).join("/");
+		while (
+			depth < p.length &&
+			parts.some((other, j) => j !== i && other.slice(-depth).join("/") === suffix)
+		) {
+			depth++;
+			suffix = p.slice(-depth).join("/");
+		}
+		out.set(names[i], suffix);
+	}
+	return out;
+}
+
 export interface TagNameChange {
 	id: number;
 	name: string;
+}
+
+const leafOf = (name: string) => name.split("/").pop() ?? name;
+
+/** An alias leaf displays its path's last segment, fixed at creation from the tag's leaf
+ *  name. When a tag's leaf name changes, rewrite the last segment of every alias key
+ *  pointing at it so the alias keeps showing the tag's name. Returns null when no alias
+ *  changed. Collisions merge last-write-wins, same as cascadeRename. */
+export function syncAliasSegments(
+	aliases: Record<string, number>,
+	renames: { id: number; oldName: string; newName: string }[],
+): Record<string, number> | null {
+	const byId = new Map(
+		renames.filter((r) => leafOf(r.oldName) !== leafOf(r.newName)).map((r) => [r.id, r]),
+	);
+	if (byId.size === 0) return null;
+	let changed = false;
+	const next: Record<string, number> = {};
+	for (const [path, id] of Object.entries(aliases)) {
+		const r = byId.get(id);
+		if (r) {
+			const parts = path.split("/");
+			parts[parts.length - 1] = leafOf(r.newName);
+			next[parts.join("/")] = id;
+			changed = true;
+		} else {
+			next[path] = id;
+		}
+	}
+	return changed ? next : null;
 }
 
 /** Rewrite the path prefix `oldPrefix` -> `newPrefix` across every tag and virtual-tag
@@ -154,7 +253,12 @@ export function cascadeRename(
 	newPrefix: string,
 	tags: Tag[],
 	virtualTags: Record<string, VirtualTag>,
-): { tagRenames: TagNameChange[]; virtualTags: Record<string, VirtualTag> } {
+	aliases: Record<string, number> = {},
+): {
+	tagRenames: TagNameChange[];
+	virtualTags: Record<string, VirtualTag>;
+	aliases: Record<string, number>;
+} {
 	const moved = newPrefix !== oldPrefix;
 	const rewrite = (s: string): string | null => {
 		if (!moved) return null;
@@ -174,13 +278,30 @@ export function cascadeRename(
 		nextVirtual[rewrite(path) ?? path] = cfg;
 	}
 
-	return { tagRenames, virtualTags: nextVirtual };
+	// Alias keys are tree paths too — move any sitting at or under the renamed folder.
+	let nextAliases: Record<string, number> = {};
+	for (const [path, id] of Object.entries(aliases)) {
+		nextAliases[rewrite(path) ?? path] = id;
+	}
+
+	// Only the tag at exactly `oldPrefix` gets a new leaf segment (descendants keep
+	// theirs), so aliases pointing at it need their displayed segment synced too.
+	const rootTag = moved ? tags.find((t) => t.name === oldPrefix) : undefined;
+	if (rootTag) {
+		nextAliases =
+			syncAliasSegments(nextAliases, [
+				{ id: rootTag.id, oldName: oldPrefix, newName: newPrefix },
+			]) ?? nextAliases;
+	}
+
+	return { tagRenames, virtualTags: nextVirtual, aliases: nextAliases };
 }
 
 interface OrderNode {
 	fullPath: string;
 	tag: { id: number } | null;
 	children: OrderNode[];
+	isAlias?: boolean;
 }
 
 function parentPathOf(path: string): string {
@@ -232,7 +353,7 @@ export function reorderSiblingsFlatOrder<T extends OrderNode>(
 	const dfs = (nodes: OrderNode[], cur: string) => {
 		const ordered = cur === parent ? without : nodes;
 		for (const n of ordered) {
-			if (n.tag) out.push(n.tag.id);
+			if (n.tag && !n.isAlias) out.push(n.tag.id); // alias leaves don't own the id
 			dfs(n.children, n.fullPath);
 		}
 	};

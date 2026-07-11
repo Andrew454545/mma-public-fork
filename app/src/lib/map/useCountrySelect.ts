@@ -16,7 +16,21 @@ export function useCountrySelect() {
 			}
 			const level = shiftKey ? subdivisionDetail : borderDetail;
 			void (async () => {
-				const geometry = await cmd.borderLookup(lat, lng, level);
+				const lookup = () => cmd.borderLookup(lat, lng, level);
+				let geometry;
+				try {
+					geometry = await lookup();
+				} catch (e) {
+					if (level === "light" || (await cmd.checkBorderFile(level))) throw e;
+					toast("Border data missing -- downloading...");
+					try {
+						await cmd.downloadBorderFile(level);
+					} catch {
+						toast("Couldn't download border data -- check your connection");
+						return;
+					}
+					geometry = await lookup();
+				}
 				if (geometry) selectPolygon(geometry, false);
 			})();
 		}, []),

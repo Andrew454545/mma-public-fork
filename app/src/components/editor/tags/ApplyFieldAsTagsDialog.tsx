@@ -1,14 +1,20 @@
-import { useState, useMemo } from "react";
-import type { ExtraFieldDef, KeySpec, DatePart, Update, LocationPatch_Deserialize as LocationPatch } from "@/bindings.gen";
-import { getFieldDef } from "@/lib/data/fieldDefRegistry";
+import { useState } from "react";
+import { NSelect } from "@/components/primitives/NSelect";
+import type {
+	KeySpec,
+	DatePart,
+	Update,
+	LocationPatch_Deserialize as LocationPatch,
+} from "@/bindings.gen";
+import { getProviderForField } from "@/lib/data/fieldDefs";
 import { projectionsForType, partitionKeyOptions, RANGE_ID } from "@/lib/data/fieldOps";
+import { useExtraFieldKeys } from "@/components/editor/map/FilterBuilder";
 import {
-	useKnownFieldKeys,
 	fetchLocationsByIds,
 	partition,
 	useScope,
 	createTags,
-    updateLocations,
+	updateLocations,
 } from "@/store/useMapStore";
 import { ScopeSelector } from "@/components/primitives/ScopeSelector";
 import { useSetting } from "@/store/settings";
@@ -27,27 +33,20 @@ export function ApplyFieldAsTagsDialog({
 	const [width, setWidth] = useState("");
 	const [tzLocal, setTzLocal] = useState(tzDefault);
 	const scopeCtl = useScope();
-	const keys = useKnownFieldKeys();
-	const fields = useMemo(() => {
-		const entries: { key: string; label: string; type: ExtraFieldDef["type"] }[] = [];
-		for (const key of keys) {
-			const def = getFieldDef(key);
-			entries.push({ key, label: def?.label ?? key, type: def?.type ?? "string" });
-		}
-		return entries;
-	}, [keys]);
+	const fields = useExtraFieldKeys();
 
-	const fieldType = fields.find((f) => f.key === field)?.type ?? "string";
+	const fieldType = fields.find((f) => f.key === field)?.def.type ?? "string";
 	const projOptions = partitionKeyOptions(fieldType, false);
 	const isRange = projectionId === RANGE_ID;
 	const selectedProj = projectionsForType(fieldType).find((p) => p.id === projectionId);
+	const hasTzData = fields.some((f) => f.key === "timezone");
 	const showTz = !isRange && selectedProj?.needsTz === true && fieldType === "date";
 	const showWidth = isRange;
 	const widthValid = !showWidth || Number(width) > 0;
 
 	const handleFieldChange = (key: string) => {
 		setField(key);
-		const type = fields.find((f) => f.key === key)?.type ?? "string";
+		const type = fields.find((f) => f.key === key)?.def.type ?? "string";
 		setProjectionId(projectionsForType(type)[0]?.id ?? "");
 		setWidth("");
 		setTzLocal(tzDefault);
@@ -60,23 +59,41 @@ export function ApplyFieldAsTagsDialog({
 			? { kind: "numericBin", binning: { by: "width", w: Number(width) } }
 			: projectionId === "value"
 				? { kind: "value" }
-				: { kind: "datePart", part: projectionId as DatePart, tzLocal };
+				: { kind: "datePart", part: projectionId as DatePart, tzLocal: tzLocal && hasTzData };
 
-		// Grouping runs in Rust; only the matched subset is fetched (once) to append tags.
 		const groups = await partition(field, key, scopeCtl.scope);
 		if (groups.length === 0) return;
 
-		const created = await createTags(groups.map((g) => g.key));
-		const tagIdByName = new Map(created.map((t) => [t.name.toLowerCase(), t.id]));
+		const transform = getProviderForField(field)?.transform;
 		const locs = await fetchLocationsByIds(groups.flatMap((g) => g.ids));
 		const locById = new Map(locs.map((l) => [l.id, l]));
+
+		const tagNames = new Set<string>();
+		for (const g of groups) {
+			if (transform) {
+				for (const id of g.ids) {
+					const l = locById.get(id);
+					if (!l) continue;
+					const name = transform(field, g.key, l);
+					if (name != null) tagNames.add(name);
+				}
+			} else {
+				tagNames.add(g.key);
+			}
+		}
+
+		const created = await createTags([...tagNames]);
+		const tagIdByName = new Map(created.map((t) => [t.name.toLowerCase(), t.id]));
 		const updates: Update<LocationPatch>[] = [];
 		for (const g of groups) {
-			const tagId = tagIdByName.get(g.key.toLowerCase());
-			if (tagId == null) continue;
 			for (const id of g.ids) {
 				const l = locById.get(id);
-				if (l && !l.tags.includes(tagId)) updates.push({ id, patch: { tags: [...l.tags, tagId] } });
+				if (!l) continue;
+				const name = transform ? transform(field, g.key, l) : g.key;
+				if (name == null) continue;
+				const tagId = tagIdByName.get(name.toLowerCase());
+				if (tagId != null && !l.tags.includes(tagId))
+					updates.push({ id, patch: { tags: [...l.tags, tagId] } });
 			}
 		}
 		if (updates.length > 0) await updateLocations(updates);
@@ -105,32 +122,35 @@ export function ApplyFieldAsTagsDialog({
 					style={{ display: "flex", flexDirection: "column", gap: "0.75rem", marginTop: 4 }}
 				>
 					<ScopeSelector ctl={scopeCtl} />
-					<select
-						className="nselect nselect--compact"
-						value={field}
-						onChange={(e) => handleFieldChange(e.target.value)}
-						autoFocus
-					>
-						<option value="">Select a field...</option>
-						{fields.map((f) => (
-							<option key={f.key} value={f.key}>
-								{f.label}
-							</option>
-						))}
-					</select>
-					{field && projOptions.length > 1 && (
-						<select
-							className="nselect nselect--compact"
-							value={projectionId}
-							onChange={(e) => setProjectionId(e.target.value)}
+					<div style={{ display: "flex", gap: "0.5rem" }}>
+						<NSelect
+							className="nselect--compact"
+							value={field}
+							onChange={(e) => handleFieldChange(e.target.value)}
+							style={{ flex: 1 }}
+							autoFocus
 						>
-							{projOptions.map((p) => (
-								<option key={p.id} value={p.id}>
-									{p.label}
+							<option value="">Select a field...</option>
+							{fields.map((f) => (
+								<option key={f.key} value={f.key}>
+									{f.label}
 								</option>
 							))}
-						</select>
-					)}
+						</NSelect>
+						{field && projOptions.length > 1 && (
+							<NSelect
+								className="nselect--compact"
+								value={projectionId}
+								onChange={(e) => setProjectionId(e.target.value)}
+							>
+								{projOptions.map((p) => (
+									<option key={p.id} value={p.id}>
+										{p.label}
+									</option>
+								))}
+							</NSelect>
+						)}
+					</div>
 					{showWidth && (
 						<input
 							className="input"
@@ -142,10 +162,19 @@ export function ApplyFieldAsTagsDialog({
 						/>
 					)}
 					{showTz && (
-						<label style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+						<label
+							style={{
+								display: "flex",
+								alignItems: "center",
+								gap: "0.5rem",
+								opacity: hasTzData ? 1 : 0.5,
+							}}
+							title={hasTzData ? undefined : "No locations have timezone data"}
+						>
 							<input
 								type="checkbox"
-								checked={tzLocal}
+								checked={tzLocal && hasTzData}
+								disabled={!hasTzData}
 								onChange={(e) => setTzLocal(e.target.checked)}
 							/>
 							Location timezone

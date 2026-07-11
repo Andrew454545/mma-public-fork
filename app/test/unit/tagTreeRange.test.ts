@@ -4,8 +4,10 @@ import {
 	reorderSiblingsFlatOrder,
 	buildTagTree,
 	cascadeRename,
+	syncAliasSegments,
 	isLeafTag,
 	sumCounts,
+	shortestUniqueSuffixes,
 	type TagTreeNode,
 } from "@/components/editor/tags/tagTreeRange";
 import type { Tag } from "@/bindings.gen";
@@ -14,6 +16,7 @@ interface N {
 	fullPath: string;
 	tag: { id: number } | null;
 	children: N[];
+	isAlias?: boolean;
 }
 const leaf = (path: string, id: number): N => ({ fullPath: path, tag: { id }, children: [] });
 
@@ -23,6 +26,35 @@ const rows = [
 	{ descendantTagIds: [3] },
 	{ descendantTagIds: [4] },
 ];
+
+describe("shortestUniqueSuffixes", () => {
+	it("collapses a unique name to its last segment", () => {
+		const m = shortestUniqueSuffixes(["europe/france/paris", "usa/texas/austin"]);
+		expect(m.get("usa/texas/austin")).toBe("austin");
+	});
+
+	it("widens colliding suffixes until unique", () => {
+		const m = shortestUniqueSuffixes([
+			"europe/france/paris",
+			"usa/texas/paris",
+			"usa/texas/austin",
+		]);
+		expect(m.get("europe/france/paris")).toBe("france/paris");
+		expect(m.get("usa/texas/paris")).toBe("texas/paris");
+		expect(m.get("usa/texas/austin")).toBe("austin");
+	});
+
+	it("falls back to the full path when even that collides ancestrally", () => {
+		const m = shortestUniqueSuffixes(["a/b/c", "b/c"]);
+		expect(m.get("b/c")).toBe("b/c");
+		expect(m.get("a/b/c")).toBe("a/b/c");
+	});
+
+	it("leaves single-segment names untouched", () => {
+		const m = shortestUniqueSuffixes(["red", "blue"]);
+		expect(m.get("red")).toBe("red");
+	});
+});
 
 describe("rangeToggleTagIds", () => {
 	it("collects rows between anchor and target, excluding the anchor", () => {
@@ -83,15 +115,22 @@ describe("reorderSiblingsFlatOrder", () => {
 	});
 
 	it("returns null for non-siblings (different parent)", () => {
-		const nested: N[] = [
-			{ fullPath: "p", tag: null, children: [leaf("p/x", 10)] },
-			leaf("q", 20),
-		];
+		const nested: N[] = [{ fullPath: "p", tag: null, children: [leaf("p/x", 10)] }, leaf("q", 20)];
 		expect(reorderSiblingsFlatOrder(nested, "p/x", "q", "after")).toBeNull();
 	});
 
 	it("returns null when source equals target", () => {
 		expect(reorderSiblingsFlatOrder(tree, "a", "a", "after")).toBeNull();
+	});
+
+	it("does not emit an alias leaf's id (the real leaf owns it)", () => {
+		const withAlias: N[] = [
+			leaf("a", 1),
+			{ fullPath: "b", tag: { id: 1 }, children: [], isAlias: true },
+			leaf("c", 3),
+		];
+		// Reordering real siblings must not duplicate/emit the alias's id 1.
+		expect(reorderSiblingsFlatOrder(withAlias, "a", "c", "after")).toEqual([3, 1]);
 	});
 });
 
@@ -164,6 +203,36 @@ describe("buildTagTree", () => {
 		expect(tree[0].tag).toBeNull();
 		expect(tree[0].inheritedColor).toBe("#888888");
 	});
+
+	it("inserts an alias leaf at a second path carrying the real tag", () => {
+		const tags = [mkTag(1, "a/b/c")];
+		const tree = buildTagTree(tags, "default", {}, {}, { "d/e/c": 1 });
+		// 'd' folder created for the alias; its leaf reuses tag id 1 and is marked isAlias.
+		const d = tree.find((n) => n.segment === "d")!;
+		const e = d.children[0];
+		const c = e.children[0];
+		expect(c.segment).toBe("c");
+		expect(c.tag?.id).toBe(1);
+		expect(c.isAlias).toBe(true);
+		// The real leaf is not an alias.
+		const realC = tree.find((n) => n.segment === "a")!.children[0].children[0];
+		expect(realC.isAlias).toBe(false);
+	});
+
+	it("drops a dangling alias whose tag no longer exists", () => {
+		const tree = buildTagTree([mkTag(1, "a/b")], "default", {}, {}, { "z/b": 999 });
+		expect(tree.find((n) => n.segment === "z")).toBeUndefined();
+	});
+
+	it("does not clobber an occupied path (no stray folders)", () => {
+		const tags = [mkTag(1, "a/b"), mkTag(2, "d")];
+		// Aliasing tag 1 onto 'd' (an existing real tag) must be skipped entirely.
+		const tree = buildTagTree(tags, "default", {}, {}, { d: 1 });
+		const d = tree.find((n) => n.segment === "d")!;
+		expect(d.tag?.id).toBe(2); // still the real tag, not the alias
+		expect(d.isAlias).toBe(false);
+		expect(d.children).toHaveLength(0);
+	});
 });
 
 describe("cascadeRename", () => {
@@ -182,16 +251,28 @@ describe("cascadeRename", () => {
 	});
 
 	it("rewrites a nested prefix without touching siblings", () => {
-		const tags = [mkTag(1, "Europe/France"), mkTag(2, "Europe/France/Paris"), mkTag(3, "Europe/Spain")];
+		const tags = [
+			mkTag(1, "Europe/France"),
+			mkTag(2, "Europe/France/Paris"),
+			mkTag(3, "Europe/Spain"),
+		];
 		const { tagRenames } = cascadeRename("Europe/France", "Europe/Iberia", tags, {});
 		const byId = Object.fromEntries(tagRenames.map((r) => [r.id, r.name]));
 		expect(byId).toEqual({ 1: "Europe/Iberia", 2: "Europe/Iberia/Paris" });
 	});
 
 	it("moves virtualTags color keys under the renamed prefix", () => {
-		const vt = { Europe: { color: "#111" }, "Europe/France": { color: "#222" }, Asia: { color: "#333" } };
+		const vt = {
+			Europe: { color: "#111" },
+			"Europe/France": { color: "#222" },
+			Asia: { color: "#333" },
+		};
 		const { virtualTags } = cascadeRename("Europe", "EU", [], vt);
-		expect(virtualTags).toEqual({ EU: { color: "#111" }, "EU/France": { color: "#222" }, Asia: { color: "#333" } });
+		expect(virtualTags).toEqual({
+			EU: { color: "#111" },
+			"EU/France": { color: "#222" },
+			Asia: { color: "#333" },
+		});
 	});
 
 	it("merges on collision (renamed name matches an existing tag)", () => {
@@ -207,6 +288,20 @@ describe("cascadeRename", () => {
 		expect(virtualTags).toEqual({ A: { color: "#1" } });
 	});
 
+	it("moves alias keys sitting under the renamed prefix", () => {
+		const aliases = { "Europe/x": 5, "Europe/France/y": 6, "Asia/z": 7 };
+		const { aliases: next } = cascadeRename("Europe", "EU", [], {}, aliases);
+		expect(next).toEqual({ "EU/x": 5, "EU/France/y": 6, "Asia/z": 7 });
+	});
+
+	it("syncs the leaf segment of aliases pointing at the renamed root tag", () => {
+		const tags = [mkTag(1, "a"), mkTag(2, "a/b")];
+		const aliases = { "Fav/a": 1, "Fav/b": 2 };
+		const { aliases: next } = cascadeRename("a", "x", tags, {}, aliases);
+		// Root tag a -> x renames the alias segment; descendant a/b -> x/b keeps leaf "b".
+		expect(next).toEqual({ "Fav/x": 1, "Fav/b": 2 });
+	});
+
 	it("renames descendants of a tagless folder and moves its color key", () => {
 		const tags = [mkTag(1, "a/b"), mkTag(2, "a/c")];
 		const { tagRenames, virtualTags } = cascadeRename("a", "x", tags, { a: { color: "#aaa" } });
@@ -215,5 +310,23 @@ describe("cascadeRename", () => {
 			{ id: 2, name: "x/c" },
 		]);
 		expect(virtualTags).toEqual({ x: { color: "#aaa" } });
+	});
+});
+
+describe("syncAliasSegments", () => {
+	it("rewrites the alias leaf segment when the tag's leaf name changes", () => {
+		const aliases = { "d/e/c": 1, "Fav/c": 1, "Asia/z": 7 };
+		const next = syncAliasSegments(aliases, [{ id: 1, oldName: "a/b/c", newName: "a/b/q" }]);
+		expect(next).toEqual({ "d/e/q": 1, "Fav/q": 1, "Asia/z": 7 });
+	});
+
+	it("returns null when only the folder part of the name changed", () => {
+		const aliases = { "Fav/c": 1 };
+		expect(syncAliasSegments(aliases, [{ id: 1, oldName: "a/c", newName: "b/c" }])).toBeNull();
+	});
+
+	it("returns null when no alias points at a renamed tag", () => {
+		const aliases = { "Fav/c": 1 };
+		expect(syncAliasSegments(aliases, [{ id: 2, oldName: "x", newName: "y" }])).toBeNull();
 	});
 });

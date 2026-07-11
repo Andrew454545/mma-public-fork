@@ -29,7 +29,7 @@ export function SaveSelectionsDialog({
 		if (!map) return [];
 		return selections
 			.map((s) => {
-				const saved = selectionToSaved(s, map);
+				const saved = selectionToSaved(s);
 				if (!saved) return null;
 				return { props: saved, color: s.color } as SavedSelectionItem;
 			})
@@ -38,7 +38,7 @@ export function SaveSelectionsDialog({
 
 	const handleSave = () => {
 		if (!name.trim() || !map) return;
-		const ok = saveCurrentSelections(name.trim(), selections, map);
+		const ok = saveCurrentSelections(name.trim(), selections);
 		if (ok) {
 			onNameChange("");
 			onOpenChange(false);
@@ -52,7 +52,10 @@ export function SaveSelectionsDialog({
 					<p>No saveable selections active.</p>
 				) : (
 					<form
-						onSubmit={(e) => { e.preventDefault(); handleSave(); }}
+						onSubmit={(e) => {
+							e.preventDefault();
+							handleSave();
+						}}
 						style={{ display: "flex", flexDirection: "column", gap: "0.75rem", marginTop: 4 }}
 					>
 						<input
@@ -67,15 +70,21 @@ export function SaveSelectionsDialog({
 								<span key={i} className="saved-selection-row__chip">
 									<span
 										className="saved-selection-row__dot"
-										style={{ background: `rgb(${item.color[0]},${item.color[1]},${item.color[2]})` }}
+										style={{
+											background: `rgb(${item.color[0]},${item.color[1]},${item.color[2]})`,
+										}}
 									/>
 									{describeRule(item.props)}
 								</span>
 							))}
 						</div>
 						<div style={{ display: "flex", justifyContent: "flex-end", gap: "0.5rem" }}>
-							<button className="button" type="button" onClick={() => onOpenChange(false)}>Cancel</button>
-							<button className="button button--primary" type="submit" disabled={!name.trim()}>Save</button>
+							<button className="button" type="button" onClick={() => onOpenChange(false)}>
+								Cancel
+							</button>
+							<button className="button button--primary" type="submit" disabled={!name.trim()}>
+								Save
+							</button>
 						</div>
 					</form>
 				)}
@@ -84,7 +93,13 @@ export function SaveSelectionsDialog({
 	);
 }
 
-export function ApplySavedSelectionDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
+export function ApplySavedSelectionDialog({
+	open,
+	onOpenChange,
+}: {
+	open: boolean;
+	onOpenChange: (v: boolean) => void;
+}) {
 	const map = useCurrentMap();
 	const saved = useSetting("savedSelections");
 
@@ -101,7 +116,7 @@ export function ApplySavedSelectionDialog({ open, onOpenChange }: { open: boolea
 								className="saved-selection-row"
 								onClick={() => {
 									if (map) {
-										applySavedSelection(s, map);
+										applySavedSelection(s);
 										onOpenChange(false);
 									}
 								}}
@@ -110,7 +125,10 @@ export function ApplySavedSelectionDialog({ open, onOpenChange }: { open: boolea
 									<span className="saved-selection-row__name">{s.name}</span>
 									<button
 										className="saved-selection-row__delete"
-										onClick={(e) => { e.stopPropagation(); deleteSavedSelection(s.id); }}
+										onClick={(e) => {
+											e.stopPropagation();
+											deleteSavedSelection(s.id);
+										}}
 										title="Delete"
 									>
 										<Icon path={mdiClose} size={14} />
@@ -121,7 +139,9 @@ export function ApplySavedSelectionDialog({ open, onOpenChange }: { open: boolea
 										<span key={i} className="saved-selection-row__chip">
 											<span
 												className="saved-selection-row__dot"
-												style={{ background: `rgb(${item.color[0]},${item.color[1]},${item.color[2]})` }}
+												style={{
+													background: `rgb(${item.color[0]},${item.color[1]},${item.color[2]})`,
+												}}
 											/>
 											{describeRule(item.props)}
 										</span>

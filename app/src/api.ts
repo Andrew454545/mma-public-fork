@@ -10,19 +10,26 @@
 
 import * as store from "@/store/useMapStore";
 import * as review from "@/lib/review/review";
-import type { Scope, Location } from "@/bindings.gen"
+import type { Scope, Location } from "@/bindings.gen";
 import { cmd as commands } from "@/lib/commands";
 import { goToMap, goToList } from "@/store/router";
 import { createLocation } from "@/types";
-import { registerPlugin, createPluginStorage } from "@/plugins/registry";
+import { registerPlugin, createPluginStorage, usePluginState } from "@/plugins/registry";
 import { trackDisposable } from "@/plugins/scope";
-import { Sidebar, Section, Field, EmptyState, SegmentedControl } from "@/components/primitives/Sidebar";
+import {
+	Sidebar,
+	Section,
+	Field,
+	EmptyState,
+	SegmentedControl,
+} from "@/components/primitives/Sidebar";
 import { ScopeSelector } from "@/components/primitives/ScopeSelector";
 import { toast } from "@/lib/util/toast";
 import { preloadModules, getAvailableExternals } from "@/plugins/externals";
 import { registerEnrichFields, registerEnrichmentProvider } from "@/lib/data/fieldDefs";
 import { getFieldDef, getAllFieldDefs } from "@/lib/data/fieldDefRegistry";
 import { invoke } from "@tauri-apps/api/core";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { Command } from "@tauri-apps/plugin-shell";
 import { open as dialogOpen, save as dialogSave } from "@tauri-apps/plugin-dialog";
 import { getGoogleMap, waitForGoogleMap } from "@/lib/map/mapState";
@@ -49,7 +56,9 @@ async function createLocationStore(): Promise<LocationStore> {
 	for (const l of await store.fetchAllLocations()) locs.set(l.id, l);
 
 	const listeners = new Set<() => void>();
-	const notify = () => { for (const cb of listeners) cb(); };
+	const notify = () => {
+		for (const cb of listeners) cb();
+	};
 
 	const unsubs = [
 		subscribe("location:add", (added) => {
@@ -76,13 +85,70 @@ async function createLocationStore(): Promise<LocationStore> {
 		},
 		onChange(cb) {
 			listeners.add(cb);
-			return () => { listeners.delete(cb); };
+			return () => {
+				listeners.delete(cb);
+			};
 		},
 		destroy() {
 			unsubs.forEach((fn) => fn());
 			listeners.clear();
 			locs.clear();
 		},
+	};
+}
+
+/** A running sidecar process. Callbacks fire per line; listeners self-remove on exit. */
+export interface SidecarRun {
+	runId: number;
+	onLine(cb: (line: string) => void): void;
+	onStderr(cb: (line: string) => void): void;
+	onExit(cb: (code: number | null) => void): void;
+	kill(): void;
+}
+
+// Spawn an installed plugin sidecar. Event listeners attach BEFORE the process starts
+// (no Rust-emitted line is missed); callers register onLine/onExit right after this resolves.
+async function spawnSidecar(pluginId: string, name: string, args: string[]): Promise<SidecarRun> {
+	const lineCbs: ((l: string) => void)[] = [];
+	const errCbs: ((l: string) => void)[] = [];
+	const exitCbs: ((c: number | null) => void)[] = [];
+	let runId = -1;
+	const unlisteners: UnlistenFn[] = [];
+	const cleanup = () => {
+		for (const u of unlisteners) u();
+		unlisteners.length = 0;
+	};
+
+	unlisteners.push(
+		await listen<{ runId: number; line: string }>("sidecar-stdout", (ev) => {
+			if (ev.payload.runId === runId) for (const cb of lineCbs) cb(ev.payload.line);
+		}),
+	);
+	unlisteners.push(
+		await listen<{ runId: number; line: string }>("sidecar-stderr", (ev) => {
+			if (ev.payload.runId === runId) for (const cb of errCbs) cb(ev.payload.line);
+		}),
+	);
+	unlisteners.push(
+		await listen<{ runId: number; code: number | null }>("sidecar-exit", (ev) => {
+			if (ev.payload.runId !== runId) return;
+			for (const cb of exitCbs) cb(ev.payload.code);
+			cleanup();
+		}),
+	);
+
+	try {
+		runId = await commands.sidecarSpawn(pluginId, name, args);
+	} catch (e) {
+		cleanup();
+		throw e;
+	}
+	return {
+		runId,
+		onLine: (cb) => lineCbs.push(cb),
+		onStderr: (cb) => errCbs.push(cb),
+		onExit: (cb) => exitCbs.push(cb),
+		kill: () => void commands.sidecarKill(runId),
 	};
 }
 
@@ -103,6 +169,12 @@ const mma = {
 	shell: { Command },
 	dialog: { open: dialogOpen, save: dialogSave },
 
+	// --- Sidecar binaries (distributed via GitHub Releases on install) ---
+	sidecar: {
+		installedVersion: (pluginId: string) => commands.sidecarInstalledVersion(pluginId),
+		spawn: spawnSidecar,
+	},
+
 	// --- Bootstrap (for plugins) ---
 	registerPlugin,
 	registerEnrichFields,
@@ -119,6 +191,7 @@ const mma = {
 
 	// --- Namespaced per-plugin storage ---
 	storage: createPluginStorage,
+	usePluginState,
 
 	// --- Field definitions ---
 	getFieldDef,
@@ -149,8 +222,10 @@ const mma = {
 	loadSeenPano,
 
 	// --- Enrichment ---
-	enrichAll: async (opts?: Record<string, unknown>) => enrichAll(await store.fetchAllLocations(), opts),
-	bulkPinToPano: async (opts?: Record<string, unknown>) => bulkPinToPano(await store.fetchAllLocations(), opts),
+	enrichAll: async (opts?: Record<string, unknown>) =>
+		enrichAll(await store.fetchAllLocations(), opts),
+	bulkPinToPano: async (opts?: Record<string, unknown>) =>
+		bulkPinToPano(await store.fetchAllLocations(), opts),
 	validateLocations,
 	needsEnrichment,
 

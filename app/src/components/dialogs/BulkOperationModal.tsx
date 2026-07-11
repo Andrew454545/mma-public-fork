@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { Dialog, DialogContent } from "@/components/primitives/Dialog";
+import { NSelect } from "@/components/primitives/NSelect";
 import {
 	getCurrentMap,
 	addSelections,
@@ -7,19 +8,18 @@ import {
 	useScope,
 	applyScope,
 	type ScopeController,
-    updateLocations,
+	updateLocations,
 } from "@/store/useMapStore";
-import type { Scope, Location, Update, LocationPatch_Deserialize as LocationPatch } from "@/bindings.gen";
+import type {
+	Scope,
+	Location,
+	Update,
+	LocationPatch_Deserialize as LocationPatch,
+} from "@/bindings.gen";
 import { ScopeSelector } from "@/components/primitives/ScopeSelector";
 import { isPinnedToPano } from "@/types";
-import { getFieldDef, getAllFieldDefs } from "@/lib/data/fieldDefRegistry";
-import {
-	planFieldSet,
-	planFieldExpr,
-	parseFieldExpr,
-	fieldPatch,
-	TOP_LEVEL_SET_FIELDS,
-} from "@/lib/data/fieldOps";
+import { getFieldDef, fieldLabel, getAllFieldDefs } from "@/lib/data/fieldDefRegistry";
+import { planFieldSet, planFieldExpr, parseFieldExpr, fieldPatch } from "@/lib/data/fieldOps";
 import { ValidationState } from "@/store/selections";
 import { validateLocations } from "@/lib/sv/validate";
 import { enrichAll, type EnrichResult } from "@/lib/sv/enrich";
@@ -101,7 +101,9 @@ function ValidateSetup({ scopeCtl, onReady }: SetupProps) {
 									state,
 								}));
 							if (batch.length > 0) addSelections(batch);
-							return { doneMessage: `Done -- ${fmt.format(locations.length)} locations validated.` };
+							return {
+								doneMessage: `Done -- ${fmt.format(locations.length)} locations validated.`,
+							};
 						})
 					}
 				>
@@ -143,17 +145,17 @@ function EnrichSetup({ scopeCtl, locs, onReady }: SetupProps) {
 					<tbody>
 						{coverage.map((c) => {
 							const missing = total - c.have;
+							const pct = Math.round((c.have / total) * 100);
 							return (
 								<tr key={c.key} className={missing > 0 ? "is-incomplete" : ""}>
 									<td className="bulk-operation__coverage-label">{c.label}</td>
 									<td className="bulk-operation__coverage-bar">
-										<span
-											className="bulk-operation__coverage-fill"
-											style={{ width: `${(c.have / total) * 100}%` }}
-										/>
+										<span className="bulk-operation__coverage-fill" style={{ width: `${pct}%` }} />
 									</td>
-									<td className="bulk-operation__coverage-stat">
-										{missing > 0 ? `${fmt.format(missing)} missing` : "complete"}
+									<td
+										className={`bulk-operation__coverage-stat ${missing > 0 ? "is-incomplete" : "is-complete"}`}
+									>
+										{missing > 0 ? `${pct}%` : "100%"}
 									</td>
 								</tr>
 							);
@@ -213,7 +215,11 @@ function PinPanoSetup({ scopeCtl, locs, onReady }: SetupProps) {
 				Re-pin already pinned locations
 			</label>
 			<label className="bulk-operation__option">
-				<input type="checkbox" checked={useLatest} onChange={(e) => setUseLatest(e.target.checked)} />
+				<input
+					type="checkbox"
+					checked={useLatest}
+					onChange={(e) => setUseLatest(e.target.checked)}
+				/>
 				Use latest timeline coverage
 			</label>
 			<div className="bulk-operation__actions">
@@ -273,7 +279,7 @@ function ClearFieldsSetup({ locs, scopedLocs, scopeCtl, onReady }: SetupProps) {
 						return (
 							<label key={key} className="bulk-operation__field-item">
 								<input type="checkbox" checked={selected.has(key)} onChange={() => toggle(key)} />
-								<span className="bulk-operation__field-label">{def?.label ?? key}</span>
+								<span className="bulk-operation__field-label">{fieldLabel(key)}</span>
 								{def?.label && def.label !== key && (
 									<span className="bulk-operation__field-key">{key}</span>
 								)}
@@ -302,7 +308,9 @@ function ClearFieldsSetup({ locs, scopedLocs, scopeCtl, onReady }: SetupProps) {
 								updates.push({ id: loc.id, patch: { extra: cleaned } });
 							}
 							if (updates.length > 0) await updateLocations(updates);
-							return { doneMessage: `Cleared fields from ${fmt.format(updates.length)} locations.` };
+							return {
+								doneMessage: `Cleared fields from ${fmt.format(updates.length)} locations.`,
+							};
 						});
 					}}
 					disabled={selected.size === 0}
@@ -316,10 +324,7 @@ function ClearFieldsSetup({ locs, scopedLocs, scopeCtl, onReady }: SetupProps) {
 
 function SetFieldSetup({ locs, scopeCtl, onReady }: SetupProps) {
 	const sortedKeys = useMemo(() => {
-		const known = new Set<string>([
-			...Object.keys(TOP_LEVEL_SET_FIELDS),
-			...Object.keys(getAllFieldDefs()),
-		]);
+		const known = new Set<string>(Object.keys(getAllFieldDefs()));
 		for (const loc of locs) {
 			if (loc.extra) for (const k of Object.keys(loc.extra)) known.add(k);
 		}
@@ -332,7 +337,7 @@ function SetFieldSetup({ locs, scopeCtl, onReady }: SetupProps) {
 	const [raw, setRaw] = useState("");
 
 	const effectiveKey = (creatingNew ? newKey : key).trim();
-	const def = effectiveKey ? (getFieldDef(effectiveKey) ?? TOP_LEVEL_SET_FIELDS[effectiveKey]) : undefined;
+	const def = effectiveKey ? getFieldDef(effectiveKey) : undefined;
 	const isNumber = def?.type === "number";
 	const isEnum = def?.type === "enum" && def.values;
 	const exprError = useMemo(() => {
@@ -351,8 +356,7 @@ function SetFieldSetup({ locs, scopeCtl, onReady }: SetupProps) {
 			<ScopeSelector ctl={scopeCtl} />
 			<label className="bulk-operation__option">
 				Field
-				<select
-					className="nselect"
+				<NSelect
 					value={creatingNew ? "__new__" : key}
 					onChange={(e) => {
 						if (e.target.value === "__new__") {
@@ -368,11 +372,11 @@ function SetFieldSetup({ locs, scopeCtl, onReady }: SetupProps) {
 					</option>
 					{sortedKeys.map((k) => (
 						<option key={k} value={k}>
-							{getFieldDef(k)?.label ?? TOP_LEVEL_SET_FIELDS[k]?.label ?? k}
+							{fieldLabel(k)}
 						</option>
 					))}
 					<option value="__new__">New field...</option>
-				</select>
+				</NSelect>
 			</label>
 			{creatingNew && (
 				<label className="bulk-operation__option">
@@ -389,14 +393,14 @@ function SetFieldSetup({ locs, scopeCtl, onReady }: SetupProps) {
 			<label className="bulk-operation__option">
 				Value
 				{isEnum ? (
-					<select className="nselect" value={raw} onChange={(e) => setRaw(e.target.value)}>
+					<NSelect value={raw} onChange={(e) => setRaw(e.target.value)}>
 						<option value="" />
 						{def!.values!.map((v) => (
 							<option key={v} value={v}>
 								{def!.labels?.[v] ?? v}
 							</option>
 						))}
-					</select>
+					</NSelect>
 				) : (
 					<input
 						className="input"
@@ -427,7 +431,8 @@ function SetFieldSetup({ locs, scopeCtl, onReady }: SetupProps) {
 							if (useExpr) {
 								const { updates, skipped } = planFieldExpr(locations, ek, parseFieldExpr(rv));
 								if (updates.length > 0) await updateLocations(updates);
-								const msg = `Set field on ${fmt.format(updates.length)} locations.` +
+								const msg =
+									`Set field on ${fmt.format(updates.length)} locations.` +
 									(skipped > 0 ? ` ${fmt.format(skipped)} skipped (missing source fields).` : "");
 								return { doneMessage: msg };
 							}
@@ -544,29 +549,56 @@ function BulkProgress({
 	const [progress, setProgress] = useState(0);
 	const [total, setTotal] = useState(0);
 	const [done, setDone] = useState(0);
+	const [rate, setRate] = useState<number | null>(null);
+	const [elapsed, setElapsed] = useState<number | null>(null);
 	const [phaseLabel, setPhaseLabel] = useState<string | null>(null);
 	const [status, setStatus] = useState<"running" | "done" | "cancelled" | "error">("running");
 	const [error, setError] = useState<string | null>(null);
 	const [result, setResult] = useState<BulkRunResult>({});
 	const controllerRef = useRef<AbortController | null>(null);
+	const rateRef = useRef<{ t: number; done: number; ema: number | null }>({
+		t: 0,
+		done: 0,
+		ema: null,
+	});
 
 	const run = useCallback(async () => {
 		const controller = new AbortController();
 		controllerRef.current = controller;
 
 		const locations = applyScope(scope, await fetchAllLocations());
+		const runStart = performance.now();
+		rateRef.current = { t: runStart, done: 0, ema: null };
+		setRate(null);
+		setElapsed(null);
 
 		const onProgress: ProgressFn = (d, t, label) => {
 			setPhaseLabel(label ?? null);
 			setTotal(t);
 			setDone(d);
 			setProgress(t > 0 ? d / t : 1);
+
+			// Smoothed items/s. `d` resets between enrich waves; on a reset just
+			// re-anchor rather than emit a negative spike.
+			const now = performance.now();
+			const prev = rateRef.current;
+			const dd = d - prev.done;
+			const dt = (now - prev.t) / 1000;
+			if (dd < 0) {
+				rateRef.current = { ...prev, t: now, done: d };
+			} else if (dt >= 0.25 && dd > 0) {
+				const inst = dd / dt;
+				const ema = prev.ema == null ? inst : prev.ema * 0.7 + inst * 0.3;
+				rateRef.current = { t: now, done: d, ema };
+				setRate(ema);
+			}
 		};
 
 		try {
 			const r = await runner({ locations, signal: controller.signal, onProgress });
 			setResult(r);
 			setProgress(1);
+			setElapsed((performance.now() - runStart) / 1000);
 			setStatus("done");
 		} catch (e: unknown) {
 			if (e instanceof Error && e.name === "AbortError") {
@@ -591,8 +623,17 @@ function BulkProgress({
 		<div className="bulk-operation">
 			<div className="bulk-operation__status">
 				{status === "running" &&
-					`${phaseLabel ? `${phaseLabel}: ` : ""}${fmt.format(done)} / ${fmt.format(total)} (${pct}%)`}
-				{status === "done" && (result.doneContent ?? result.doneMessage ?? `Done -- ${fmt.format(total)} locations processed.`)}
+					`${phaseLabel ? `${phaseLabel}: ` : ""}${fmt.format(done)} / ${fmt.format(total)} (${pct}%)${
+						rate != null ? ` -- ${fmt.format(Math.round(rate))}/s` : ""
+					}`}
+				{status === "done" &&
+					(result.doneContent ??
+						result.doneMessage ??
+						`Done -- ${fmt.format(total)} locations processed${
+							elapsed != null && elapsed > 0
+								? ` in ${elapsed.toFixed(1)}s (${fmt.format(Math.round(total / elapsed))}/s)`
+								: ""
+						}.`)}
 				{status === "cancelled" && `Cancelled at ${fmt.format(done)} / ${fmt.format(total)}.`}
 				{status === "error" && `Error: ${error}`}
 			</div>
@@ -653,18 +694,9 @@ export function BulkOperationModal({ operation, onClose }: Props) {
 		>
 			<DialogContent title={TITLES[operation]} className="bulk-operation-modal">
 				{runner ? (
-					<BulkProgress
-						runner={runner}
-						scope={scopeCtl.scope}
-						onClose={onClose}
-					/>
+					<BulkProgress runner={runner} scope={scopeCtl.scope} onClose={onClose} />
 				) : (
-					<Setup
-						scopeCtl={scopeCtl}
-						locs={locs}
-						scopedLocs={scopedLocs}
-						onReady={onReady}
-					/>
+					<Setup scopeCtl={scopeCtl} locs={locs} scopedLocs={scopedLocs} onReady={onReady} />
 				)}
 			</DialogContent>
 		</Dialog>

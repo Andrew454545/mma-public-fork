@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { Dialog, DialogContent } from "@/components/primitives/Dialog";
+import { NSelect } from "@/components/primitives/NSelect";
 import { DatabaseManager } from "@/components/dialogs/DatabaseManager";
 import {
 	getAllBindings,
@@ -17,7 +18,7 @@ import {
 	type HotkeyGroup,
 } from "@/lib/util/hotkeys";
 import { Icon } from "@/components/primitives/Icon";
-import { mdiAlertCircleOutline } from "@mdi/js";
+import { mdiAlertCircleOutline, mdiRefresh } from "@mdi/js";
 import {
 	useSettings,
 	useSetting,
@@ -40,6 +41,10 @@ import {
 } from "@/store/settings";
 import { formatBinding, buildComboString } from "@/lib/hooks/useHotkey";
 import { cmd } from "@/lib/commands";
+import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import { toast } from "@/lib/util/toast";
+import { log } from "@/lib/util/log";
+import type { DataLocation } from "@/bindings.gen";
 import { useUpdateState, checkForUpdate, installUpdate, relaunchApp } from "@/lib/util/updateCheck";
 import { ColorPicker } from "@/components/primitives/ColorPicker";
 
@@ -52,8 +57,8 @@ function SettingSelect<K extends keyof AppSettings>({
 }) {
 	const value = useSetting(setting);
 	return (
-		<select
-			className="nselect nselect--compact"
+		<NSelect
+			className="nselect--compact"
 			value={value as string}
 			onChange={(e) => setSetting(setting, e.target.value as AppSettings[K])}
 		>
@@ -62,7 +67,7 @@ function SettingSelect<K extends keyof AppSettings>({
 					{label as string}
 				</option>
 			))}
-		</select>
+		</NSelect>
 	);
 }
 
@@ -613,19 +618,35 @@ function NavigationSection() {
 	);
 }
 
-function ActiveLocationSection() {
+function MarkersSection() {
 	const s = useSettings();
 	return (
 		<fieldset className="fieldset">
 			<legend className="fieldset__header">
-				Active location <span className="fieldset__divider" />
+				Markers <span className="fieldset__divider" />
 			</legend>
 			<div className="settings-popup__item">
-				Marker color
+				Default marker color
+				<ColorPicker
+					color={s.markerColor}
+					onChange={(color) => setSetting("markerColor", color)}
+					ariaLabel="Default marker color"
+				/>
+			</div>
+			<div className="settings-popup__item">
+				Active marker color
 				<ColorPicker
 					color={s.activeLocationColor}
 					onChange={(color) => setSetting("activeLocationColor", color)}
 					ariaLabel="Active location marker color"
+				/>
+			</div>
+			<div className="settings-popup__item">
+				Staged marker color
+				<ColorPicker
+					color={s.importPreviewColor}
+					onChange={(color) => setSetting("importPreviewColor", color)}
+					ariaLabel="Staged import marker color"
 				/>
 			</div>
 			<label className="settings-popup__item">
@@ -677,25 +698,6 @@ function PanoDotsSection() {
 	);
 }
 
-function ImportSection() {
-	const s = useSettings();
-	return (
-		<fieldset className="fieldset">
-			<legend className="fieldset__header">
-				Import <span className="fieldset__divider" />
-			</legend>
-			<div className="settings-popup__item">
-				Staged marker color
-				<ColorPicker
-					color={s.importPreviewColor}
-					onChange={(color) => setSetting("importPreviewColor", color)}
-					ariaLabel="Staged import marker color"
-				/>
-			</div>
-		</fieldset>
-	);
-}
-
 function MapListSection() {
 	const s = useSettings();
 	const fields = s.mapListFields;
@@ -716,7 +718,7 @@ function MapListSection() {
 			<legend className="fieldset__header">
 				Map List <span className="fieldset__divider" />
 			</legend>
-			<p style={{ margin: "0 0 0.25rem", fontSize: "0.85rem", color: "#888" }}>
+			<p style={{ margin: "0.25rem 0", fontSize: "0.85rem", color: "#888" }}>
 				Fields shown on each map row (labels are always shown)
 			</p>
 			{Object.entries(MAP_LIST_FIELDS).map(([value, label]) => (
@@ -774,9 +776,8 @@ function MapTab() {
 	return (
 		<>
 			<MapNavigationSection />
-			<ActiveLocationSection />
+			<MarkersSection />
 			<PanoDotsSection />
-			<ImportSection />
 		</>
 	);
 }
@@ -827,6 +828,16 @@ function TagsSection() {
 				View mode
 				<SettingSelect setting="tagViewMode" options={TAG_VIEW_MODES} />
 			</label>
+			{s.tagViewMode === "tree" && (
+				<label className="settings-popup__item">
+					<input
+						type="checkbox"
+						checked={s.truncateTagPaths}
+						onChange={(e) => setSetting("truncateTagPaths", e.target.checked)}
+					/>
+					Truncate tag names to shortest unique path
+				</label>
+			)}
 			<label
 				className="settings-popup__item"
 				style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}
@@ -958,8 +969,8 @@ function BorderDetailSection() {
 			</legend>
 			<label className="settings-popup__item">
 				Country data
-				<select
-					className="nselect nselect--compact"
+				<NSelect
+					className="nselect--compact"
 					value={s.borderDetail}
 					onChange={(e) => handleChange(e.target.value as BorderDetail)}
 					disabled={downloading !== null}
@@ -970,12 +981,12 @@ function BorderDetailSection() {
 							{value !== "light" && statusLabel(value as "medium" | "heavy")}
 						</option>
 					))}
-				</select>
+				</NSelect>
 			</label>
 			<label className="settings-popup__item">
 				Subdivision data
-				<select
-					className="nselect nselect--compact"
+				<NSelect
+					className="nselect--compact"
 					value={s.subdivisionDetail}
 					onChange={(e) => handleSubdivisionChange(e.target.value as SubdivisionDetail)}
 					disabled={downloading !== null}
@@ -986,7 +997,7 @@ function BorderDetailSection() {
 							{value !== "off" && subdivisionStatus()}
 						</option>
 					))}
-				</select>
+				</NSelect>
 			</label>
 			{downloading && (
 				<p style={{ margin: "0.25rem 0 0", fontSize: "0.85rem", opacity: 0.7 }}>
@@ -1014,9 +1025,32 @@ function StreetViewTab() {
 
 declare const __APP_VERSION__: string;
 
+const UPDATE_STATUS: Record<string, string> = {
+	idle: "Updates haven't been checked yet.",
+	checking: "Checking for updates...",
+	"up-to-date": "You're on the latest version.",
+	downloading: "Downloading update...",
+	ready: "Update installed. Restart to apply.",
+};
+
 function UpdateSection() {
 	const update = useUpdateState();
 	const version = typeof __APP_VERSION__ !== "undefined" ? __APP_VERSION__ : "dev";
+	const checking = update.phase === "checking";
+	const badgeMod =
+		update.phase === "up-to-date"
+			? " settings-updates__version--latest"
+			: update.phase === "available" || update.phase === "ready"
+				? " settings-updates__version--outdated"
+				: update.phase === "error"
+					? " settings-updates__version--error"
+					: "";
+	const status =
+		update.phase === "available"
+			? `Version ${update.version} is available.`
+			: update.phase === "error"
+				? (update.error ?? "Update check failed.")
+				: UPDATE_STATUS[update.phase];
 
 	return (
 		<fieldset className="fieldset">
@@ -1025,22 +1059,26 @@ function UpdateSection() {
 			</legend>
 			<div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
 				<div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-					<span>Current version: {version}</span>
-					{(update.phase === "idle" || update.phase === "up-to-date") && (
-						<button className="button" onClick={checkForUpdate}>
-							{update.phase === "up-to-date" ? "Check again" : "Check for updates"}
-						</button>
-					)}
-					{update.phase === "checking" && <span>Checking...</span>}
-					{update.phase === "up-to-date" && <span>Up to date</span>}
-					{update.phase === "error" && (
-						<>
-							<span style={{ color: "var(--color-error, #e53935)" }}>{update.error}</span>
-							<button className="button" onClick={checkForUpdate}>
-								Retry
-							</button>
-						</>
-					)}
+					<span
+						className={`settings-updates__version${badgeMod}`}
+						title={status}
+						aria-label={status}
+					>
+						v{version}
+					</span>
+					<button
+						className="icon-button settings-updates__check"
+						onClick={checkForUpdate}
+						disabled={checking || update.phase === "downloading"}
+						title="Check for updates"
+						aria-label="Check for updates"
+					>
+						<Icon
+							path={mdiRefresh}
+							size={18}
+							className={checking ? "settings-updates__spin" : undefined}
+						/>
+					</button>
 				</div>
 				{update.phase === "available" && (
 					<div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -1082,13 +1120,118 @@ function UpdateSection() {
 	);
 }
 
-function AdvancedTab() {
+function DataSection() {
 	const [showDbManager, setShowDbManager] = useState(false);
+	const [loc, setLoc] = useState<DataLocation | null>(null);
+	// undefined = no dialog; string = chosen folder; null = reset to default.
+	const [pending, setPending] = useState<string | null | undefined>(undefined);
+	const [busy, setBusy] = useState(false);
+
+	useEffect(() => {
+		cmd
+			.getDataLocation()
+			.then(setLoc)
+			.catch(() => {});
+	}, []);
+
+	const pick = useCallback(async () => {
+		const picked = await openDialog({ directory: true, title: "Choose data folder" });
+		if (typeof picked === "string") setPending(picked);
+	}, []);
+
+	const apply = useCallback(async () => {
+		setBusy(true);
+		try {
+			await cmd.setDataLocation(pending ?? null);
+			await relaunchApp();
+		} catch (e) {
+			log.error("data folder relaunch failed", e);
+			toast("Couldn't relaunch automatically -- restart the app to apply.");
+			setBusy(false);
+		}
+	}, [pending]);
+
+	const target = pending ?? loc?.default_path ?? "";
+
+	return (
+		<fieldset className="fieldset">
+			<legend className="fieldset__header">
+				Data <span className="fieldset__divider" />
+			</legend>
+			<code style={{ display: "block", wordBreak: "break-all", marginBottom: 8 }}>
+				{loc?.path ?? "..."}
+			</code>
+			<div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+				<button className="button" onClick={pick}>
+					Change folder...
+				</button>
+				<button className="button" onClick={() => cmd.openDataFolder()}>
+					Open data folder
+				</button>
+				{loc?.is_custom && (
+					<button className="button" onClick={() => setPending(null)}>
+						Reset to default
+					</button>
+				)}
+				<button className="button" onClick={() => setShowDbManager(true)}>
+					Database management
+				</button>
+			</div>
+			<DatabaseManager open={showDbManager} onOpenChange={setShowDbManager} />
+
+			<Dialog open={pending !== undefined} onOpenChange={(o) => !o && setPending(undefined)}>
+				<DialogContent title="Change data folder">
+					<p>Map data will be stored in:</p>
+					<code style={{ display: "block", wordBreak: "break-all", margin: "8px 0" }}>
+						{target}
+					</code>
+					<p style={{ color: "#888" }}>
+						Existing maps are not moved automatically. Copy them from the current folder if you want
+						to keep them. The app must relaunch to apply.
+					</p>
+					<div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 12 }}>
+						<button className="button" onClick={() => setPending(undefined)} disabled={busy}>
+							Cancel
+						</button>
+						<button className="button button--primary" onClick={apply} disabled={busy}>
+							Relaunch now
+						</button>
+					</div>
+				</DialogContent>
+			</Dialog>
+		</fieldset>
+	);
+}
+
+function StartupSection() {
+	const restoreSession = useSetting("restoreSession");
+	return (
+		<fieldset className="fieldset">
+			<legend className="fieldset__header">
+				Startup <span className="fieldset__divider" />
+			</legend>
+			<label className="settings-popup__item">
+				<input
+					type="checkbox"
+					checked={restoreSession}
+					onChange={(e) => setSetting("restoreSession", e.target.checked)}
+				/>
+				Restore open maps on startup
+			</label>
+		</fieldset>
+	);
+}
+
+function AdvancedTab() {
 	const showFps = useSetting("showFps");
 	return (
 		<>
+			<StartupSection />
 			<MapListSection />
 			<SeenSection />
+			<CustomCssSection />
+			<UpdateSection />
+			<DataSection />
 			<fieldset className="fieldset">
 				<legend className="fieldset__header">
 					Debug <span className="fieldset__divider" />
@@ -1101,23 +1244,12 @@ function AdvancedTab() {
 					/>
 					Show FPS counter
 				</label>
-			</fieldset>
-			<CustomCssSection />
-			<UpdateSection />
-			<fieldset className="fieldset">
-				<legend className="fieldset__header">
-					Database <span className="fieldset__divider" />
-				</legend>
 				<div style={{ display: "flex", gap: 8 }}>
-					<button className="button" onClick={() => setShowDbManager(true)}>
-						Database management
-					</button>
-					<button className="button" onClick={() => cmd.openDataFolder()}>
-						Open data folder
+					<button className="button" onClick={() => cmd.openLogFile()}>
+						Open log file
 					</button>
 				</div>
 			</fieldset>
-			<DatabaseManager open={showDbManager} onOpenChange={setShowDbManager} />
 		</>
 	);
 }

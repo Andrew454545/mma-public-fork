@@ -6,7 +6,7 @@ name: E2E Tests
 # Not a release gate — the release workflow does not wait on this.
 on:
   push:
-    tags: ["v*"]
+    tags: ["v[0-9]*"]
   workflow_dispatch:
 
 jobs:

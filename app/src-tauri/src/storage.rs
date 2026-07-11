@@ -4,10 +4,10 @@
 //! corruption on crash. Arrow IPC writes go through [`BufWriter`](std::io::BufWriter)
 //! because unbuffered `File` writes are ~15x slower.
 
+use crate::arrow_bridge;
 use crate::types::{AppError, AppResult};
 use rusqlite::Connection;
 use tauri::Manager;
-use crate::arrow_bridge;
 
 /// True when running under e2e tests or with `MMA_TEST_DB` set.
 /// Controls which database file and Arrow directory are used, keeping
@@ -18,24 +18,49 @@ fn is_test_mode() -> bool {
 
 /// Returns `"mma_test.db"` in test mode, `"mma.db"` otherwise.
 fn db_filename() -> &'static str {
-    if is_test_mode() { "mma_test.db" } else { "mma.db" }
+    if is_test_mode() {
+        "mma_test.db"
+    } else {
+        "mma.db"
+    }
 }
 
 /// Process-constant directories, resolved once at startup. Lets every path helper
 /// (db, arrow, plugins, temp) be zero-arg instead of threading an `AppHandle`
 /// through functions whose only use for it is path resolution.
 static APP_DATA_DIR: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
+static DEFAULT_DATA_DIR: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
+static CONFIG_DIR: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
 static TEMP_DIR: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
+
+/// Bootstrap pointer file (in `app_config_dir`, never relocatable) naming the
+/// user's chosen data folder. Absent/empty means "use the OS default".
+const DATA_LOCATION_FILE: &str = "data_location.txt";
 
 /// Resolve and cache the data/temp directories. Called once from `setup()`,
 /// before anything touches disk.
+///
+/// The effective data dir is the OS default unless a [`DATA_LOCATION_FILE`]
+/// pointer in `app_config_dir` overrides it. Test mode always uses the default.
 pub(crate) fn init_paths(app: &tauri::AppHandle) -> AppResult<()> {
-    let data_dir = match std::env::var("MMA_DATA_DIR") {
-        Ok(path) if !path.trim().is_empty() => std::path::PathBuf::from(expand_tilde(&path)),
-        _ => app.path().app_data_dir().map_err(AppError::from)?,
-    };
-    let _ = APP_DATA_DIR.set(data_dir);
+    let default_dir = app.path().app_data_dir().map_err(AppError::from)?;
+    let config_dir = app.path().app_config_dir().map_err(AppError::from)?;
+    let _ = DEFAULT_DATA_DIR.set(default_dir.clone());
+    let _ = CONFIG_DIR.set(config_dir.clone());
     let _ = TEMP_DIR.set(app.path().temp_dir().map_err(AppError::from)?);
+
+    let effective = if is_test_mode() {
+        default_dir
+    } else if let Ok(path) = std::env::var("MMA_DATA_DIR") {
+        if path.trim().is_empty() {
+            read_data_location_override(&config_dir).unwrap_or(default_dir)
+        } else {
+            std::path::PathBuf::from(expand_tilde(&path))
+        }
+    } else {
+        read_data_location_override(&config_dir).unwrap_or(default_dir)
+    };
+    let _ = APP_DATA_DIR.set(effective);
     Ok(())
 }
 
@@ -44,8 +69,13 @@ pub(crate) fn init_paths_headless() -> AppResult<()> {
     let data_dir = std::env::var("MMA_DATA_DIR")
         .ok()
         .filter(|path| !path.trim().is_empty())
-        .ok_or_else(|| AppError::from("MMA_DATA_DIR must be set for headless commands".to_string()))?;
-    let _ = APP_DATA_DIR.set(std::path::PathBuf::from(expand_tilde(&data_dir)));
+        .ok_or_else(|| {
+            AppError::from("MMA_DATA_DIR must be set for headless commands".to_string())
+        })?;
+    let data_dir = std::path::PathBuf::from(expand_tilde(&data_dir));
+    let _ = DEFAULT_DATA_DIR.set(data_dir.clone());
+    let _ = CONFIG_DIR.set(data_dir.clone());
+    let _ = APP_DATA_DIR.set(data_dir);
     let _ = TEMP_DIR.set(std::env::temp_dir());
     Ok(())
 }
@@ -62,14 +92,78 @@ fn expand_tilde(path: &str) -> String {
     }
 }
 
-/// The app data directory. Errors if `init_paths` has not run.
+/// The effective app data directory (default or user override). Errors if
+/// `init_paths` has not run.
 pub(crate) fn app_data_dir() -> AppResult<std::path::PathBuf> {
-    APP_DATA_DIR.get().cloned().ok_or_else(|| AppError::from("app paths not initialized".to_string()))
+    APP_DATA_DIR
+        .get()
+        .cloned()
+        .ok_or_else(|| AppError::from("app paths not initialized".to_string()))
+}
+
+/// The OS default data directory, ignoring any override. Used to reset the
+/// data-folder setting and to tell the UI what "default" resolves to.
+pub(crate) fn default_data_dir() -> AppResult<std::path::PathBuf> {
+    DEFAULT_DATA_DIR
+        .get()
+        .cloned()
+        .ok_or_else(|| AppError::from("app paths not initialized".to_string()))
+}
+
+/// Parse the raw pointer-file contents into an override path. Pure: trims
+/// whitespace, treats empty as "no override". Does not touch disk.
+fn parse_data_location(raw: &str) -> Option<std::path::PathBuf> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(std::path::PathBuf::from(trimmed))
+    }
+}
+
+/// Read and validate the data-folder override from `<config_dir>/data_location.txt`.
+/// Returns `None` (falling back to default) if the file is absent, empty, or names
+/// a folder that cannot be created/used.
+fn read_data_location_override(config_dir: &std::path::Path) -> Option<std::path::PathBuf> {
+    let raw = std::fs::read_to_string(config_dir.join(DATA_LOCATION_FILE)).ok()?;
+    let path = parse_data_location(&raw)?;
+    if let Err(e) = std::fs::create_dir_all(&path) {
+        log::warn!(
+            "configured data folder '{}' is unusable ({e}); using default",
+            path.display()
+        );
+        return None;
+    }
+    Some(path)
+}
+
+/// Persist (or clear) the data-folder override. `Some(path)` validates the folder
+/// is creatable then writes the pointer; `None` removes it (revert to default).
+/// Takes effect on next launch -- the active paths are fixed for the process.
+pub(crate) fn set_data_location(path: Option<&std::path::Path>) -> AppResult<()> {
+    let config_dir = CONFIG_DIR
+        .get()
+        .ok_or_else(|| AppError::from("app paths not initialized".to_string()))?;
+    std::fs::create_dir_all(config_dir)?;
+    let file = config_dir.join(DATA_LOCATION_FILE);
+    match path {
+        Some(p) => {
+            std::fs::create_dir_all(p)?;
+            std::fs::write(&file, p.to_string_lossy().as_bytes())?;
+        }
+        None => {
+            let _ = std::fs::remove_file(&file);
+        }
+    }
+    Ok(())
 }
 
 /// The OS temp directory (resolved via Tauri at startup).
 pub(crate) fn temp_dir() -> AppResult<std::path::PathBuf> {
-    TEMP_DIR.get().cloned().ok_or_else(|| AppError::from("app paths not initialized".to_string()))
+    TEMP_DIR
+        .get()
+        .cloned()
+        .ok_or_else(|| AppError::from("app paths not initialized".to_string()))
 }
 
 /// Full path to the SQLite database.
@@ -78,17 +172,26 @@ pub(crate) fn db_path() -> AppResult<std::path::PathBuf> {
 }
 
 /// Open (or create) the SQLite database, ensuring the parent directory exists.
-/// The one place that owns per-connection setup (busy timeout, future pragmas).
+/// The one place that owns per-connection setup (busy timeout, pragmas).
 pub(crate) fn open_db() -> AppResult<Connection> {
     let path = db_path()?;
     if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| format!("failed to create app data dir: {e}"))?;
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("failed to create app data dir: {e}"))?;
     }
     let conn = Connection::open(path)?;
+    configure_connection(&conn)?;
+    Ok(conn)
+}
+
+/// Per-connection setup applied to every open. FK enforcement is per-connection and
+/// defaults OFF in SQLite; without it every ON DELETE CASCADE in the schema is dead.
+fn configure_connection(conn: &Connection) -> AppResult<()> {
     // Default busy timeout is 0: any write-lock contention (second window, lingering
     // process) fails instantly with "database is locked" instead of waiting.
     conn.busy_timeout(std::time::Duration::from_secs(5))?;
-    Ok(conn)
+    conn.pragma_update(None, "foreign_keys", true)?;
+    Ok(())
 }
 
 /// Apply all pending schema migrations from [`MIGRATIONS`] in order.
@@ -98,11 +201,13 @@ pub(crate) fn open_db() -> AppResult<Connection> {
 /// Sets WAL mode and foreign keys as part of the connection setup.
 pub(crate) fn run_migrations() -> AppResult<()> {
     let conn = open_db()?;
-    conn.execute_batch("
+    conn.execute_batch(
+        "
         PRAGMA foreign_keys = ON;
         PRAGMA journal_mode = WAL;
         PRAGMA synchronous = NORMAL;
-    ")?;
+    ",
+    )?;
 
     conn.execute(
         "CREATE TABLE IF NOT EXISTS _mma_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)",
@@ -110,15 +215,19 @@ pub(crate) fn run_migrations() -> AppResult<()> {
     )?;
 
     // Seed from tauri-plugin-sql's migration table if upgrading from old system
-    let sqlx_exists: bool = conn.query_row(
-        "SELECT COUNT(*) > 0 FROM sqlite_master WHERE type='table' AND name='_sqlx_migrations'",
-        [], |r| r.get(0),
-    ).unwrap_or(false);
+    let sqlx_exists: bool = conn
+        .query_row(
+            "SELECT COUNT(*) > 0 FROM sqlite_master WHERE type='table' AND name='_sqlx_migrations'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap_or(false);
     if sqlx_exists {
         conn.execute_batch(
             "INSERT OR IGNORE INTO _mma_migrations (version, applied_at)
-             SELECT version, installed_on FROM _sqlx_migrations WHERE success = 1"
-        ).ok();
+             SELECT version, installed_on FROM _sqlx_migrations WHERE success = 1",
+        )
+        .ok();
     }
 
     let applied: std::collections::HashSet<u32> = conn
@@ -129,14 +238,19 @@ pub(crate) fn run_migrations() -> AppResult<()> {
 
     let mut wiped_blobs = false;
     for (version, sql) in MIGRATIONS {
-        if applied.contains(version) { continue; }
+        if applied.contains(version) {
+            continue;
+        }
         log::info!("[migrations] applying v{version}");
-        conn.execute_batch(sql).map_err(|e| format!("migration v{version} failed: {e}"))?;
+        conn.execute_batch(sql)
+            .map_err(|e| format!("migration v{version} failed: {e}"))?;
         conn.execute(
             "INSERT INTO _mma_migrations (version, applied_at) VALUES (?1, datetime('now'))",
             rusqlite::params![version],
         )?;
-        if *version == 16 { wiped_blobs = true; }
+        if *version == 16 {
+            wiped_blobs = true;
+        }
     }
 
     // auto_vacuum must be set before the DB has data, or toggled with a one-time VACUUM.
@@ -161,7 +275,9 @@ pub(crate) fn run_migrations() -> AppResult<()> {
 }
 
 const MIGRATIONS: &[(u32, &str)] = &[
-    (1, "CREATE TABLE IF NOT EXISTS maps (
+    (
+        1,
+        "CREATE TABLE IF NOT EXISTS maps (
             id TEXT PRIMARY KEY NOT NULL,
             name TEXT NOT NULL DEFAULT '',
             description TEXT NOT NULL DEFAULT '',
@@ -197,8 +313,11 @@ const MIGRATIONS: &[(u32, &str)] = &[
           CREATE INDEX IF NOT EXISTS idx_locations_map_id ON locations(map_id);
           CREATE INDEX IF NOT EXISTS idx_tags_map_id ON tags(map_id);
           CREATE INDEX IF NOT EXISTS idx_location_tags_location ON location_tags(location_id);
-          CREATE INDEX IF NOT EXISTS idx_location_tags_tag ON location_tags(tag_id);"),
-    (2, "DROP TABLE IF EXISTS location_tags;
+          CREATE INDEX IF NOT EXISTS idx_location_tags_tag ON location_tags(tag_id);",
+    ),
+    (
+        2,
+        "DROP TABLE IF EXISTS location_tags;
           DROP TABLE IF EXISTS locations;
           DROP INDEX IF EXISTS idx_locations_map_id;
           DROP INDEX IF EXISTS idx_location_tags_location;
@@ -230,22 +349,37 @@ const MIGRATIONS: &[(u32, &str)] = &[
             PRIMARY KEY (commit_id, geohash)
           );
           CREATE INDEX IF NOT EXISTS idx_working_tree_map ON working_tree(map_id);
-          CREATE INDEX IF NOT EXISTS idx_commits_map ON commits(map_id);"),
-    (3, "CREATE TABLE IF NOT EXISTS edit_history (
+          CREATE INDEX IF NOT EXISTS idx_commits_map ON commits(map_id);",
+    ),
+    (
+        3,
+        "CREATE TABLE IF NOT EXISTS edit_history (
             map_id TEXT PRIMARY KEY NOT NULL REFERENCES maps(id) ON DELETE CASCADE,
             undo_stack TEXT NOT NULL DEFAULT '[]',
             redo_stack TEXT NOT NULL DEFAULT '[]'
-          );"),
-    (4, "CREATE TABLE IF NOT EXISTS pano_date_cache (
+          );",
+    ),
+    (
+        4,
+        "CREATE TABLE IF NOT EXISTS pano_date_cache (
             pano_id TEXT PRIMARY KEY NOT NULL,
             timestamp INTEGER NOT NULL
-          );"),
-    (5, "ALTER TABLE commits ADD COLUMN tree_hash TEXT;
+          );",
+    ),
+    (
+        5,
+        "ALTER TABLE commits ADD COLUMN tree_hash TEXT;
           ALTER TABLE commits ADD COLUMN added INTEGER NOT NULL DEFAULT 0;
           ALTER TABLE commits ADD COLUMN removed INTEGER NOT NULL DEFAULT 0;
-          ALTER TABLE commits ADD COLUMN modified INTEGER NOT NULL DEFAULT 0;"),
-    (6, "ALTER TABLE tags ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0;"),
-    (7, "CREATE TABLE IF NOT EXISTS seen (
+          ALTER TABLE commits ADD COLUMN modified INTEGER NOT NULL DEFAULT 0;",
+    ),
+    (
+        6,
+        "ALTER TABLE tags ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0;",
+    ),
+    (
+        7,
+        "CREATE TABLE IF NOT EXISTS seen (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             pano_id TEXT NOT NULL,
             lat REAL NOT NULL,
@@ -258,8 +392,11 @@ const MIGRATIONS: &[(u32, &str)] = &[
             location_id TEXT,
             thumbnail BLOB
           );
-          CREATE INDEX IF NOT EXISTS idx_seen_entered ON seen(entered_at DESC);"),
-    (8, "DROP TABLE IF EXISTS seen;
+          CREATE INDEX IF NOT EXISTS idx_seen_entered ON seen(entered_at DESC);",
+    ),
+    (
+        8,
+        "DROP TABLE IF EXISTS seen;
           CREATE TABLE IF NOT EXISTS seen (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             pano_id TEXT NOT NULL,
@@ -275,9 +412,15 @@ const MIGRATIONS: &[(u32, &str)] = &[
             address TEXT,
             thumbnail TEXT
           );
-          CREATE INDEX IF NOT EXISTS idx_seen_entered ON seen(entered_at DESC);"),
-    (9, "ALTER TABLE maps ADD COLUMN extra TEXT NOT NULL DEFAULT '{}';"),
-    (10, "CREATE TABLE IF NOT EXISTS working_tree_new (
+          CREATE INDEX IF NOT EXISTS idx_seen_entered ON seen(entered_at DESC);",
+    ),
+    (
+        9,
+        "ALTER TABLE maps ADD COLUMN extra TEXT NOT NULL DEFAULT '{}';",
+    ),
+    (
+        10,
+        "CREATE TABLE IF NOT EXISTS working_tree_new (
             map_id TEXT NOT NULL REFERENCES maps(id) ON DELETE CASCADE,
             geohash TEXT NOT NULL,
             blob_hash TEXT NOT NULL,
@@ -298,10 +441,19 @@ const MIGRATIONS: &[(u32, &str)] = &[
           INSERT INTO commit_trees_new SELECT * FROM commit_trees;
           DROP TABLE commit_trees;
           ALTER TABLE commit_trees_new RENAME TO commit_trees;
-          DROP TABLE IF EXISTS blobs;"),
-    (11, "ALTER TABLE maps ADD COLUMN location_count INTEGER NOT NULL DEFAULT 0;"),
-    (12, "ALTER TABLE maps ADD COLUMN tags TEXT NOT NULL DEFAULT '{}';"),
-    (13, "DROP TABLE IF EXISTS seen;
+          DROP TABLE IF EXISTS blobs;",
+    ),
+    (
+        11,
+        "ALTER TABLE maps ADD COLUMN location_count INTEGER NOT NULL DEFAULT 0;",
+    ),
+    (
+        12,
+        "ALTER TABLE maps ADD COLUMN tags TEXT NOT NULL DEFAULT '{}';",
+    ),
+    (
+        13,
+        "DROP TABLE IF EXISTS seen;
           CREATE TABLE seen (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             pano_id TEXT NOT NULL,
@@ -317,14 +469,23 @@ const MIGRATIONS: &[(u32, &str)] = &[
             address TEXT,
             thumbnail TEXT
           );
-          CREATE INDEX IF NOT EXISTS idx_seen_entered ON seen(entered_at DESC);"),
-    (14, "ALTER TABLE maps ADD COLUMN labels TEXT NOT NULL DEFAULT '[]';
-          ALTER TABLE maps ADD COLUMN last_opened_at TEXT;"),
+          CREATE INDEX IF NOT EXISTS idx_seen_entered ON seen(entered_at DESC);",
+    ),
+    (
+        14,
+        "ALTER TABLE maps ADD COLUMN labels TEXT NOT NULL DEFAULT '[]';
+          ALTER TABLE maps ADD COLUMN last_opened_at TEXT;",
+    ),
     (15, "DROP TABLE IF EXISTS pano_date_cache;"),
-    (16, "DROP TABLE IF EXISTS commit_trees;
+    (
+        16,
+        "DROP TABLE IF EXISTS commit_trees;
           DROP TABLE IF EXISTS working_tree;
-          DELETE FROM commits;"),
-    (17, "CREATE TABLE IF NOT EXISTS review_sessions (
+          DELETE FROM commits;",
+    ),
+    (
+        17,
+        "CREATE TABLE IF NOT EXISTS review_sessions (
             id           TEXT PRIMARY KEY NOT NULL,
             map_id       TEXT NOT NULL REFERENCES maps(id) ON DELETE CASCADE,
             name         TEXT NOT NULL DEFAULT '',
@@ -337,9 +498,13 @@ const MIGRATIONS: &[(u32, &str)] = &[
             created_at   TEXT NOT NULL,
             updated_at   TEXT NOT NULL
           );
-          CREATE INDEX IF NOT EXISTS idx_review_sessions_map ON review_sessions(map_id, status);"),
-    (18, "DROP TABLE IF EXISTS tags;
-          DROP INDEX IF EXISTS idx_tags_map_id;"),
+          CREATE INDEX IF NOT EXISTS idx_review_sessions_map ON review_sessions(map_id, status);",
+    ),
+    (
+        18,
+        "DROP TABLE IF EXISTS tags;
+          DROP INDEX IF EXISTS idx_tags_map_id;",
+    ),
 ];
 
 // ---------------------------------------------------------------------------
@@ -349,7 +514,11 @@ const MIGRATIONS: &[(u32, &str)] = &[
 /// Root directory for all Arrow IPC files (`arrow/` or `arrow_test/`).
 /// Created on first access.
 pub(crate) fn arrow_dir() -> AppResult<std::path::PathBuf> {
-    let subdir = if is_test_mode() { "arrow_test" } else { "arrow" };
+    let subdir = if is_test_mode() {
+        "arrow_test"
+    } else {
+        "arrow"
+    };
     let dir = app_data_dir()?.join(subdir);
     if !dir.exists() {
         std::fs::create_dir_all(&dir)?;
@@ -387,7 +556,10 @@ pub(crate) fn commit_delta_path(map_id: &str, commit_id: &str) -> AppResult<std:
 /// Uses a 1 MB `BufWriter` (unbuffered writes are ~15x slower on Windows).
 /// The write targets a `.tmp` sibling then renames, so readers never see
 /// a partial file.
-pub(crate) fn write_arrow_ipc(path: &std::path::Path, batch: &arrow_array::RecordBatch) -> AppResult<()> {
+pub(crate) fn write_arrow_ipc(
+    path: &std::path::Path,
+    batch: &arrow_array::RecordBatch,
+) -> AppResult<()> {
     atomic_write(path, |file| {
         let buf = std::io::BufWriter::with_capacity(1 << 20, file);
         let mut writer = arrow_ipc::writer::FileWriter::try_new(buf, &batch.schema())?;
@@ -399,7 +571,10 @@ pub(crate) fn write_arrow_ipc(path: &std::path::Path, batch: &arrow_array::Recor
 
 /// Write to `path` via a temporary `.tmp` sibling, then atomically rename.
 /// Guarantees readers never observe a partially-written file.
-pub(crate) fn atomic_write(path: &std::path::Path, write_fn: impl FnOnce(std::fs::File) -> AppResult<()>) -> AppResult<()> {
+pub(crate) fn atomic_write(
+    path: &std::path::Path,
+    write_fn: impl FnOnce(std::fs::File) -> AppResult<()>,
+) -> AppResult<()> {
     let tmp = path.with_extension("tmp");
     let file = std::fs::File::create(&tmp)?;
     write_fn(file)?;
@@ -441,10 +616,12 @@ pub(crate) struct MmapHandle {
 /// as long as any array data from the batch is referenced. Parses the IPC
 /// footer and record-batch blocks directly from the mmap buffer, avoiding
 /// any heap allocation for the raw column data.
-pub(crate) fn read_arrow_ipc_mmap(path: &std::path::Path) -> AppResult<(arrow_array::RecordBatch, MmapHandle)> {
+pub(crate) fn read_arrow_ipc_mmap(
+    path: &std::path::Path,
+) -> AppResult<(arrow_array::RecordBatch, MmapHandle)> {
     use arrow_buffer::Buffer;
-    use arrow_ipc::reader::{FileDecoder, read_footer_length};
-    use arrow_ipc::{root_as_footer, convert::fb_to_schema};
+    use arrow_ipc::reader::{read_footer_length, FileDecoder};
+    use arrow_ipc::{convert::fb_to_schema, root_as_footer};
     use std::sync::Arc;
 
     let file = std::fs::File::open(path)?;
@@ -464,7 +641,8 @@ pub(crate) fn read_arrow_ipc_mmap(path: &std::path::Path) -> AppResult<(arrow_ar
 
     let trailer: [u8; 10] = buffer[buf_len - 10..].try_into().unwrap();
     let footer_len = read_footer_length(trailer)?;
-    let footer = root_as_footer(&buffer[buf_len - 10 - footer_len..buf_len - 10]).map_err(|e| AppError(e.to_string()))?;
+    let footer = root_as_footer(&buffer[buf_len - 10 - footer_len..buf_len - 10])
+        .map_err(|e| AppError(e.to_string()))?;
     let schema = Arc::new(fb_to_schema(footer.schema().unwrap()));
     let mut decoder = FileDecoder::new(schema.clone(), footer.version());
 
@@ -489,9 +667,13 @@ pub(crate) fn read_arrow_ipc_mmap(path: &std::path::Path) -> AppResult<(arrow_ar
         let block = blocks.get(0);
         let block_len = block.bodyLength() as usize + block.metaDataLength() as usize;
         let data = buffer.slice_with_length(block.offset() as usize, block_len);
-        let batch = decoder.read_record_batch(&block, &data)?
+        let batch = decoder
+            .read_record_batch(&block, &data)?
             .unwrap_or_else(|| arrow_array::RecordBatch::new_empty(schema));
-        Ok((crate::arrow_migrate::migrate(batch)?, MmapHandle { _buffer: buffer }))
+        Ok((
+            crate::arrow_migrate::migrate(batch)?,
+            MmapHandle { _buffer: buffer },
+        ))
     } else {
         let mut batches = Vec::with_capacity(blocks.len());
         for i in 0..blocks.len() {
@@ -503,10 +685,12 @@ pub(crate) fn read_arrow_ipc_mmap(path: &std::path::Path) -> AppResult<(arrow_ar
             }
         }
         let merged = arrow_select::concat::concat_batches(&schema, &batches)?;
-        Ok((crate::arrow_migrate::migrate(merged)?, MmapHandle { _buffer: buffer }))
+        Ok((
+            crate::arrow_migrate::migrate(merged)?,
+            MmapHandle { _buffer: buffer },
+        ))
     }
 }
-
 
 #[cfg(test)]
 #[path = "storage.test.rs"]

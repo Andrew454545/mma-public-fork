@@ -1,9 +1,12 @@
 import { useState } from "react";
 import type { Tag } from "@/bindings.gen";
+import { Icon } from "@/components/primitives/Icon";
+import { mdiClose } from "@mdi/js";
 import { getTagCounts } from "@/store/useMapStore";
 import { sortTagsByMode, tagChipStyle, appendTagName } from "@/lib/util/util";
 import { textColorFor } from "@/lib/util/color";
 import { useSetting } from "@/store/settings";
+import { displayTagName } from "@/store/selections";
 
 export function FullscreenTagBar({
 	pendingTags,
@@ -17,6 +20,9 @@ export function FullscreenTagBar({
 	const [input, setInput] = useState("");
 	const [focused, setFocused] = useState(false);
 	const tagSortMode = useSetting("tagSortMode");
+	useSetting("truncateTagPaths");
+	useSetting("tagViewMode");
+	const label = displayTagName;
 
 	const handleAdd = (e: React.FormEvent) => {
 		e.preventDefault();
@@ -53,11 +59,9 @@ export function FullscreenTagBar({
 							onClick={() => onChangeTags(pendingTags.filter((n) => n !== name))}
 							type="button"
 						>
-							<svg height="16" width="16" viewBox="0 0 24 24" fill="currentColor">
-								<path d="M19,6.41L17.59,5L12,10.59L6.41,5L5,6.41L10.59,12L5,17.59L6.41,19L12,13.41L17.59,19L19,17.59L13.41,12L19,6.41Z" />
-							</svg>
+							<Icon path={mdiClose} size={16} />
 						</button>
-						<span className="tag__text">{name}</span>
+						<span className="tag__text">{label(name)}</span>
 					</li>
 				))}
 			</ul>
@@ -89,7 +93,7 @@ export function FullscreenTagBar({
 							}}
 							type="button"
 						>
-							<span className="tag__text">{t.name}</span>
+							<span className="tag__text">{label(t.name)}</span>
 						</button>
 					))}
 				</div>

@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useRef, useCallback, useEffect } from "react";
+import { NSelect } from "@/components/primitives/NSelect";
 import {
 	useMapList,
 	createMap,
@@ -11,7 +12,6 @@ import {
 	updateMapLabels,
 } from "@/store/useMapStore";
 import { openMapWindow } from "@/lib/window";
-import { openManual } from "@/store/router";
 import { log, fireAndForget } from "@/lib/util/log";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { cmd } from "@/lib/commands";
@@ -318,7 +318,13 @@ function hitTestDropTarget(x: number, y: number): DropTarget {
 
 // --- Subcomponents ---
 
-function RenameForm({ name, onRename }: { name: string; onRename?: (from: string, to: string) => void }) {
+function RenameForm({
+	name,
+	onRename,
+}: {
+	name: string;
+	onRename?: (from: string, to: string) => void;
+}) {
 	const close = useCloseDialog();
 	return (
 		<form
@@ -573,7 +579,7 @@ const FolderEntry = React.memo(function FolderEntry({
 	const [collapsed, setCollapsed] = useLocalStorage<string[]>("collapsedFolders", []);
 	const open = !collapsed.includes(name);
 	const setOpen = (v: boolean) => {
-		setCollapsed((prev) => v ? prev.filter((f) => f !== name) : [...prev, name]);
+		setCollapsed((prev) => (v ? prev.filter((f) => f !== name) : [...prev, name]));
 	};
 	const count = useMemo(() => maps.reduce((a, m) => a + m.locationCount, 0), [maps]);
 
@@ -663,7 +669,10 @@ async function applyFolderFiles(paths: string[], maps: MapMeta[]) {
 		}
 		for (const [mapName, folder] of Object.entries(mapping)) {
 			const map = byName.get(mapName);
-			if (!map) { skipped++; continue; }
+			if (!map) {
+				skipped++;
+				continue;
+			}
 			if (map.folder === folder) continue;
 			await moveMapToFolder(map.id, folder);
 			applied++;
@@ -788,7 +797,11 @@ export function BulkActions() {
 		const progress = progressToast("Exporting maps...");
 		const unlisten = await listen<{ current: number; total: number; mapName: string }>(
 			"bulk-export-progress",
-			(e) => progress.update(e.payload.current / e.payload.total, `${e.payload.current} / ${e.payload.total}`),
+			(e) =>
+				progress.update(
+					e.payload.current / e.payload.total,
+					`${e.payload.current} / ${e.payload.total}`,
+				),
 		);
 		try {
 			const path = await cmd.storeExportBulkZip();
@@ -812,9 +825,7 @@ export function BulkActions() {
 	const handleImport = useCallback(async () => {
 		const selection = await openDialog({
 			multiple: true,
-			filters: [
-				{ name: "Map data", extensions: ["json", "zip", "mmafolders"] },
-			],
+			filters: [{ name: "Map data", extensions: ["json", "zip", "mmafolders"] }],
 		});
 		if (!selection) return;
 		const paths = Array.isArray(selection) ? selection : [selection];
@@ -888,7 +899,11 @@ export function BulkActions() {
 		const progress = progressToast("Importing maps...");
 		const unlisten = await listen<{ current: number; total: number; mapName: string }>(
 			"bulk-import-progress",
-			(e) => progress.update((base + e.payload.current) / total, `${base + e.payload.current} / ${total}`),
+			(e) =>
+				progress.update(
+					(base + e.payload.current) / total,
+					`${base + e.payload.current} / ${total}`,
+				),
 		);
 		let failed = 0;
 		try {
@@ -1146,17 +1161,19 @@ export function MapList() {
 								}
 								if (e.key !== "Enter") return;
 								e.preventDefault();
-								const first = listRef.current?.querySelector<HTMLAnchorElement>(
-									"[data-filter-name]:not([hidden]) .map-link",
+								const name = filterInputRef.current?.value.trim();
+								if (!name) return;
+								const entries = listRef.current?.querySelectorAll<HTMLElement>(
+									"[data-filter-name]:not([hidden])",
 								);
-								if (first) {
-									first.click();
+								const exact = entries
+									? [...entries].find((el) => el.dataset.filterName === name.toLowerCase())
+									: undefined;
+								if (exact) {
+									exact.querySelector<HTMLAnchorElement>(".map-link")?.click();
 									return;
 								}
-								const name = filterInputRef.current?.value.trim();
-								if (name) {
-									createMap(name).then((m) => openMapWindow(m.id, m.name));
-								}
+								createMap(name).then((m) => openMapWindow(m.id, m.name));
 							}}
 							className="input"
 							type="text"
@@ -1187,8 +1204,8 @@ export function MapList() {
 							</button>
 						)}
 					</span>
-					<select
-						className="nselect map-list__sort"
+					<NSelect
+						className="map-list__sort"
 						value={sortMode}
 						onChange={(e) => setSortMode(e.target.value as SortMode)}
 					>
@@ -1197,7 +1214,7 @@ export function MapList() {
 								{o.label}
 							</option>
 						))}
-					</select>
+					</NSelect>
 					<button
 						className="icon-button"
 						onClick={() => {
@@ -1269,23 +1286,6 @@ export function MapList() {
 							.
 						</p>
 					</li>
-					<li className="updates__item updates__item--manual">
-						<span className="updates__circle" />
-						<time className="updates__time">Manual</time>
-						<p>
-							New here?{" "}
-							<a
-								href="#"
-								onClick={(e) => {
-									e.preventDefault();
-									openManual();
-								}}
-							>
-								Open the manual
-							</a>{" "}
-							for a guide to every feature.
-						</p>
-					</li>
 					<WhatsNew />
 				</ul>
 			</section>
@@ -1353,13 +1353,13 @@ export function MapList() {
 							</>
 						)}
 						{activeAction.type === "rename-folder" && (
-								<RenameForm
-									name={activeAction.name}
-									onRename={(from, to) =>
-										setSyntheticFolders((prev) => prev.map((f) => (f === from ? to : f)))
-									}
-								/>
-							)}
+							<RenameForm
+								name={activeAction.name}
+								onRename={(from, to) =>
+									setSyntheticFolders((prev) => prev.map((f) => (f === from ? to : f)))
+								}
+							/>
+						)}
 						{activeAction.type === "delete-folder" && (
 							<>
 								<p>

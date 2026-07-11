@@ -10,6 +10,11 @@ execSync(
 );
 
 let content = fs.readFileSync(out, "utf-8");
+// dts-bundle-generator appends $1 to types that collide with DOM globals.
+// Undo it - plugin authors need the clean names.
+for (const name of ["Location", "Selection", "Plugin", "MMA", "open"]) {
+  content = content.replace(new RegExp(`\\b${name}\\$1\\b`, "g"), name);
+}
 content += `\ndeclare global {\n\tconst MMA: typeof mma;\n}\n`;
 fs.writeFileSync(out, content);
 

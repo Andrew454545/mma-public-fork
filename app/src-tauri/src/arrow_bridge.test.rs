@@ -54,7 +54,11 @@ fn schema_field_names_match_column_indices() {
     ];
     assert_eq!(schema.fields().len(), expected.len());
     for (idx, name) in expected {
-        assert_eq!(schema.field(idx).name().as_str(), name, "column index {idx}");
+        assert_eq!(
+            schema.field(idx).name().as_str(),
+            name,
+            "column index {idx}"
+        );
     }
 }
 
@@ -79,8 +83,12 @@ fn round_trip() {
         assert_eq!(orig.flags, rest.flags);
         assert_eq!(orig.tags, rest.tags);
         assert_eq!(
-            orig.extra.as_ref().map(|e| serde_json::to_string(e).unwrap()),
-            rest.extra.as_ref().map(|e| serde_json::to_string(e).unwrap()),
+            orig.extra
+                .as_ref()
+                .map(|e| serde_json::to_string(e).unwrap()),
+            rest.extra
+                .as_ref()
+                .map(|e| serde_json::to_string(e).unwrap()),
         );
         assert_eq!(orig.created_at, rest.created_at);
         assert_eq!(orig.modified_at, rest.modified_at);
@@ -183,7 +191,7 @@ fn patch_batch_nullable_transitions() {
     assert_eq!(restored[0].extra, None);
     assert_eq!(restored[0].modified_at, None);
     assert_eq!(restored[1].pano_id, Some("newpano".into()));
-    assert_eq!(restored[1].extra.as_ref().unwrap()["k"], "v");
+    assert_eq!(restored[1].extra.as_ref().unwrap().get("k").unwrap(), "v");
     assert_eq!(restored[1].modified_at, Some(123));
 }
 

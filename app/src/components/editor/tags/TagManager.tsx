@@ -1,10 +1,20 @@
-import { useState, useMemo, useEffect, useRef, useCallback, memo, useOptimistic, startTransition } from "react";
+import {
+	useState,
+	useMemo,
+	useEffect,
+	useRef,
+	useCallback,
+	memo,
+	useOptimistic,
+	startTransition,
+} from "react";
 import { createPortal } from "react-dom";
 import { cmd } from "@/lib/commands";
 import { HslColorPicker } from "react-colorful";
 import * as ContextMenu from "@radix-ui/react-context-menu";
 import {
 	useCurrentMap,
+	getCurrentMap,
 	useSelectedTagIds,
 	useTagCounts,
 	toggleTagSelections,
@@ -14,11 +24,12 @@ import {
 	removeTagFromAllLocations,
 	getSelectedLocationIds,
 	getVisibleTags,
-    removeTagFromLocations,
+	removeTagFromLocations,
 } from "@/store/useMapStore";
 import type { TagSortMode } from "@/types";
 import type { Tag, VirtualTag } from "@/bindings.gen";
 import { Dialog, DialogContent } from "@/components/primitives/Dialog";
+import { SuggestInput } from "@/components/primitives/SuggestInput";
 import { Icon } from "@/components/primitives/Icon";
 import { mdiPencil } from "@mdi/js";
 import { ToolBlock } from "@/components/primitives/ToolBlock";
@@ -31,7 +42,7 @@ import { HotkeyInput } from "@/components/primitives/HotkeyInput";
 import { getConflicts } from "@/lib/util/hotkeys";
 import { getTagBindingKey, withTagKeyBinding } from "@/lib/map/mapKeyBindings";
 import { TagTreeView, type TagTreeHandle } from "./TagTree";
-import { cascadeRename } from "./tagTreeRange";
+import { cascadeRename, syncAliasSegments, type TagTreeNode } from "./tagTreeRange";
 
 export function TagManager() {
 	const map = useCurrentMap();
@@ -41,10 +52,15 @@ export function TagManager() {
 	const [filterText, setFilterText] = useState("");
 	const sortMode = useSetting("tagSortMode");
 	const [virtualTags, setVirtualTags] = useMapSetting("virtualTags");
+	const [aliases, setAliases] = useMapSetting("aliases");
+	const [addingAliasFor, setAddingAliasFor] = useState<{ id: number; name: string } | null>(null);
 	const [editingTagId, setEditingTagId] = useState<number | null>(null);
 	// Tree-mode tag edit carries the node so the dialog can offer a descendant-cascade
 	// rename; flat-mode edits stay on editingTagId (no folder context).
-	const [editingTreeTag, setEditingTreeTag] = useState<{ tag: Tag; descendantCount: number } | null>(null);
+	const [editingTreeTag, setEditingTreeTag] = useState<{
+		tag: Tag;
+		descendantCount: number;
+	} | null>(null);
 	const [editingVirtualPath, setEditingVirtualPath] = useState<string | null>(null);
 	const treeRef = useRef<TagTreeHandle>(null);
 	const [renamingTag, setRenamingTag] = useState<{ id: number; name: string } | null>(null);
@@ -66,7 +82,10 @@ export function TagManager() {
 	// virtualTags/expansion updates
 	const [tags, addOptimisticTags] = useOptimistic(
 		storeTags,
-		(cur: Tag[], updates: { id: number; patch: { name?: string | null; color?: string | null } }[]) =>
+		(
+			cur: Tag[],
+			updates: { id: number; patch: { name?: string | null; color?: string | null } }[],
+		) =>
 			cur.map((t) => {
 				const u = updates.find((x) => x.id === t.id);
 				if (!u) return t;
@@ -107,6 +126,20 @@ export function TagManager() {
 		for (const f of folders) nextVT[f] = { color };
 		setVirtualTags(nextVT);
 	};
+	const addAlias = useCallback((tag: { id: number; name: string }) => setAddingAliasFor(tag), []);
+	const handleEditTreeTag = useCallback((node: TagTreeNode) => {
+		if (node.tag)
+			setEditingTreeTag({ tag: node.tag, descendantCount: node.descendantTagIds.length - 1 });
+	}, []);
+	const removeAlias = useCallback(
+		(aliasPath: string) => {
+			const next = { ...(getCurrentMap()?.meta.settings.aliases ?? {}) };
+			delete next[aliasPath];
+			setAliases(next);
+		},
+		[setAliases],
+	);
+
 	const lastShiftClickRef = useRef<number | null>(null);
 
 	const sortedTags = useMemo(() => {
@@ -310,12 +343,12 @@ export function TagManager() {
 						tagCounts={tagCounts}
 						sortMode={sortMode}
 						virtualTags={virtualTags ?? {}}
-						onEditTag={(node) => {
-							if (node.tag)
-								setEditingTreeTag({ tag: node.tag, descendantCount: node.descendantTagIds.length - 1 });
-						}}
+						aliases={aliases ?? {}}
+						onEditTag={handleEditTreeTag}
 						onEditVirtual={setEditingVirtualPath}
 						onRenameTag={setRenamingTag}
+						onAddAlias={addAlias}
+						onRemoveAlias={removeAlias}
 						filterText={filterText}
 					/>
 				) : (
@@ -333,6 +366,7 @@ export function TagManager() {
 									onMouseMove={handleTagMouseMove}
 									onEdit={setEditingTagId}
 									onRename={setRenamingTag}
+									onAddAlias={addAlias}
 								/>
 							))}
 						</ul>
@@ -356,9 +390,7 @@ export function TagManager() {
 							</button>
 							<label className="tag__text">
 								{dragTag.name}
-								<small
-									style={{ marginLeft: ".375rem", fontWeight: 600, verticalAlign: "middle" }}
-								>
+								<small style={{ marginLeft: ".375rem", fontWeight: 600, verticalAlign: "middle" }}>
 									{fmt.format(tagCounts[dragTag.id] ?? 0)}
 								</small>
 							</label>
@@ -368,13 +400,21 @@ export function TagManager() {
 				)}
 
 			{editingTag && (
-				<EditTagDialog tag={editingTag} commit={commitTags} onClose={() => setEditingTagId(null)} />
+				<EditTagDialog
+					tag={editingTag}
+					commit={commitTags}
+					aliases={aliases ?? {}}
+					setAliases={setAliases}
+					onClose={() => setEditingTagId(null)}
+				/>
 			)}
 
 			{editingTreeTag && (
 				<EditTagDialog
 					tag={editingTreeTag.tag}
 					commit={commitTags}
+					aliases={aliases ?? {}}
+					setAliases={setAliases}
 					cascade={
 						editingTreeTag.descendantCount > 0
 							? {
@@ -383,7 +423,7 @@ export function TagManager() {
 									virtualTags: virtualTags ?? {},
 									setVirtualTags,
 									onRenamed: (o, n) => treeRef.current?.remapExpanded(o, n),
-										onApplyColor: (color) => applyColorToSubtree(editingTreeTag.tag.name, color),
+									onApplyColor: (color) => applyColorToSubtree(editingTreeTag.tag.name, color),
 								}
 							: undefined
 					}
@@ -407,16 +447,16 @@ export function TagManager() {
 						const parent = i === -1 ? "" : editingVirtualPath.slice(0, i);
 						const newPath = parent ? `${parent}/${newSegment}` : newSegment;
 						if (newPath !== editingVirtualPath) {
-							const { tagRenames, virtualTags: nextVT } = cascadeRename(
-								editingVirtualPath,
-								newPath,
-								tags,
-								vt,
-							);
+							const {
+								tagRenames,
+								virtualTags: nextVT,
+								aliases: nextAliases,
+							} = cascadeRename(editingVirtualPath, newPath, tags, vt, aliases ?? {});
 							if (tagRenames.length)
 								commitTags(tagRenames.map((r) => ({ id: r.id, patch: { name: r.name } })));
 							nextVT[newPath] = { color };
 							setVirtualTags(nextVT);
+							setAliases(nextAliases);
 							treeRef.current?.remapExpanded(editingVirtualPath, newPath);
 						} else {
 							setVirtualTags({ ...vt, [editingVirtualPath]: { color } });
@@ -436,7 +476,23 @@ export function TagManager() {
 				<RenameInSelectionDialog
 					tag={renamingTag}
 					commit={commitTags}
+					aliases={aliases ?? {}}
+					setAliases={setAliases}
 					onClose={() => setRenamingTag(null)}
+				/>
+			)}
+
+			{addingAliasFor && (
+				<AddAliasDialog
+					tag={addingAliasFor}
+					tags={tags}
+					virtualTags={virtualTags ?? {}}
+					aliases={aliases ?? {}}
+					onClose={() => setAddingAliasFor(null)}
+					onSave={(aliasPath) => {
+						setAliases({ ...(aliases ?? {}), [aliasPath]: addingAliasFor.id });
+						setAddingAliasFor(null);
+					}}
 				/>
 			)}
 		</>
@@ -457,6 +513,7 @@ const TagRow = memo(function TagRow({
 	onMouseMove,
 	onEdit,
 	onRename,
+	onAddAlias,
 }: {
 	tag: Tag;
 	count: number;
@@ -467,6 +524,7 @@ const TagRow = memo(function TagRow({
 	onMouseMove: (e: React.MouseEvent, tagId: number, el: HTMLElement) => void;
 	onEdit: (tagId: number) => void;
 	onRename: (tag: { id: number; name: string }) => void;
+	onAddAlias: (tag: { id: number; name: string }) => void;
 }) {
 	const bg = tag.color;
 	const fg = textColorFor(bg);
@@ -514,6 +572,7 @@ const TagRow = memo(function TagRow({
 					tagId={tag.id}
 					totalCount={count}
 					onRename={() => onRename({ id: tag.id, name: tag.name })}
+					onAddAlias={() => onAddAlias({ id: tag.id, name: tag.name })}
 				/>
 			</ContextMenu.Portal>
 		</ContextMenu.Root>
@@ -524,10 +583,16 @@ export function TagContextMenuContent({
 	tagId,
 	totalCount,
 	onRename,
+	onAddAlias,
+	onRemoveAlias,
 }: {
 	tagId: number;
 	totalCount: number;
 	onRename: () => void;
+	/** Tree mode only: place this tag at a second folder path. */
+	onAddAlias?: () => void;
+	/** Tree mode only: present on an alias leaf to remove it. */
+	onRemoveAlias?: () => void;
 }) {
 	const [selCount, setSelCount] = useState<number | null>(null);
 
@@ -537,20 +602,21 @@ export function TagContextMenuContent({
 			setSelCount(0);
 			return;
 		}
-		cmd.storeResolveSelection({ type: "Tag", tagId }).then(
-			(tagLocIds) => {
-				let count = 0;
-				for (const id of tagLocIds) if (selIds.has(id)) count++;
-				setSelCount(count);
-			},
-		);
+		cmd.storeResolveSelection({ type: "Tag", tagId }).then((tagLocIds) => {
+			let count = 0;
+			for (const id of tagLocIds) if (selIds.has(id)) count++;
+			setSelCount(count);
+		});
 	}, [tagId]);
 
 	const inSel = selCount ?? 0;
 
 	return (
 		<ContextMenu.Content className="context-menu">
-			<ContextMenu.Item className="context-menu__item" onSelect={() => removeTagFromAllLocations(tagId)}>
+			<ContextMenu.Item
+				className="context-menu__item"
+				onSelect={() => removeTagFromAllLocations(tagId)}
+			>
 				Remove from all ({fmt.format(totalCount)} locations)
 			</ContextMenu.Item>
 			<ContextMenu.Item
@@ -563,6 +629,16 @@ export function TagContextMenuContent({
 			<ContextMenu.Item className="context-menu__item" disabled={inSel === 0} onSelect={onRename}>
 				Rename in selection ({fmt.format(inSel)} locations)
 			</ContextMenu.Item>
+			{onAddAlias && (
+				<ContextMenu.Item className="context-menu__item" onSelect={onAddAlias}>
+					Add alias...
+				</ContextMenu.Item>
+			)}
+			{onRemoveAlias && (
+				<ContextMenu.Item className="context-menu__item" onSelect={onRemoveAlias}>
+					Remove alias
+				</ContextMenu.Item>
+			)}
 		</ContextMenu.Content>
 	);
 }
@@ -571,16 +647,28 @@ function RenameInSelectionDialog({
 	tag,
 	onClose,
 	commit,
+	aliases,
+	setAliases,
 }: {
 	tag: { id: number; name: string };
 	onClose: () => void;
-	commit: (updates: { id: number; patch: { name?: string | null; color?: string | null } }[]) => void;
+	commit: (
+		updates: { id: number; patch: { name?: string | null; color?: string | null } }[],
+	) => void;
+	aliases: Record<string, number>;
+	setAliases: (v: Record<string, number>) => void;
 }) {
 	const [name, setName] = useState(tag.name);
 
 	const handleSubmit = () => {
 		const trimmed = name.trim();
-		if (trimmed && trimmed !== tag.name) commit([{ id: tag.id, patch: { name: trimmed } }]);
+		if (trimmed && trimmed !== tag.name) {
+			commit([{ id: tag.id, patch: { name: trimmed } }]);
+			const synced = syncAliasSegments(aliases, [
+				{ id: tag.id, oldName: tag.name, newName: trimmed },
+			]);
+			if (synced) setAliases(synced);
+		}
 		onClose();
 	};
 
@@ -619,12 +707,18 @@ function EditTagDialog({
 	tag,
 	onClose,
 	commit,
+	aliases,
+	setAliases,
 	cascade,
 }: {
 	tag: { id: number; name: string; color: string };
 	onClose: () => void;
 	/** Routes tag updates through the optimistic overlay. */
-	commit: (updates: { id: number; patch: { name?: string | null; color?: string | null } }[]) => void;
+	commit: (
+		updates: { id: number; patch: { name?: string | null; color?: string | null } }[],
+	) => void;
+	aliases: Record<string, number>;
+	setAliases: (v: Record<string, number>) => void;
 	/** Present for a tree folder node with descendants: lets the rename cascade down. */
 	cascade?: {
 		descendantCount: number;
@@ -647,8 +741,7 @@ function EditTagDialog({
 	const globalConflicts = hotkey ? getConflicts("", hotkey) : [];
 	const holder = hotkey
 		? (bindings ?? []).find(
-				(b) =>
-					b.key === hotkey && !(b.action.type === "applyTag" && b.action.tagId === tag.id),
+				(b) => b.key === hotkey && !(b.action.type === "applyTag" && b.action.tagId === tag.id),
 			)
 		: undefined;
 	const holderAction = holder?.action;
@@ -660,12 +753,11 @@ function EditTagDialog({
 	const handleSave = () => {
 		const newName = name.trim() || tag.name;
 		if (cascade && cascadeOn && newName !== tag.name) {
-			const { tagRenames, virtualTags: nextVT } = cascadeRename(
-				tag.name,
-				newName,
-				cascade.tags,
-				cascade.virtualTags,
-			);
+			const {
+				tagRenames,
+				virtualTags: nextVT,
+				aliases: nextAliases,
+			} = cascadeRename(tag.name, newName, cascade.tags, cascade.virtualTags, aliases);
 			commit(
 				tagRenames.map((r) => ({
 					id: r.id,
@@ -673,9 +765,14 @@ function EditTagDialog({
 				})),
 			);
 			cascade.setVirtualTags(nextVT);
+			setAliases(nextAliases);
 			cascade.onRenamed(tag.name, newName);
 		} else {
 			commit([{ id: tag.id, patch: { name: newName, color: hexValue } }]);
+			if (newName !== tag.name) {
+				const synced = syncAliasSegments(aliases, [{ id: tag.id, oldName: tag.name, newName }]);
+				if (synced) setAliases(synced);
+			}
 		}
 		const cur = bindings ?? [];
 		if ((getTagBindingKey(cur, tag.id) ?? "") !== hotkey) {
@@ -715,7 +812,8 @@ function EditTagDialog({
 									checked={cascadeOn}
 									onChange={(e) => setCascadeOn(e.target.checked)}
 								/>
-								Rename {cascade.descendantCount} tag{cascade.descendantCount === 1 ? "" : "s"} inside
+								Rename {cascade.descendantCount} tag{cascade.descendantCount === 1 ? "" : "s"}{" "}
+								inside
 							</label>
 						)}
 					</div>
@@ -747,7 +845,8 @@ function EditTagDialog({
 									onClose();
 								}}
 							>
-								Apply to {cascade.descendantCount} tag{cascade.descendantCount === 1 ? "" : "s"} inside
+								Apply to {cascade.descendantCount} tag{cascade.descendantCount === 1 ? "" : "s"}{" "}
+								inside
 							</button>
 						)}
 					</div>
@@ -872,6 +971,117 @@ function VirtualTagDialog({
 						</button>
 						<button className="button button--primary" type="submit">
 							Save
+						</button>
+					</div>
+				</form>
+			</DialogContent>
+		</Dialog>
+	);
+}
+
+/** Place an existing tag at a second tree location. The alias keeps the tag's leaf name;
+ *  the user picks the target folder. Persists to `MapSettings.aliases` (path -> tag id). */
+function AddAliasDialog({
+	tag,
+	tags,
+	virtualTags,
+	aliases,
+	onClose,
+	onSave,
+}: {
+	tag: { id: number; name: string };
+	tags: Tag[];
+	virtualTags: Record<string, VirtualTag>;
+	aliases: Record<string, number>;
+	onClose: () => void;
+	onSave: (aliasPath: string) => void;
+}) {
+	const [folder, setFolder] = useState("");
+	const segment = tag.name.split("/").pop() || tag.name;
+
+	// Every existing tree path (tag paths + their ancestors + alias paths) — the alias
+	// slot must be free, matching buildTagTree's occupancy check.
+	const occupied = useMemo(() => {
+		const set = new Set<string>();
+		const addPrefixes = (path: string) => {
+			let p = "";
+			for (const s of path.split("/")) {
+				p = p ? `${p}/${s}` : s;
+				set.add(p);
+			}
+		};
+		for (const t of tags) addPrefixes(t.name);
+		for (const k of Object.keys(aliases)) addPrefixes(k);
+		return set;
+	}, [tags, aliases]);
+
+	// Folder paths the user can nest under: ancestors of tags + virtual/alias folder nodes.
+	const folderSuggestions = useMemo(() => {
+		const set = new Set<string>();
+		const addAncestors = (path: string) => {
+			const parts = path.split("/");
+			let p = "";
+			for (let i = 0; i < parts.length - 1; i++) {
+				p = p ? `${p}/${parts[i]}` : parts[i];
+				set.add(p);
+			}
+		};
+		for (const t of tags) addAncestors(t.name);
+		for (const k of Object.keys(virtualTags)) set.add(k);
+		for (const k of Object.keys(aliases)) addAncestors(k);
+		const lower = folder.toLowerCase();
+		return [...set]
+			.filter((p) => p.toLowerCase().includes(lower))
+			.sort()
+			.slice(0, 50);
+	}, [tags, virtualTags, aliases, folder]);
+
+	const trimmed = folder.trim().replace(/^\/+|\/+$/g, "");
+	const aliasPath = trimmed ? `${trimmed}/${segment}` : segment;
+	const collision = occupied.has(aliasPath);
+
+	return (
+		<Dialog open onOpenChange={(open) => !open && onClose()}>
+			<DialogContent title={`Alias "${segment}"`}>
+				<form
+					onSubmit={(e) => {
+						e.preventDefault();
+						if (!collision) onSave(aliasPath);
+					}}
+					style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}
+				>
+					<div style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
+						<span style={{ fontSize: "0.85em", opacity: 0.7 }}>Target folder</span>
+						<SuggestInput
+							value={folder}
+							onChange={setFolder}
+							suggestions={folderSuggestions}
+							onPick={setFolder}
+							renderItem={(p) => p}
+							getKey={(p) => p}
+							placeholder="e.g. Europe/France (blank = top level)"
+							portal
+							autoFocus
+							pickOnEnter={false}
+						/>
+						<span style={{ fontSize: "0.85em", opacity: 0.7 }}>
+							{collision ? (
+								<span style={{ color: "var(--red, #f87171)" }}>
+									"{aliasPath}" already exists in the tree
+								</span>
+							) : (
+								<>
+									Appears as <strong>{aliasPath}</strong>
+								</>
+							)}
+						</span>
+					</div>
+					<div style={{ display: "flex", gap: "0.5rem", justifyContent: "flex-end" }}>
+						<button className="button" type="button" onClick={onClose}>
+							Cancel
+						</button>
+						<button className="button button--primary" type="submit" disabled={collision}>
+							Add alias
 						</button>
 					</div>
 				</form>

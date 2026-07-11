@@ -1,262 +1,80 @@
-import { useState, useRef, useCallback, useEffect } from "react";
-import { Command, type Child } from "@tauri-apps/plugin-shell";
+import { useRef, useEffect } from "react";
+import { listen } from "@tauri-apps/api/event";
 import { cmd } from "@/lib/commands";
+import type { ValiLocation } from "@/bindings.gen";
 import { createLocation, LocationFlag } from "@/types";
 import { createTags } from "@/store/useMapStore";
 import { Sidebar } from "@/components/primitives/Sidebar";
-import { createPluginStorage } from "@/plugins/registry";
+import { log } from "@/lib/util/log";
 import "./vali.css";
 
-type Phase = "editing" | "generating" | "done" | "error";
+// The embedded Vali GUI (vendored bundle, ?host=mma) owns the whole flow: definition
+// editor, tag input, generate button, progress. This side is just the bridge:
+//   <- iframe  { type: "vali:generate", data, tag }
+//   <- iframe  { type: "vali:cancel" }
+//   -> iframe  { type: "vali:progress", progress } (forwarded vali-progress events)
+//   -> iframe  { type: "vali:done", count } | { type: "vali:error", message }
 
-interface LogLine {
-	text: string;
-	isError: boolean;
+const VALIG_URL = "/valig/index.html?host=mma";
+
+async function importLocations(valiLocs: ValiLocation[], tagName: string): Promise<number> {
+	let tagId: number | null = null;
+	if (tagName) {
+		tagId = (await createTags([tagName]))[0].id;
+	}
+	const locations = valiLocs.map((v) =>
+		createLocation({
+			lat: v.lat,
+			lng: v.lng,
+			heading: v.heading,
+			...(v.zoom != null ? { zoom: v.zoom } : {}),
+			...(v.pitch != null ? { pitch: v.pitch } : {}),
+			...(v.panoId != null ? { panoId: v.panoId } : {}),
+			...(v.tags.length ? { extra: { tags: v.tags } } : {}),
+			flags: LocationFlag.LoadAsPanoId,
+			...(tagId != null ? { tags: [tagId] } : {}),
+		}),
+	);
+	MMA.addLocations(locations);
+	return locations.length;
 }
-
-interface ValiLocation {
-	lat: number;
-	lng: number;
-	heading?: number;
-	pitch?: number;
-	zoom?: number;
-	panoId: string;
-}
-
-const VALIG_URL = "https://valig.vercel.app";
-const OUTPUT_SUFFIX = "-locations.json";
-const valiStore = createPluginStorage("vali");
-
-let sessionPhase: Phase = "editing";
-let sessionLines: LogLine[] = [];
-let sessionChild: Child | null = null;
 
 export function ValiSidebar({ onClose }: { onClose: () => void }) {
-	const [phase, setPhase] = useState<Phase>(sessionPhase);
-	const [lines, setLines] = useState<LogLine[]>(sessionLines);
-	const [error, setError] = useState("");
-	const [importCount, setImportCount] = useState(0);
-	const [tagName, setTagName] = useState(() => valiStore.get<string>("tagName", ""));
-	const logRef = useRef<HTMLDivElement>(null);
-	const childRef = useRef<Child | null>(sessionChild);
+	const iframeRef = useRef<HTMLIFrameElement>(null);
+	const runningRef = useRef(false);
 
 	useEffect(() => {
-		sessionPhase = phase;
-	}, [phase]);
-	useEffect(() => {
-		sessionLines = lines;
-	}, [lines]);
-
-	// Auto-scroll log to bottom
-	useEffect(() => {
-		if (logRef.current) {
-			logRef.current.scrollTop = logRef.current.scrollHeight;
-		}
-	}, [lines]);
-
-	const appendLine = useCallback((text: string, isError = false) => {
-		setLines((prev) => [...prev, { text, isError }]);
-	}, []);
-
-	const importLocations = useCallback(
-		async (outputPath: string) => {
-			try {
-				const raw = await cmd.readFile(outputPath);
-				const valiLocs: ValiLocation[] = JSON.parse(raw);
-				let tagId: number | null = null;
-				const tagName = valiStore.get<string>("tagName", "");
-				if (tagName) {
-					tagId = (await createTags([tagName]))[0].id;
-				}
-				const locations = valiLocs.map((v) =>
-					createLocation({
-						...v,
-						flags: LocationFlag.LoadAsPanoId,
-						...(tagId != null ? { tags: [tagId] } : {}),
-					}),
-				);
-				MMA.addLocations(locations);
-				setImportCount(locations.length);
-			} catch (e) {
-				setError(`Failed to import locations: ${e}`);
-				setPhase("error");
+		const onMessage = async (e: MessageEvent) => {
+			if (e.data?.type === "vali:cancel") {
+				cmd.valiCancel();
+				return;
 			}
-		},
-		[],
-	);
-
-	const handleGenerate = useCallback(async () => {
-		setError("");
-		setImportCount(0);
-
-		let json: string;
-		try {
-			json = await navigator.clipboard.readText();
-		} catch {
-			setError("Could not read clipboard. Copy the JSON from Vali first.");
-			return;
-		}
-
-		try {
-			JSON.parse(json);
-		} catch {
-			setError(
-				"Clipboard does not contain valid JSON. Click the copy button in Vali's Definition panel first.",
+			if (e.data?.type !== "vali:generate" || runningRef.current) return;
+			runningRef.current = true;
+			const post = (msg: unknown) => iframeRef.current?.contentWindow?.postMessage(msg, "*");
+			const unlisten = await listen("vali-progress", (ev) =>
+				post({ type: "vali:progress", progress: ev.payload }),
 			);
-			return;
-		}
-
-		let tempPath: string;
-		try {
-			tempPath = await cmd.writeTempFile("vali_config.json", json);
-		} catch (e) {
-			setError(`Failed to write config: ${e}`);
-			return;
-		}
-
-		const outputPath = tempPath.replace(/\.json$/, OUTPUT_SUFFIX);
-
-		setPhase("generating");
-		setLines([]);
-
-		try {
-			const command = Command.create("vali", ["generate", "--file", tempPath]);
-
-			command.stdout.on("data", (line) => appendLine(line));
-			command.stderr.on("data", (line) => appendLine(line, true));
-
-			command.on("close", (data) => {
-				childRef.current = null;
-				sessionChild = null;
-				if (data.code === 0) {
-					setPhase("done");
-					importLocations(outputPath);
-				} else {
-					setPhase("error");
-					setError(`Vali exited with code ${data.code}`);
-				}
-			});
-
-			command.on("error", (err) => {
-				childRef.current = null;
-				sessionChild = null;
-				setPhase("error");
-				setError(String(err));
-			});
-
-			const child = await command.spawn();
-			childRef.current = child;
-			sessionChild = child;
-		} catch (e) {
-			setPhase("error");
-			setError(`Failed to start Vali: ${e}`);
-		}
-	}, [appendLine, importLocations]);
-
-	const handleKill = useCallback(async () => {
-		if (childRef.current) {
-			await childRef.current.kill();
-			childRef.current = null;
-			sessionChild = null;
-			setPhase("error");
-			setError("Cancelled by user");
-		}
+			try {
+				const locations = await cmd.valiGenerate(JSON.stringify(e.data.data));
+				const count = await importLocations(locations, String(e.data.tag ?? ""));
+				post({ type: "vali:done", count });
+			} catch (err) {
+				log.error("[vali] generate failed:", err);
+				post({ type: "vali:error", message: String(err) });
+			} finally {
+				unlisten();
+				runningRef.current = false;
+			}
+		};
+		window.addEventListener("message", onMessage);
+		return () => window.removeEventListener("message", onMessage);
 	}, []);
-
-	const handleReset = useCallback(() => {
-		setPhase("editing");
-		setLines([]);
-		setError("");
-		sessionPhase = "editing";
-		sessionLines = [];
-	}, []);
-
-	const handleClose = useCallback(() => {
-		childRef.current?.kill();
-		childRef.current = null;
-		sessionChild = null;
-		sessionPhase = "editing";
-		sessionLines = [];
-		onClose();
-	}, [onClose]);
 
 	return (
-		<Sidebar title="Vali" onBack={handleClose} className="vali-sidebar" flush>
-			<div className="vali-sidebar__body">
-				{phase === "editing" && (
-					<>
-						<div className="vali-sidebar__iframe-wrap">
-							<iframe
-								src={VALIG_URL}
-								title="Vali Configuration Editor"
-								allow="clipboard-write; clipboard-read"
-							/>
-						</div>
-						<div className="vali-sidebar__actions">
-							{error && <div className="vali-sidebar__error">{error}</div>}
-							<label className="settings-popup__item settings-popup__select">
-								Tag as:
-								<input
-									className="input"
-									type="text"
-									value={tagName}
-									onChange={(e) => {
-										setTagName(e.target.value);
-										valiStore.set("tagName", e.target.value);
-									}}
-									placeholder="None"
-								/>
-							</label>
-							<button className="button button--primary" onClick={handleGenerate}>
-								Generate
-							</button>
-						</div>
-					</>
-				)}
-
-				{(phase === "generating" || phase === "done" || phase === "error") && (
-					<div className="vali-sidebar__output">
-						<div className="vali-sidebar__output-header">
-							Output
-							<span className="vali-sidebar__output-status">
-								{phase === "generating" && (
-									<>
-										<span className="vali-sidebar__spinner" /> Running...
-									</>
-								)}
-								{phase === "done" &&
-									(importCount > 0 ? `Imported ${importCount} locations` : "Complete")}
-								{phase === "error" && "Failed"}
-							</span>
-						</div>
-
-						<div className="vali-sidebar__log" ref={logRef}>
-							{lines.map((line, i) => (
-								<div
-									key={i}
-									className={`vali-sidebar__log-line${line.isError ? " vali-sidebar__log-line--error" : ""}`}
-								>
-									{line.text}
-								</div>
-							))}
-							{phase === "error" && error && (
-								<div className="vali-sidebar__log-line vali-sidebar__log-line--error">{error}</div>
-							)}
-						</div>
-
-						<div className="vali-sidebar__output-actions">
-							{phase === "generating" ? (
-								<button className="button" onClick={handleKill}>
-									Cancel
-								</button>
-							) : (
-								<button className="button" onClick={handleReset}>
-									Back to Editor
-								</button>
-							)}
-						</div>
-					</div>
-				)}
+		<Sidebar title="Vali" onBack={onClose} className="vali-sidebar" flush>
+			<div className="vali-sidebar__iframe-wrap">
+				<iframe ref={iframeRef} src={VALIG_URL} title="Vali" />
 			</div>
 		</Sidebar>
 	);

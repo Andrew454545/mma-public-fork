@@ -10,6 +10,7 @@ export const MANUAL_IMG_DIMS: Record<string, { w: number; h: number }> = {
 	"map-list.png": { w: 2560, h: 1366 },
 	"pano-controls.png": { w: 1369, h: 769 },
 	"plugin-marketplace.png": { w: 892, h: 548 },
+	"review-sessions.png": { w: 804, h: 311 },
 	"score-bounds.png": { w: 1128, h: 659 },
 	"selection-algebra.png": { w: 2548, h: 1360 },
 	"selections.png": { w: 2559, h: 1356 },

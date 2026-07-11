@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import {
 	useCurrentMap,
 	useGhostedSelections,
+	useSelectionCounts,
 	selectInverse,
 	setPolygonName,
 	setSelectionColors,
@@ -16,14 +17,21 @@ import {
 	isolateSelection,
 	updateFilterSelection,
 	pruneDuplicates,
+	getVisibleTags,
 } from "@/store/useMapStore";
 import { toast } from "@/lib/util/toast";
 import { stepFilterWindow } from "@/lib/data/fieldOps";
 import { cmd } from "@/lib/commands";
 import { RgbColorPicker } from "react-colorful";
+import { useDebouncedCallback } from "@/lib/hooks/useDebouncedCallback";
+import type { RGB } from "@/lib/util/color";
 import type { Selection } from "@/bindings.gen";
 import { selectionDisplayName } from "@/store/selections";
-import { FilterForm, filterPropsToSeed, useExtraFieldKeys } from "@/components/editor/map/FilterBuilder";
+import {
+	FilterForm,
+	filterPropsToSeed,
+	useExtraFieldKeys,
+} from "@/components/editor/map/FilterBuilder";
 import { beginReview } from "@/lib/review/review";
 import { Dialog, DialogContent } from "@/components/primitives/Dialog";
 import { Icon } from "@/components/primitives/Icon";
@@ -38,23 +46,21 @@ import {
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import { fmt } from "@/lib/util/format";
 import { rgbCss } from "@/lib/util/color";
-import { getGoogleMap as getGoogleMapInstance } from "@/lib/map/mapState";
+import { getMapHost } from "@/lib/map/mapState";
+import { boundsOfCoords, type MapHost } from "@/lib/map/host";
 
-async function fitSelectionBounds(map: google.maps.Map, selection: Selection) {
+async function fitSelectionBounds(host: MapHost, selection: Selection) {
 	if (selection.props.type === "Polygon") {
 		const coords = selection.props.polygon.coordinates.flat();
-		if (coords.length === 0) return;
-		const bounds = new google.maps.LatLngBounds();
-		for (const [lng, lat] of coords) bounds.extend({ lat, lng });
-		map.fitBounds(bounds, 100);
+		const bounds = boundsOfCoords(coords.map(([lng, lat]) => ({ lat, lng })));
+		if (bounds) host.fitBounds(bounds, 100);
 		return;
 	}
-	if ((selection.count ?? 0) === 0) return;
 	const ids = await cmd.storeResolveSelection(selection.props);
+	if (ids.length === 0) return;
 	const locs = await fetchLocationsByIds(ids);
-	const bounds = new google.maps.LatLngBounds();
-	for (const loc of locs) bounds.extend({ lat: loc.lat, lng: loc.lng });
-	map.fitBounds(bounds, 100);
+	const bounds = boundsOfCoords(locs);
+	if (bounds) host.fitBounds(bounds, 100);
 }
 
 function uniqueTagName(base: string, existing: Set<string>): string {
@@ -116,6 +122,7 @@ export function SelectionRow({
 }) {
 	const map = useCurrentMap();
 	const ghostedKeys = useGhostedSelections();
+	const count = useSelectionCounts()[selection.key] ?? 0;
 	const isTopLevel = depth === 0;
 	const ghosted = inheritedGhost || (isTopLevel && ghostedKeys.has(selection.key));
 	const [view, setView] = useState<"contextmenu" | "color">("contextmenu");
@@ -127,11 +134,15 @@ export function SelectionRow({
 	const drag = useDragState();
 	const isDragging = drag?.key === selection.key;
 	const isDropTarget = drag != null && drag.key !== selection.key;
-	const handleColorChange = useCallback(
-		(c: { r: number; g: number; b: number }) => {
-			setSelectionColors([{ key: selection.key, color: [c.r, c.g, c.b] }]);
-		},
-		[selection.key],
+	const handleColorChange = useDebouncedCallback(
+		useCallback(
+			(c: RGB) => {
+				setSelectionColors([{ key: selection.key, color: [c.r, c.g, c.b] }]);
+			},
+			[selection.key],
+		),
+		60,
+		{ flush: true },
 	);
 
 	const fieldEntries = useExtraFieldKeys();
@@ -141,7 +152,7 @@ export function SelectionRow({
 	const stepFilter = (() => {
 		const p = selection.props;
 		if (p.type !== "Filter") return null;
-		const ft = fieldEntries.find((f) => f.key === p.field)?.fieldType;
+		const ft = fieldEntries.find((f) => f.key === p.field)?.def.type;
 		const wallClock = p.tzLocal ?? false;
 		if (stepFilterWindow(ft, p.op, p.value, p.value2, 1, wallClock) == null) return null;
 		return (dir: 1 | -1) => {
@@ -303,17 +314,17 @@ export function SelectionRow({
 					style={{ paddingLeft: `${depth * 2}rem` }}
 					onClick={() => {
 						if (drag) return;
-						const gMap = getGoogleMapInstance();
-						if (gMap && map) fitSelectionBounds(gMap, selection);
+						const host = getMapHost();
+						if (host && map) fitSelectionBounds(host, selection);
 					}}
 				>
 					<span className="color-block" style={{ backgroundColor: colorBlockCss }} />{" "}
-					{selectionDisplayName(map, selection)}
+					{selectionDisplayName(selection)}
 				</span>
 				{isDropTarget && dropZone === "on" && (
 					<span className="selection-row__drop-hint">{drag?.altKey ? "OR" : "AND"}</span>
 				)}
-				<span className="selection-row__size">{fmt.format(selection.count ?? 0)}</span>
+				<span className="selection-row__size">{fmt.format(count)}</span>
 				<span className="selection-row__actions">
 					{stepFilter && (
 						<>
@@ -376,7 +387,7 @@ export function SelectionRow({
 										)}
 										<DropdownMenu.Item
 											className="context-menu__item"
-											disabled={(selection.count ?? 0) === 0}
+											disabled={count === 0}
 											onSelect={async () => {
 												const ids = await cmd.storeResolveSelection(selection.props);
 												beginReview(ids, selection);
@@ -387,10 +398,10 @@ export function SelectionRow({
 										{selection.props.type !== "Tag" && (
 											<DropdownMenu.Item
 												className="context-menu__item"
-												disabled={(selection.count ?? 0) === 0}
+												disabled={count === 0}
 												onSelect={() => {
-													const names = new Set(Object.values(map.meta.tags).map((t) => t.name));
-													setTagName(uniqueTagName(selectionDisplayName(map, selection), names));
+													const names = new Set(getVisibleTags().map((t) => t.name));
+													setTagName(uniqueTagName(selectionDisplayName(selection), names));
 													setSavingTag(true);
 												}}
 											>
@@ -400,9 +411,12 @@ export function SelectionRow({
 										{pruneDistance(selection) != null && (
 											<DropdownMenu.Item
 												className="context-menu__item"
-												disabled={(selection.count ?? 0) === 0}
+												disabled={count === 0}
 												onSelect={async () => {
-													const n = await pruneDuplicates(selection.props, pruneDistance(selection)!);
+													const n = await pruneDuplicates(
+														selection.props,
+														pruneDistance(selection)!,
+													);
 													toast(`Pruned ${fmt.format(n)} duplicate${n === 1 ? "" : "s"}`);
 												}}
 											>
@@ -476,7 +490,14 @@ export function SelectionRow({
 					initial={filterPropsToSeed(selection.props)}
 					submitLabel="Update filter"
 					onSubmit={(field, op, value, value2, tzLocal) =>
-						updateFilterSelection(selection.key, { type: "Filter", field, op, value, value2, tzLocal })
+						updateFilterSelection(selection.key, {
+							type: "Filter",
+							field,
+							op,
+							value,
+							value2,
+							tzLocal,
+						})
 					}
 					onClose={() => setEditingFilter(false)}
 				/>

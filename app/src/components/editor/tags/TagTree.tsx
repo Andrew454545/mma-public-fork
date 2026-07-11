@@ -1,4 +1,12 @@
-import { useState, useMemo, useCallback, useRef, forwardRef, useImperativeHandle } from "react";
+import {
+	memo,
+	useState,
+	useMemo,
+	useCallback,
+	useRef,
+	forwardRef,
+	useImperativeHandle,
+} from "react";
 import { createPortal } from "react-dom";
 import * as ContextMenu from "@radix-ui/react-context-menu";
 import { Icon } from "@/components/primitives/Icon";
@@ -22,7 +30,12 @@ interface TreeDrag {
 	dragPath: string | null;
 	dropTarget: { path: string; position: "before" | "after" } | null;
 	onMouseDown: (e: React.MouseEvent, node: TagTreeNode) => void;
-	onMouseMove: (e: React.MouseEvent, node: TagTreeNode, el: HTMLElement, horizontal?: boolean) => void;
+	onMouseMove: (
+		e: React.MouseEvent,
+		node: TagTreeNode,
+		el: HTMLElement,
+		horizontal?: boolean,
+	) => void;
 }
 
 const EXPANDED_KEY = "tagTreeExpanded";
@@ -31,7 +44,9 @@ function loadExpanded(): Set<string> {
 	try {
 		const raw = localStorage.getItem(EXPANDED_KEY);
 		if (raw) return new Set(JSON.parse(raw));
-	} catch { /* ignored */ }
+	} catch {
+		/* ignored */
+	}
 	return new Set();
 }
 
@@ -46,30 +61,39 @@ export interface TagTreeHandle {
 
 interface TagTreeViewProps {
 	tags: Tag[];
-	selectedTagIds: Set<number>;
+	selectedTagIds: ReadonlySet<number>;
 	tagCounts: Record<number, number>;
 	sortMode: TagSortMode;
 	virtualTags: Record<string, VirtualTag>;
+	aliases: Record<string, number>;
 	onEditTag: (node: TagTreeNode) => void;
 	onEditVirtual: (fullPath: string) => void;
 	onRenameTag: (tag: { id: number; name: string }) => void;
+	onAddAlias: (tag: { id: number; name: string }) => void;
+	onRemoveAlias: (aliasPath: string) => void;
 	filterText: string;
 }
 
-export const TagTreeView = forwardRef<TagTreeHandle, TagTreeViewProps>(function TagTreeView({
-	tags,
-	selectedTagIds,
-	tagCounts,
-	sortMode,
-	virtualTags,
-	onEditTag,
-	onEditVirtual,
-	onRenameTag,
-	filterText,
-}: TagTreeViewProps, ref) {
+export const TagTreeView = forwardRef<TagTreeHandle, TagTreeViewProps>(function TagTreeView(
+	{
+		tags,
+		selectedTagIds,
+		tagCounts,
+		sortMode,
+		virtualTags,
+		aliases,
+		onEditTag,
+		onEditVirtual,
+		onRenameTag,
+		onAddAlias,
+		onRemoveAlias,
+		filterText,
+	}: TagTreeViewProps,
+	ref,
+) {
 	const tree = useMemo(
-		() => buildTagTree(tags, sortMode, tagCounts, virtualTags),
-		[tags, sortMode, tagCounts, virtualTags],
+		() => buildTagTree(tags, sortMode, tagCounts, virtualTags, aliases),
+		[tags, sortMode, tagCounts, virtualTags, aliases],
 	);
 	const [expandedPaths, setExpandedPaths] = useState(loadExpanded);
 
@@ -150,7 +174,10 @@ export const TagTreeView = forwardRef<TagTreeHandle, TagTreeViewProps>(function 
 
 	// --- In-level drag reorder (only in "default" sort, not while filtering) ---
 	const [dragPath, setDragPath] = useState<string | null>(null);
-	const [dropTarget, setDropTarget] = useState<{ path: string; position: "before" | "after" } | null>(null);
+	const [dropTarget, setDropTarget] = useState<{
+		path: string;
+		position: "before" | "after";
+	} | null>(null);
 	const dragEnabled = sortMode === "default" && !filterText;
 	const draggedRef = useRef(false);
 	const dragNodeRef = useRef<TagTreeNode | null>(null);
@@ -163,7 +190,9 @@ export const TagTreeView = forwardRef<TagTreeHandle, TagTreeViewProps>(function 
 	const treeRef = useRef(tree);
 	treeRef.current = tree;
 	// Set while dragging a leaf pill — drives the floating "picked up" preview (flat-mode parity).
-	const [dragLeaf, setDragLeaf] = useState<{ color: string; label: string; count: number } | null>(null);
+	const [dragLeaf, setDragLeaf] = useState<{ color: string; label: string; count: number } | null>(
+		null,
+	);
 
 	const applyDropTarget = useCallback(
 		(v: { path: string; position: "before" | "after" } | null) => {
@@ -176,7 +205,7 @@ export const TagTreeView = forwardRef<TagTreeHandle, TagTreeViewProps>(function 
 	const handleDragMouseDown = useCallback(
 		(e: React.MouseEvent, node: TagTreeNode) => {
 			draggedRef.current = false; // fresh interaction; a drag that ends off-row won't fire a click to clear it
-			if (!dragEnabled || e.button !== 0) return;
+			if (!dragEnabled || e.button !== 0 || node.isAlias) return; // alias leaves aren't reorderable
 			if ((e.target as HTMLElement).closest("button")) return;
 			e.preventDefault(); // don't start a text selection
 			const startX = e.clientX;
@@ -215,7 +244,12 @@ export const TagTreeView = forwardRef<TagTreeHandle, TagTreeViewProps>(function 
 				document.body.classList.remove("mm-tag-dragging");
 				const dropT = dropTargetRef.current;
 				if (started && dropT) {
-					const order = reorderSiblingsFlatOrder(treeRef.current, node.fullPath, dropT.path, dropT.position);
+					const order = reorderSiblingsFlatOrder(
+						treeRef.current,
+						node.fullPath,
+						dropT.path,
+						dropT.position,
+					);
 					if (order) reorderTags(order);
 				}
 				dragNodeRef.current = null;
@@ -232,9 +266,13 @@ export const TagTreeView = forwardRef<TagTreeHandle, TagTreeViewProps>(function 
 
 	const handleDragMouseMove = useCallback(
 		(e: React.MouseEvent, node: TagTreeNode, el: HTMLElement, horizontal = false) => {
-			if (!dragPath || dragPath === node.fullPath) return;
-			const dragParent = dragPath.lastIndexOf("/") === -1 ? "" : dragPath.slice(0, dragPath.lastIndexOf("/"));
-			const nodeParent = node.fullPath.lastIndexOf("/") === -1 ? "" : node.fullPath.slice(0, node.fullPath.lastIndexOf("/"));
+			if (!dragPath || dragPath === node.fullPath || node.isAlias) return; // don't drop onto an alias
+			const dragParent =
+				dragPath.lastIndexOf("/") === -1 ? "" : dragPath.slice(0, dragPath.lastIndexOf("/"));
+			const nodeParent =
+				node.fullPath.lastIndexOf("/") === -1
+					? ""
+					: node.fullPath.slice(0, node.fullPath.lastIndexOf("/"));
 			if (dragParent !== nodeParent) return; // in-level only
 			const src = dragNodeRef.current;
 			// Pills reorder among pills, rows among rows — never across the leaf/branch split.
@@ -252,12 +290,15 @@ export const TagTreeView = forwardRef<TagTreeHandle, TagTreeViewProps>(function 
 		[dragPath, applyDropTarget],
 	);
 
-	const drag: TreeDrag = {
-		dragPath,
-		dropTarget,
-		onMouseDown: handleDragMouseDown,
-		onMouseMove: handleDragMouseMove,
-	};
+	const drag: TreeDrag = useMemo(
+		() => ({
+			dragPath,
+			dropTarget,
+			onMouseDown: handleDragMouseDown,
+			onMouseMove: handleDragMouseMove,
+		}),
+		[dragPath, dropTarget, handleDragMouseDown, handleDragMouseMove],
+	);
 
 	const handleRowClick = useCallback(
 		(node: TagTreeNode, shiftKey: boolean, altKey: boolean) => {
@@ -303,6 +344,8 @@ export const TagTreeView = forwardRef<TagTreeHandle, TagTreeViewProps>(function 
 				tagCounts={tagCounts}
 				onEditTag={onEditTag}
 				onRenameTag={onRenameTag}
+				onAddAlias={onAddAlias}
+				onRemoveAlias={onRemoveAlias}
 				onRowClick={handleRowClick}
 				drag={drag}
 			/>
@@ -310,7 +353,7 @@ export const TagTreeView = forwardRef<TagTreeHandle, TagTreeViewProps>(function 
 				<ul className="tag-tree">
 					{rootRows.map((node) => (
 						<TagTreeNodeRow
-							key={node.tag?.id ?? node.fullPath}
+							key={node.fullPath}
 							node={node}
 							depth={0}
 							selectedTagIds={selectedTagIds}
@@ -318,6 +361,8 @@ export const TagTreeView = forwardRef<TagTreeHandle, TagTreeViewProps>(function 
 							onEditTag={onEditTag}
 							onEditVirtual={onEditVirtual}
 							onRenameTag={onRenameTag}
+							onAddAlias={onAddAlias}
+							onRemoveAlias={onRemoveAlias}
 							forceExpanded={forceExpanded}
 							expandedPaths={expandedPaths}
 							onToggleExpanded={toggleExpanded}
@@ -355,7 +400,7 @@ export const TagTreeView = forwardRef<TagTreeHandle, TagTreeViewProps>(function 
 	);
 });
 
-function TagTreeNodeRow({
+const TagTreeNodeRow = memo(function TagTreeNodeRow({
 	node,
 	depth,
 	selectedTagIds,
@@ -363,6 +408,8 @@ function TagTreeNodeRow({
 	onEditTag,
 	onEditVirtual,
 	onRenameTag,
+	onAddAlias,
+	onRemoveAlias,
 	forceExpanded,
 	expandedPaths,
 	onToggleExpanded,
@@ -371,11 +418,13 @@ function TagTreeNodeRow({
 }: {
 	node: TagTreeNode;
 	depth: number;
-	selectedTagIds: Set<number>;
+	selectedTagIds: ReadonlySet<number>;
 	tagCounts: Record<number, number>;
 	onEditTag: (node: TagTreeNode) => void;
 	onEditVirtual: (fullPath: string) => void;
 	onRenameTag: (tag: { id: number; name: string }) => void;
+	onAddAlias: (tag: { id: number; name: string }) => void;
+	onRemoveAlias: (aliasPath: string) => void;
 	forceExpanded: boolean;
 	expandedPaths: Set<string>;
 	onToggleExpanded: (path: string) => void;
@@ -418,7 +467,9 @@ function TagTreeNodeRow({
 							marginLeft: `${depth * 1.25}rem`,
 							cursor: "pointer",
 						}}
-						data-drop={drag.dropTarget?.path === node.fullPath ? drag.dropTarget.position : undefined}
+						data-drop={
+							drag.dropTarget?.path === node.fullPath ? drag.dropTarget.position : undefined
+						}
 						onClick={(e) => onRowClick(node, e.shiftKey, e.altKey)}
 						onMouseDown={(e) => drag.onMouseDown(e, node)}
 						onMouseMove={(e) => drag.onMouseMove(e, node, e.currentTarget)}
@@ -437,11 +488,7 @@ function TagTreeNodeRow({
 						)}
 						<span className="tag-tree__label">{node.segment}</span>
 						{!node.tag && (
-							<Icon
-								path={mdiFolder}
-								size={13}
-								style={{ color: fg, opacity: 0.5, flexShrink: 0 }}
-							/>
+							<Icon path={mdiFolder} size={13} style={{ color: fg, opacity: 0.5, flexShrink: 0 }} />
 						)}
 						<small className="tag-tree__count">{fmt.format(count)}</small>
 						<button
@@ -463,9 +510,8 @@ function TagTreeNodeRow({
 						<TagContextMenuContent
 							tagId={node.tag!.id}
 							totalCount={sumCounts(node, tagCounts)}
-							onRename={() =>
-								onRenameTag({ id: node.tag!.id, name: node.tag!.name })
-							}
+							onRename={() => onRenameTag({ id: node.tag!.id, name: node.tag!.name })}
+							onAddAlias={() => onAddAlias({ id: node.tag!.id, name: node.tag!.name })}
 						/>
 					</ContextMenu.Portal>
 				)}
@@ -479,6 +525,8 @@ function TagTreeNodeRow({
 						tagCounts={tagCounts}
 						onEditTag={onEditTag}
 						onRenameTag={onRenameTag}
+						onAddAlias={onAddAlias}
+						onRemoveAlias={onRemoveAlias}
 						onRowClick={onRowClick}
 						drag={drag}
 					/>
@@ -486,7 +534,7 @@ function TagTreeNodeRow({
 						<ul className="tag-tree__children">
 							{childRows.map((child) => (
 								<TagTreeNodeRow
-									key={child.tag?.id ?? child.fullPath}
+									key={child.fullPath}
 									node={child}
 									depth={depth + 1}
 									selectedTagIds={selectedTagIds}
@@ -494,6 +542,8 @@ function TagTreeNodeRow({
 									onEditTag={onEditTag}
 									onEditVirtual={onEditVirtual}
 									onRenameTag={onRenameTag}
+									onAddAlias={onAddAlias}
+									onRemoveAlias={onRemoveAlias}
 									forceExpanded={forceExpanded}
 									expandedPaths={expandedPaths}
 									onToggleExpanded={onToggleExpanded}
@@ -507,7 +557,7 @@ function TagTreeNodeRow({
 			)}
 		</li>
 	);
-}
+});
 
 /** Live drag order: the dragged pill is spliced to its prospective slot so the group
  *  visibly opens a gap there (the dragged pill itself is hidden via `is-dragging`). Returns
@@ -530,22 +580,26 @@ function leafDisplayOrder(
 
 /** A group of terminal tags rendered as flat pills (flat-mode style), indented to sit
  *  under their parent folder row. */
-function TagLeafGroup({
+const TagLeafGroup = memo(function TagLeafGroup({
 	nodes,
 	depth,
 	selectedTagIds,
 	tagCounts,
 	onEditTag,
 	onRenameTag,
+	onAddAlias,
+	onRemoveAlias,
 	onRowClick,
 	drag,
 }: {
 	nodes: TagTreeNode[];
 	depth: number;
-	selectedTagIds: Set<number>;
+	selectedTagIds: ReadonlySet<number>;
 	tagCounts: Record<number, number>;
 	onEditTag: (node: TagTreeNode) => void;
 	onRenameTag: (tag: { id: number; name: string }) => void;
+	onAddAlias: (tag: { id: number; name: string }) => void;
+	onRemoveAlias: (aliasPath: string) => void;
 	onRowClick: (node: TagTreeNode, shiftKey: boolean, altKey: boolean) => void;
 	drag: TreeDrag;
 }) {
@@ -558,34 +612,40 @@ function TagLeafGroup({
 		>
 			{display.map((node) => (
 				<TagTreeLeaf
-					key={node.tag?.id ?? node.fullPath}
+					key={node.fullPath}
 					node={node}
 					selectedTagIds={selectedTagIds}
 					tagCounts={tagCounts}
 					onEditTag={onEditTag}
 					onRenameTag={onRenameTag}
+					onAddAlias={onAddAlias}
+					onRemoveAlias={onRemoveAlias}
 					onRowClick={onRowClick}
 					drag={drag}
 				/>
 			))}
 		</ul>
 	);
-}
+});
 
-function TagTreeLeaf({
+const TagTreeLeaf = memo(function TagTreeLeaf({
 	node,
 	selectedTagIds,
 	tagCounts,
 	onEditTag,
 	onRenameTag,
+	onAddAlias,
+	onRemoveAlias,
 	onRowClick,
 	drag,
 }: {
 	node: TagTreeNode;
-	selectedTagIds: Set<number>;
+	selectedTagIds: ReadonlySet<number>;
 	tagCounts: Record<number, number>;
 	onEditTag: (node: TagTreeNode) => void;
 	onRenameTag: (tag: { id: number; name: string }) => void;
+	onAddAlias: (tag: { id: number; name: string }) => void;
+	onRemoveAlias: (aliasPath: string) => void;
 	onRowClick: (node: TagTreeNode, shiftKey: boolean, altKey: boolean) => void;
 	drag: TreeDrag;
 }) {
@@ -599,7 +659,7 @@ function TagTreeLeaf({
 		<ContextMenu.Root modal={false}>
 			<ContextMenu.Trigger asChild>
 				<li
-					className={`tag has-button${isSelected ? " is-selected" : ""}${drag.dragPath === node.fullPath ? " is-dragging" : ""}`}
+					className={`tag has-button${isSelected ? " is-selected" : ""}${node.isAlias ? " is-alias" : ""}${drag.dragPath === node.fullPath ? " is-dragging" : ""}`}
 					style={{
 						backgroundColor: bg,
 						color: fg,
@@ -633,9 +693,10 @@ function TagTreeLeaf({
 					tagId={tag.id}
 					totalCount={count}
 					onRename={() => onRenameTag({ id: tag.id, name: tag.name })}
+					onAddAlias={node.isAlias ? undefined : () => onAddAlias({ id: tag.id, name: tag.name })}
+					onRemoveAlias={node.isAlias ? () => onRemoveAlias(node.fullPath) : undefined}
 				/>
 			</ContextMenu.Portal>
 		</ContextMenu.Root>
 	);
-}
-
+});

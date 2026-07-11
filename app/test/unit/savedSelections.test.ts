@@ -1,5 +1,16 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+
+// The store binds tag lookups internally; back them with a settable fake tag set.
+const h = vi.hoisted(() => ({
+	tags: {} as Record<number, { id: number; name: string; color: string; visible: boolean }>,
+}));
+vi.mock("@/store/useMapStore", () => ({
+	addSelections: vi.fn(),
+	getTag: (id: number) => h.tags[id],
+	getVisibleTags: () => Object.values(h.tags).filter((t) => t.visible !== false),
+}));
+
 import {
 	selectionToSaved,
 	savedToSelectionProps,
@@ -8,38 +19,14 @@ import {
 	type SavedSelection,
 	type SavedSelectionProps,
 } from "@/store/savedSelections";
-import type { MapData, Tag } from "@/types";
-import type { Selection } from "@/store/selections";
+import type { Selection } from "@/bindings.gen";
 
-function makeMap(tags: Record<number, Tag> = {}): MapData {
-	return {
-		meta: {
-			id: "map1",
-			name: "Test",
-			description: "",
-			folder: null,
-			locationCount: 0,
-			tags,
-			settings: {
-				pointAlongRoad: false,
-				preferDirection: null,
-				preferOfficial: false,
-				preferHigherQuality: false,
-				onlyOfficial: false,
-				cameraTypes: null,
-				defaultPanoId: false,
-				exportZoom: false,
-				exportUnpanned: false,
-			},
-			scoreBounds: "auto",
-			createdAt: "",
-			updatedAt: "",
-		},
-	};
-}
+beforeEach(() => {
+	h.tags = {};
+});
 
 function makeSel(props: Selection["props"]): Selection {
-	return { key: "test", color: [100, 100, 100], props, count: 0 };
+	return { key: "test", color: [100, 100, 100], props };
 }
 
 // ============================================================================
@@ -77,10 +64,7 @@ describe("rewriteSavedSelectionFields", () => {
 			[
 				wrap({
 					type: "Union",
-					selections: [
-						{ type: "Filter", field: "a", op: "eq", value: 1 },
-						{ type: "Untagged" },
-					],
+					selections: [{ type: "Filter", field: "a", op: "eq", value: 1 }, { type: "Untagged" }],
 				}),
 			],
 			"a",
@@ -97,83 +81,64 @@ describe("rewriteSavedSelectionFields", () => {
 
 describe("selectionToSaved", () => {
 	it("converts Everything selection", () => {
-		const result = selectionToSaved(makeSel({ type: "Everything" }), makeMap());
+		const result = selectionToSaved(makeSel({ type: "Everything" }));
 		expect(result).toEqual({ type: "Everything" });
 	});
 
 	it("converts Untagged selection", () => {
-		const result = selectionToSaved(makeSel({ type: "Untagged" }), makeMap());
+		const result = selectionToSaved(makeSel({ type: "Untagged" }));
 		expect(result).toEqual({ type: "Untagged" });
 	});
 
 	it("converts Unpanned selection", () => {
-		const result = selectionToSaved(makeSel({ type: "Unpanned" }), makeMap());
+		const result = selectionToSaved(makeSel({ type: "Unpanned" }));
 		expect(result).toEqual({ type: "Unpanned" });
 	});
 
 	it("converts PanoIds selection", () => {
-		const result = selectionToSaved(makeSel({ type: "PanoIds" }), makeMap());
+		const result = selectionToSaved(makeSel({ type: "PanoIds" }));
 		expect(result).toEqual({ type: "PanoIds" });
 	});
 
 	it("converts NotPanoIds selection", () => {
-		const result = selectionToSaved(makeSel({ type: "NotPanoIds" }), makeMap());
+		const result = selectionToSaved(makeSel({ type: "NotPanoIds" }));
 		expect(result).toEqual({ type: "NotPanoIds" });
 	});
 
 	it("converts Duplicates selection with distance", () => {
-		const result = selectionToSaved(
-			makeSel({ type: "Duplicates", distance: 50 }),
-			makeMap(),
-		);
+		const result = selectionToSaved(makeSel({ type: "Duplicates", distance: 50 }));
 		expect(result).toEqual({ type: "Duplicates", distance: 50 });
 	});
 
 	it("converts Tag selection to TagName using map tag lookup", () => {
-		const tags = { 7: { id: 7, name: "Mountains", color: "#ff0000", visible: true } };
-		const result = selectionToSaved(
-			makeSel({ type: "Tag", tagId: 7 }),
-			makeMap(tags),
-		);
+		h.tags = { 7: { id: 7, name: "Mountains", color: "#ff0000", visible: true } };
+		const result = selectionToSaved(makeSel({ type: "Tag", tagId: 7 }));
 		expect(result).toEqual({ type: "TagName", tagName: "Mountains" });
 	});
 
 	it("returns null for Tag selection with unknown tagId", () => {
-		const result = selectionToSaved(
-			makeSel({ type: "Tag", tagId: 999 }),
-			makeMap(),
-		);
+		const result = selectionToSaved(makeSel({ type: "Tag", tagId: 999 }));
 		expect(result).toBeNull();
 	});
 
 	it("returns null for Manual selection (not saveable)", () => {
-		const result = selectionToSaved(
-			makeSel({ type: "Manual", locations: [1, 2, 3] }),
-			makeMap(),
-		);
+		const result = selectionToSaved(makeSel({ type: "Manual", locations: [1, 2, 3] }));
 		expect(result).toBeNull();
 	});
 
 	it("returns null for Locations selection (not saveable)", () => {
-		const result = selectionToSaved(
-			makeSel({ type: "Locations", locations: [1, 2], name: null }),
-			makeMap(),
-		);
+		const result = selectionToSaved(makeSel({ type: "Locations", locations: [1, 2], name: null }));
 		expect(result).toBeNull();
 	});
 
 	it("returns null for ValidationState selection (not saveable)", () => {
-		const result = selectionToSaved(
-			makeSel({ type: "ValidationState", locations: [1], state: 0 }),
-			makeMap(),
-		);
+		const result = selectionToSaved(makeSel({ type: "ValidationState", locations: [1], state: 0 }));
 		expect(result).toBeNull();
 	});
 
 	it("converts Filter selection", () => {
 		const result = selectionToSaved(
 			makeSel({ type: "Filter", field: "altitude", op: "gt", value: 1000, value2: null }),
-			makeMap(),
 		);
 		expect(result).toEqual({
 			type: "Filter",
@@ -185,33 +150,27 @@ describe("selectionToSaved", () => {
 	});
 
 	it("converts Union of saveable children", () => {
-		const tags = { 1: { id: 1, name: "A", color: "#aaa", visible: true } };
-		const map = makeMap(tags);
+		h.tags = { 1: { id: 1, name: "A", color: "#aaa", visible: true } };
 		const sel = makeSel({
 			type: "Union",
 			selections: [
-				{ key: "panoids", color: [0, 0, 0], props: { type: "PanoIds" }, count: 0 },
-				{ key: "tag:1", color: [0, 0, 0], props: { type: "Tag", tagId: 1 }, count: 0 },
+				{ key: "panoids", color: [0, 0, 0], props: { type: "PanoIds" } },
+				{ key: "tag:1", color: [0, 0, 0], props: { type: "Tag", tagId: 1 } },
 			],
 		});
-		const result = selectionToSaved(sel, map);
+		const result = selectionToSaved(sel);
 		expect(result).toEqual({
 			type: "Union",
-			selections: [
-				{ type: "PanoIds" },
-				{ type: "TagName", tagName: "A" },
-			],
+			selections: [{ type: "PanoIds" }, { type: "TagName", tagName: "A" }],
 		});
 	});
 
 	it("returns null for composite where all children are unsaveable", () => {
 		const sel = makeSel({
 			type: "Intersection",
-			selections: [
-				{ key: "manual", color: [0, 0, 0], props: { type: "Manual", locations: [1] }, count: 0 },
-			],
+			selections: [{ key: "manual", color: [0, 0, 0], props: { type: "Manual", locations: [1] } }],
 		});
-		const result = selectionToSaved(sel, makeMap());
+		const result = selectionToSaved(sel);
 		expect(result).toBeNull();
 	});
 });
@@ -222,23 +181,23 @@ describe("selectionToSaved", () => {
 
 describe("savedToSelectionProps", () => {
 	it("resolves TagName to Tag using map lookup (case-insensitive)", () => {
-		const tags = { 3: { id: 3, name: "Coastal", color: "#00f", visible: true } };
-		const result = savedToSelectionProps({ type: "TagName", tagName: "coastal" }, makeMap(tags));
+		h.tags = { 3: { id: 3, name: "Coastal", color: "#00f", visible: true } };
+		const result = savedToSelectionProps({ type: "TagName", tagName: "coastal" });
 		expect(result).toEqual({ type: "Tag", tagId: 3 });
 	});
 
 	it("returns null for TagName when tag no longer exists", () => {
-		const result = savedToSelectionProps({ type: "TagName", tagName: "Deleted" }, makeMap());
+		const result = savedToSelectionProps({ type: "TagName", tagName: "Deleted" });
 		expect(result).toBeNull();
 	});
 
 	it("passes through Everything unchanged", () => {
-		const result = savedToSelectionProps({ type: "Everything" }, makeMap());
+		const result = savedToSelectionProps({ type: "Everything" });
 		expect(result).toEqual({ type: "Everything" });
 	});
 
 	it("passes through PanoIds unchanged", () => {
-		const result = savedToSelectionProps({ type: "PanoIds" }, makeMap());
+		const result = savedToSelectionProps({ type: "PanoIds" });
 		expect(result).toEqual({ type: "PanoIds" });
 	});
 
@@ -250,7 +209,7 @@ describe("savedToSelectionProps", () => {
 			value: 0,
 			value2: 5000,
 		};
-		const result = savedToSelectionProps(saved, makeMap());
+		const result = savedToSelectionProps(saved);
 		expect(result).toEqual(saved);
 	});
 
@@ -259,12 +218,12 @@ describe("savedToSelectionProps", () => {
 			type: "Intersection",
 			selections: [{ type: "TagName", tagName: "NoSuchTag" }],
 		};
-		const result = savedToSelectionProps(saved, makeMap());
+		const result = savedToSelectionProps(saved);
 		expect(result).toBeNull();
 	});
 
 	it("resolves composite with mixed resolvable/unresolvable children", () => {
-		const tags = { 1: { id: 1, name: "Valid", color: "#aaa", visible: true } };
+		h.tags = { 1: { id: 1, name: "Valid", color: "#aaa", visible: true } };
 		const saved: SavedSelectionProps = {
 			type: "Union",
 			selections: [
@@ -272,7 +231,7 @@ describe("savedToSelectionProps", () => {
 				{ type: "TagName", tagName: "Missing" },
 			],
 		};
-		const result = savedToSelectionProps(saved, makeMap(tags));
+		const result = savedToSelectionProps(saved);
 		expect(result).not.toBeNull();
 		expect(result!.type).toBe("Union");
 		if (result!.type === "Union") {
@@ -342,7 +301,10 @@ describe("describeRule", () => {
 	it("describes Union", () => {
 		const result = describeRule({
 			type: "Union",
-			selections: [{ type: "TagName", tagName: "A" }, { type: "TagName", tagName: "B" }],
+			selections: [
+				{ type: "TagName", tagName: "A" },
+				{ type: "TagName", tagName: "B" },
+			],
 		});
 		expect(result).toBe("Tag: A OR Tag: B");
 	});

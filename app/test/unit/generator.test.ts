@@ -2,7 +2,11 @@ import { describe, it, expect } from "vitest";
 import { passesDescriptionSearch, isPanoGood } from "@/plugins/generator/engine/filters";
 import { GenerationEngine } from "@/plugins/generator/engine/GenerationEngine";
 import { DEFAULT_SETTINGS } from "@/plugins/generator/engine/types";
-import type { GeneratorSettings, GeneratorRegion, GenerationCallbacks } from "@/plugins/generator/engine/types";
+import type {
+	GeneratorSettings,
+	GeneratorRegion,
+	GenerationCallbacks,
+} from "@/plugins/generator/engine/types";
 
 function loc(description = "", shortDescription = ""): google.maps.StreetViewLocation {
 	return { description, shortDescription } as unknown as google.maps.StreetViewLocation;
@@ -14,14 +18,23 @@ function settings(patch: Partial<GeneratorSettings>): GeneratorSettings {
 
 describe("passesDescriptionSearch", () => {
 	it("passes everything when disabled or terms empty", () => {
-		expect(passesDescriptionSearch(loc("Main Street"), settings({ searchInDescription: false }))).toBe(true);
 		expect(
-			passesDescriptionSearch(loc("Main Street"), settings({ searchInDescription: true, searchTerms: "  " })),
+			passesDescriptionSearch(loc("Main Street"), settings({ searchInDescription: false })),
+		).toBe(true);
+		expect(
+			passesDescriptionSearch(
+				loc("Main Street"),
+				settings({ searchInDescription: true, searchTerms: "  " }),
+			),
 		).toBe(true);
 	});
 
 	it("include + contains keeps matches, drops non-matches", () => {
-		const s = settings({ searchInDescription: true, searchTerms: "street", searchMode: "contains" });
+		const s = settings({
+			searchInDescription: true,
+			searchTerms: "street",
+			searchMode: "contains",
+		});
 		expect(passesDescriptionSearch(loc("Main Street"), s)).toBe(true);
 		expect(passesDescriptionSearch(loc("Country Road"), s)).toBe(false);
 	});
@@ -38,7 +51,11 @@ describe("passesDescriptionSearch", () => {
 	});
 
 	it("matches any of several comma-separated terms", () => {
-		const s = settings({ searchInDescription: true, searchTerms: "road, avenue", searchMode: "contains" });
+		const s = settings({
+			searchInDescription: true,
+			searchTerms: "road, avenue",
+			searchMode: "contains",
+		});
 		expect(passesDescriptionSearch(loc("Sunset Avenue"), s)).toBe(true);
 		expect(passesDescriptionSearch(loc("Main Street"), s)).toBe(false);
 	});
@@ -49,9 +66,17 @@ describe("passesDescriptionSearch", () => {
 	});
 
 	it("startswith / endswith operate per word", () => {
-		const starts = settings({ searchInDescription: true, searchTerms: "av", searchMode: "startswith" });
+		const starts = settings({
+			searchInDescription: true,
+			searchTerms: "av",
+			searchMode: "startswith",
+		});
 		expect(passesDescriptionSearch(loc("Sunset Avenue"), starts)).toBe(true);
-		const ends = settings({ searchInDescription: true, searchTerms: "street", searchMode: "endswith" });
+		const ends = settings({
+			searchInDescription: true,
+			searchTerms: "street",
+			searchMode: "endswith",
+		});
 		expect(passesDescriptionSearch(loc("Main Street"), ends)).toBe(true);
 		expect(passesDescriptionSearch(loc("Streetlight"), ends)).toBe(false);
 	});
@@ -109,7 +134,15 @@ function regionAt(id: string, west: number, east: number): GeneratorRegion {
 			properties: { name: id },
 			geometry: {
 				type: "Polygon",
-				coordinates: [[[west, -5], [east, -5], [east, 5], [west, 5], [west, -5]]],
+				coordinates: [
+					[
+						[west, -5],
+						[east, -5],
+						[east, 5],
+						[west, 5],
+						[west, -5],
+					],
+				],
 			},
 		},
 		found: [],
@@ -352,5 +385,86 @@ describe("GenerationEngine live tuning", () => {
 
 		expect(probesAfterResume).toBeGreaterThanOrEqual(50);
 		expect(engine.isRunning()).toBe(false);
+	});
+});
+
+// --- Poisson disk sampling ---
+
+import { poissonDiskSample } from "@/plugins/generator/engine/geo";
+
+function squareFeature(
+	west: number,
+	south: number,
+	east: number,
+	north: number,
+): GeoJSON.Feature<GeoJSON.Polygon> {
+	return {
+		type: "Feature",
+		properties: {},
+		geometry: {
+			type: "Polygon",
+			coordinates: [
+				[
+					[west, south],
+					[east, south],
+					[east, north],
+					[west, north],
+					[west, south],
+				],
+			],
+		},
+	};
+}
+
+describe("poissonDiskSample", () => {
+	it("all points are inside the polygon", () => {
+		const feature = squareFeature(10, 50, 11, 51);
+		const points = poissonDiskSample(feature, 5000);
+		expect(points.length).toBeGreaterThan(0);
+		for (const p of points) {
+			expect(p.lng).toBeGreaterThanOrEqual(10);
+			expect(p.lng).toBeLessThanOrEqual(11);
+			expect(p.lat).toBeGreaterThanOrEqual(50);
+			expect(p.lat).toBeLessThanOrEqual(51);
+		}
+	});
+
+	it("no two points are closer than minDistance", () => {
+		const feature = squareFeature(10, 50, 10.5, 50.5);
+		const minDist = 3000;
+		const points = poissonDiskSample(feature, minDist);
+
+		const mPerDegLat = 111_320;
+		const midLat = 50.25;
+		const mPerDegLng = mPerDegLat * Math.cos((midLat * Math.PI) / 180);
+
+		for (let i = 0; i < points.length; i++) {
+			for (let j = i + 1; j < points.length; j++) {
+				const dx = (points[i].lng - points[j].lng) * mPerDegLng;
+				const dy = (points[i].lat - points[j].lat) * mPerDegLat;
+				const dist = Math.sqrt(dx * dx + dy * dy);
+				expect(dist).toBeGreaterThanOrEqual(minDist * 0.99);
+			}
+		}
+	});
+
+	it("produces a reasonable number of points for the area", () => {
+		const feature = squareFeature(10, 50, 11, 51);
+		const minDist = 5000;
+		const points = poissonDiskSample(feature, minDist);
+
+		const mPerDegLat = 111_320;
+		const mPerDegLng = mPerDegLat * Math.cos((50.5 * Math.PI) / 180);
+		const areaM2 = 1 * mPerDegLng * (1 * mPerDegLat);
+		const maxPacking = areaM2 / (minDist * minDist * Math.PI * 0.25);
+
+		expect(points.length).toBeGreaterThan(maxPacking * 0.3);
+		expect(points.length).toBeLessThan(maxPacking * 1.5);
+	});
+
+	it("handles tiny polygons gracefully", () => {
+		const feature = squareFeature(10, 50, 10.001, 50.001);
+		const points = poissonDiskSample(feature, 5000);
+		expect(points.length).toBeLessThanOrEqual(1);
 	});
 });

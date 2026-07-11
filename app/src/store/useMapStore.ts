@@ -1,15 +1,33 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
 import type { WorkArea, LatLng, MaybeLocation } from "@/types";
-import { isVirtualLocation, isImportPreview, LocationFlag, locId, bboxTupleToBounds } from "@/types";
-import type { Location, MapData, MapMeta, Tag, ExtraFieldDef, FilterOp, KeySpec, Scope, CommitDiff, PartitionBucket, EditorImportPreview } from "@/bindings.gen";
+import {
+	isVirtualLocation,
+	isImportPreview,
+	LocationFlag,
+	locId,
+	bboxTupleToBounds,
+} from "@/types";
+import type {
+	Location,
+	MapData,
+	MapMeta,
+	Tag,
+	ExtraFieldDef,
+	FilterOp,
+	KeySpec,
+	Scope,
+	CommitDiff,
+	PartitionBucket,
+	EditorImportPreview,
+} from "@/bindings.gen";
 import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
 import { emit as tauriEmit, listen } from "@tauri-apps/api/event";
 import { cmd } from "@/lib/commands";
 import type {
 	MutationResult,
 	MapMetaPatch_Deserialize as MapMetaPatch,
-	SyncSelectionsResult,
-	CommitInfo
+	SelectionSync,
+	CommitInfo,
 } from "@/bindings.gen";
 import { emit as emitEvent } from "@/lib/events";
 import { log, fireAndForget } from "@/lib/util/log";
@@ -20,7 +38,11 @@ import { mmaBufUrl, compareNatural } from "@/lib/util/util";
 import { fitMapToBounds } from "@/lib/map/mapState";
 import { getSettings, setSetting } from "@/store/settings";
 import { getTriggeredProviders } from "@/lib/data/fieldDefs";
-import { setUserFieldDefs, mergeUserFieldDefs, resetForMapChange } from "@/lib/data/fieldDefRegistry";
+import {
+	setUserFieldDefs,
+	mergeUserFieldDefs,
+	resetForMapChange,
+} from "@/lib/data/fieldDefRegistry";
 import {
 	planFieldMove,
 	planFieldDelete,
@@ -30,7 +52,13 @@ import {
 import type { LocationPatch_Deserialize as LocationPatch, Update, TagPatch } from "@/bindings.gen";
 import { getSavedSelections, rewriteSavedSelectionFields } from "./savedSelections";
 import type { RenderDelta } from "@/bindings.gen";
-import { SelectedIds, decodeSelectionBitmask, type ReadonlyIdSet, type SelCellEntry } from "@/lib/render/CellManager";
+import {
+	SelectedIds,
+	decodeSelectionBitmask,
+	type ReadonlyIdSet,
+	type SelCellEntry,
+} from "@/lib/render/CellManager";
+import { whenSceneSettled } from "@/lib/render/sceneStore";
 
 /** Minimal pub/sub bus. `.on()` returns an unsubscribe function. */
 function createBus<T extends (...args: never[]) => void>() {
@@ -88,26 +116,42 @@ const notify = storeBus.emit;
 /** Subscribe to any store mutation (map open/close, rename, edits, ...). */
 export const subscribeStore = subscribe;
 
-/** Build a reactive store hook: subscribe to the bus, return the latest value. */
-function makeStoreHook<T>(getValue: () => T, snapshot: () => number = getMapSnapshot): () => T {
+/** Build a reactive store hook: subscribe to the bus, return the latest value.
+ *  The value itself is the useSyncExternalStore snapshot, so consumers re-render
+ *  only when its reference changes (Object.is). Two invariants follow:
+ *  - getValue must return a cached/stable reference, never construct per call
+ *  - mutations must reassign the published reference, never mutate in place */
+function makeStoreHook<T>(getValue: () => T): () => T {
 	return function useStoreValue(): T {
-		useSyncExternalStore(subscribe, snapshot);
-		return getValue();
+		return useSyncExternalStore(subscribe, getValue);
+	};
+}
+
+/** Single-slot memo for values derived from store state: re-derives only when an
+ *  input reference changes, so repeated calls return the same object. This is what
+ *  lets a derived getter double as a hook snapshot (see makeStoreHook). Inputs
+ *  must be the copy-on-write references the derivation reads. */
+function memoOnRefs<const I extends readonly unknown[], O>(
+	getInputs: () => I,
+	derive: (...inputs: I) => O,
+): () => O {
+	let slot: { inputs: I; output: O } | null = null;
+	return () => {
+		const inputs = getInputs();
+		if (!slot || slot.inputs.some((v, i) => v !== inputs[i])) {
+			slot = { inputs, output: derive(...inputs) };
+		}
+		return slot.output;
 	};
 }
 
 // --- Map list state ---
-let mapListVersion = 0;
-function getMapListSnapshot() {
-	return mapListVersion;
-}
-
 let cachedMapList: MapMeta[] = [];
-export const useMapList = makeStoreHook(() => cachedMapList, getMapListSnapshot);
+export const useMapList = makeStoreHook(() => cachedMapList);
+export const getMapList = () => cachedMapList;
 
 async function reloadMapList() {
 	cachedMapList = await cmd.storeListMaps();
-	mapListVersion++;
 	notify();
 }
 
@@ -122,9 +166,13 @@ let currentMap: MapData | null = null;
 /** Persisted bitmasks per selection key. Updated incrementally on each
  *  mutation (delta refresh) when the column store is available. */
 let selections: Selection[] = [];
+/** Resolved count per selection node (top-level and nested), keyed by `Selection.key`.
+ *  The sole source for sidebar counts — refreshed wholesale from Rust on every sync. */
+let selectionCounts: Record<string, number> = {};
 /** Keys of selections that are "ghosted": kept in the list but excluded from the
- *  Rust sync, so they neither render nor count toward the selected set. Ephemeral. */
-const ghostedSelections = new Set<string>();
+ *  Rust sync, so they neither render nor count toward the selected set. Ephemeral.
+ *  Reassigned on every change (never mutated in place) — it is a hook snapshot. */
+let ghostedSelections: ReadonlySet<string> = new Set<string>();
 let selectedLocationIds: SelectedIds = SelectedIds.EMPTY;
 let activeLocationId: number | null = null;
 let duplicateLocations: Location[] = [];
@@ -187,7 +235,6 @@ function bump() {
 export function refreshAfterMutation() {
 	if (!currentMap) {
 		selections = [];
-
 		selectedLocationIds = SelectedIds.EMPTY;
 		bump();
 		return;
@@ -197,27 +244,30 @@ export function refreshAfterMutation() {
 
 export const useCurrentMap = makeStoreHook(() => currentMap);
 
-export function getVisibleTags(): Tag[] {
-	if (!currentMap) return [];
-	return Object.values(currentMap.meta.tags).filter((t) => t.visible !== false);
+/** Tags that exist from the user's point of view. Raw `meta.tags` also holds soft-deleted ghosts (count=0, visible=false, kept for undo revival) — almost nothing outside the undo/revival machinery should enumerate those. */
+const NO_TAGS: Tag[] = [];
+export const getVisibleTags: () => Tag[] = memoOnRefs(
+	() => [currentMap?.meta.tags] as const,
+	(tags) => (tags ? Object.values(tags).filter((t) => t.visible !== false) : NO_TAGS),
+);
+
+export const useVisibleTags = makeStoreHook(getVisibleTags);
+
+/** Raw by-id tag lookup — includes soft-deleted ghosts so stale references
+ *  (e.g. a selection whose tag just died) still resolve to a name. */
+export function getTag(id: number): Tag | undefined {
+	return currentMap?.meta.tags[id];
 }
 
-/** Reactive map version counter. Bumps on every mutation. */
 export const useMapVersion = makeStoreHook(() => mapVersion);
-
 export const useSelectedLocationIds = makeStoreHook(() => selectedLocationIds);
 
 let cachedActiveLocation: Location | null = null;
-
 export const useActiveLocation = makeStoreHook((): Location | null => cachedActiveLocation);
-
 export const useDuplicateLocations = makeStoreHook(() => duplicateLocations);
 
 export const useWorkArea = makeStoreHook(() => workArea);
-
 export const useImportStaging = makeStoreHook(() => importStaging);
-
-/** Reactive counter for the staged import preview markers. */
 export const useImportMarkerVersion = makeStoreHook(() => importMarkerVersion);
 
 export function getImportPreviewPositions() {
@@ -225,8 +275,6 @@ export function getImportPreviewPositions() {
 }
 
 export const useCommitDiffPreview = makeStoreHook(() => commitDiffPreview);
-
-/** Reactive counter for the commit-diff overlay markers. */
 export const useDiffMarkerVersion = makeStoreHook(() => diffMarkerVersion);
 
 export function getCommitDiffPreview() {
@@ -260,7 +308,7 @@ export function useCommitDiff() {
 
 // --- Autosave ---
 let autosaveTimer: ReturnType<typeof setTimeout> | null = null;
-let inflightSave: Promise<void> | null = null;
+let inflightPersist: Promise<void> | null = null;
 const AUTOSAVE_DELAY_MS = 2000;
 
 export async function getDirtyCount(): Promise<number> {
@@ -276,10 +324,19 @@ export function scheduleSave() {
 	}, AUTOSAVE_DELAY_MS);
 }
 
+function cancelAutosave() {
+	if (autosaveTimer) {
+		clearTimeout(autosaveTimer);
+		autosaveTimer = null;
+	}
+}
+
 async function doSave(): Promise<void> {
 	if (!currentMapId || !currentMap) return;
+	await inflightPersist;
+
 	const t = trace("save");
-	inflightSave = cmd
+	inflightPersist = cmd
 		.storeSaveDirty()
 		.then(() => {
 			t.end();
@@ -290,15 +347,13 @@ async function doSave(): Promise<void> {
 			log.error("Autosave failed, will retry:", err);
 		})
 		.finally(() => {
-			inflightSave = null;
+			inflightPersist = null;
 		});
-	await inflightSave;
+	await inflightPersist;
 }
 
 export async function flushSave(): Promise<void> {
-	if (autosaveTimer) clearTimeout(autosaveTimer);
-	autosaveTimer = null;
-	if (inflightSave) await inflightSave;
+	cancelAutosave();
 	await doSave();
 }
 
@@ -309,23 +364,28 @@ export async function initStore() {
 	listen("map-list-changed", () => reloadMapList());
 }
 
-let mapOpenT0 = 0;
-let mapOpenSeen = new Set<string>();
-export function mapOpenMark(phase: string) {
-	if (mapOpenT0 === 0 || mapOpenSeen.has(phase)) return;
-	mapOpenSeen.add(phase);
-	log.info(`[map-open] ${phase}=${Math.round(performance.now() - mapOpenT0)}ms`);
-}
+/** Cross-module stopwatch for map-open latency. */
+export const mapOpen = {
+	start: 0,
+	seen: new Set<string>(),
+	begin() {
+		this.start = performance.now();
+		this.seen.clear();
+	},
+	mark(phase: string) {
+		if (!this.start || this.seen.has(phase)) return;
+		this.seen.add(phase);
+		log.info(`[map-open] ${phase}=${Math.round(performance.now() - this.start)}ms`);
+	},
+};
 
 // --- Actions ---
 export async function openMap(id: string) {
-	mapOpenT0 = performance.now();
-	mapOpenSeen = new Set();
-	if (autosaveTimer) {
-		clearTimeout(autosaveTimer);
-		autosaveTimer = null;
-	}
-	if (inflightSave) await inflightSave;
+	mapOpen.begin();
+
+	cancelAutosave();
+	await inflightPersist;
+
 	const t = trace("openMap");
 	currentMapId = id;
 	currentMap = null;
@@ -337,9 +397,9 @@ export async function openMap(id: string) {
 		try {
 			const openResult = await cmd.storeOpenMap(id);
 			t.step("store_open_map");
-			mapOpenMark("data");
+			mapOpen.mark("data");
 			currentMap = meta;
-			tagCounts = openResult.tagCounts;
+			tagCounts = openResult.tagCounts ?? {};
 			undoRedoState = { canUndo: openResult.canUndo, canRedo: openResult.canRedo };
 			knownFieldKeys = new Set(openResult.knownFieldKeys);
 			setUserFieldDefs(meta.meta.extra?.fields ?? {});
@@ -366,8 +426,7 @@ export async function openMap(id: string) {
 	if (currentMap) emitEvent("map:open", currentMap);
 }
 
-// Tear down all in-memory state for the open map. Shared by closeMap (clean
-// close) and discardOpenMap (the map's data is gone, so we must NOT flush).
+/** Tear down all in-memory state for the open map. */
 function resetMapState() {
 	emitEvent("map:close");
 	currentMapId = null;
@@ -396,11 +455,9 @@ export async function closeMap() {
 
 /* Drop the open map without persisting anything */
 export function discardOpenMap() {
-	if (autosaveTimer) clearTimeout(autosaveTimer);
-	autosaveTimer = null;
+	cancelAutosave();
 	resetMapState();
 }
-
 
 export function getCurrentMapId() {
 	return currentMapId;
@@ -442,10 +499,10 @@ export function getAllSelections() {
 }
 
 /** Active (non-ghosted) selections, the default for any operational logic. */
-export function getSelections() {
-	if (ghostedSelections.size === 0) return selections;
-	return selections.filter((s) => !ghostedSelections.has(s.key));
-}
+export const getSelections: () => Selection[] = memoOnRefs(
+	() => [selections, ghostedSelections] as const,
+	(sels, ghosts) => (ghosts.size === 0 ? sels : sels.filter((s) => !ghosts.has(s.key))),
+);
 
 export function getSelectedLocationIds() {
 	return selectedLocationIds;
@@ -465,6 +522,7 @@ export async function syncSelections(): Promise<{ ids: number[] }> {
 	const ids = await cmd.storeGetSelectedIdsList();
 	return { ids };
 }
+
 export interface ScopeController {
 	scope: Scope;
 	setScope: (s: Scope) => void;
@@ -481,7 +539,11 @@ export function applyScope<T extends { id: number }>(scope: Scope, pool: T[]): T
 
 /** Group the scoped location set by a derived key — entirely in Rust, no locations fetched.
  *  Numeric bins arrive in bound order; projection keys are sorted naturally for display. */
-export async function partition(field: string, key: KeySpec, scope: Scope): Promise<PartitionBucket[]> {
+export async function partition(
+	field: string,
+	key: KeySpec,
+	scope: Scope,
+): Promise<PartitionBucket[]> {
 	const groups = await cmd.storePartition(field, key, scope);
 	if (key.kind !== "numericBin") groups.sort((a, b) => compareNatural(a.key, b.key));
 	return groups;
@@ -565,7 +627,6 @@ export async function deleteMap(id: string) {
 
 export async function renameFolder(from: string, to: string) {
 	cachedMapList = cachedMapList.map((m) => (m.folder === from ? { ...m, folder: to } : m));
-	mapListVersion++;
 	notify();
 	await cmd.storeRenameFolder(from, to);
 	await invalidateMapList();
@@ -575,7 +636,6 @@ export async function moveMapToFolder(mapId: string, folder: string | null) {
 	const idx = cachedMapList.findIndex((m) => m.id === mapId);
 	if (idx !== -1) {
 		cachedMapList = cachedMapList.map((m) => (m.id === mapId ? { ...m, folder } : m));
-		mapListVersion++;
 		notify();
 	}
 	await cmd.storeUpdateMapMeta(mapId, { folder: folder ?? null });
@@ -589,25 +649,31 @@ export async function deleteFolder(name: string) {
 
 export async function renameMap(id: string, name: string) {
 	await cmd.storeUpdateMapMeta(id, { name });
-	if (currentMap && currentMapId === id) currentMap.meta.name = name;
+	if (currentMap && currentMapId === id)
+		currentMap = { ...currentMap, meta: { ...currentMap.meta, name } };
 	refreshAfterMutation();
 	await invalidateMapList();
 }
 
 export async function updateMapLabels(id: string, labels: string[]) {
 	await cmd.storeUpdateMapMeta(id, { labels });
-	if (currentMap && currentMapId === id) currentMap.meta.labels = labels;
+	if (currentMap && currentMapId === id) {
+		currentMap = { ...currentMap, meta: { ...currentMap.meta, labels } };
+		notify();
+	}
 	await invalidateMapList();
 }
 
 export async function updateMapMeta(patch: MapMetaPatch) {
 	if (!currentMapId || !currentMap) return;
-	if (patch.name != null) currentMap.meta.name = patch.name;
-	if (patch.description != null) currentMap.meta.description = patch.description;
-	if (patch.folder !== undefined) currentMap.meta.folder = patch.folder;
-	if (patch.settings != null) currentMap.meta.settings = patch.settings;
-	if (patch.scoreBounds != null) currentMap.meta.scoreBounds = patch.scoreBounds;
-	if (patch.extra != null) currentMap.meta.extra = patch.extra;
+	const meta = { ...currentMap.meta };
+	if (patch.name != null) meta.name = patch.name;
+	if (patch.description != null) meta.description = patch.description;
+	if (patch.folder !== undefined) meta.folder = patch.folder;
+	if (patch.settings != null) meta.settings = patch.settings;
+	if (patch.scoreBounds != null) meta.scoreBounds = patch.scoreBounds;
+	if (patch.extra != null) meta.extra = patch.extra;
+	currentMap = { ...currentMap, meta };
 	refreshAfterMutation();
 	await cmd.storeUpdateMapMeta(currentMapId, patch);
 	await invalidateMapList();
@@ -632,21 +698,28 @@ function syncMutationResult(r: MutationResult) {
 		undoRedoState.canUndo !== r.canUndo ||
 		undoRedoState.canRedo !== r.canRedo ||
 		hasNewDefs ||
-		r.tags != null;
+		r.tags != null ||
+		r.tagCounts != null;
 	if (hasNewDefs) {
 		knownFieldKeys = new Set(knownFieldKeys);
 		for (const key of Object.keys(r.newFieldDefs!)) knownFieldKeys.add(key);
 		mergeUserFieldDefs(r.newFieldDefs!);
 	}
-	currentMap = {
-		...currentMap,
-		meta: {
-			...currentMap.meta,
-			locationCount: r.locationCount,
-		},
-	};
-	undoRedoState = { canUndo: r.canUndo, canRedo: r.canRedo };
-	tagCounts = r.tagCounts;
+	// Published references are hook snapshots: only replace them when the value
+	// actually changed, so unrelated consumers keep a stable reference.
+	if (currentMap.meta.locationCount !== r.locationCount) {
+		currentMap = {
+			...currentMap,
+			meta: {
+				...currentMap.meta,
+				locationCount: r.locationCount,
+			},
+		};
+	}
+	if (undoRedoState.canUndo !== r.canUndo || undoRedoState.canRedo !== r.canRedo) {
+		undoRedoState = { canUndo: r.canUndo, canRedo: r.canRedo };
+	}
+	if (r.tagCounts) tagCounts = r.tagCounts;
 	if (needsNotify) {
 		bump();
 	}
@@ -677,20 +750,18 @@ export function emitBitmask(bytes: number[]) {
 	});
 }
 
-function applySelectionSync(sync: {
-	counts: number[];
-	bitmask: number[] | null;
-	selectedCount: number;
-}) {
-	assignCounts(sync.counts);
+/** Apply a resolved selection payload (counts + overlay bitmask) to JS state and re-render.
+ *  Shared by both triggers: location mutations (membership changed) and selection edits. */
+function applySelectionSync(sync: SelectionSync) {
+	selectionCounts = sync.counts;
 	if (sync.bitmask) emitBitmask(sync.bitmask);
-
 	bump();
 }
 
 /** Await a mutation IPC, emit its render delta, sync JS state, and schedule a save. */
 export async function mutate(p: Promise<MutationResult>): Promise<MutationResult> {
 	const r = await p;
+	await inflightPersist;
 	renderDeltaBus.emit(r.delta);
 	syncMutationResult(r);
 	refreshAfterMutation();
@@ -742,21 +813,20 @@ export async function removeLocations(ids: ReadonlyIdSet) {
 
 export async function updateLocations(
 	updates: Update<LocationPatch>[],
-	opts?: { undoable?: boolean }
+	opts?: { undoable?: boolean },
 ) {
 	if (!currentMap || updates.length === 0) return;
-	if (updates.some(u => isVirtualLocation(u))) return;
+	if (updates.some((u) => isVirtualLocation(u))) return;
 	emitEvent("location:update", updates);
 	await mutate(cmd.storeUpdateLocations(updates, opts?.undoable ?? true));
-	if (cachedActiveLocation && updates.some(u => u.id === activeLocationId)) {
-		const activePatch = updates.find(u => u.id === activeLocationId)?.patch;
+	if (cachedActiveLocation && updates.some((u) => u.id === activeLocationId)) {
+		const activePatch = updates.find((u) => u.id === activeLocationId)?.patch;
 		if (activePatch) cachedActiveLocation = { ...cachedActiveLocation, ...activePatch } as Location;
 		bump();
 	}
 }
 
-// --- Bulk metadata-field operations (rare; intentionally NOT undoable, since the
-//     definition/selection migration below isn't part of the undo system) ---
+// --- Bulk metadata-field operations ---
 
 /** Rename or merge extra-field `from` into `to` across all locations, then migrate
  *  its definition and every selection that references it. Merge ≡ rename; `winner`
@@ -836,9 +906,14 @@ export async function patchLocationExtra(
 export const useAllSelections = makeStoreHook(() => selections);
 
 /** Active (non-ghosted) selections — the default for any operational logic. */
-export const useSelections = makeStoreHook(() =>
-	ghostedSelections.size === 0 ? selections : selections.filter((s) => !ghostedSelections.has(s.key)),
-);
+export const useSelections = makeStoreHook(getSelections);
+
+/** Keyed per-node selection counts (by `Selection.key`). Look up a row's count by its key. */
+export const useSelectionCounts = makeStoreHook(() => selectionCounts);
+
+export function getSelectionCounts() {
+	return selectionCounts;
+}
 
 /** Resolve a selection's overlay color, substituting the live tag color for Tag selections. */
 function selectionSyncColor(s: Selection): [number, number, number] {
@@ -852,25 +927,11 @@ function selectionSyncColor(s: Selection): [number, number, number] {
 /** All selections, each flagged ghosted or not. Rust counts every one, renders/selects only non-ghosted. */
 function buildSyncInputs() {
 	return selections.map((s) => ({
+		key: s.key,
 		props: s.props,
 		color: selectionSyncColor(s),
 		ghosted: ghostedSelections.has(s.key),
 	}));
-}
-
-/** Map Rust counts onto `selections`. `full` = one per selection in order; otherwise counts
- *  cover only the non-ghosted subset, and ghosted entries keep their last count. */
-function assignCounts(counts: number[], full = false) {
-	let j = 0;
-	for (let i = 0; i < selections.length; i++) {
-		if (full) {
-			selections[i] = { ...selections[i], count: counts[i] ?? 0 };
-		} else if (ghostedSelections.has(selections[i].key)) {
-			selections[i] = { ...selections[i], count: selections[i].count ?? 0 };
-		} else {
-			selections[i] = { ...selections[i], count: counts[j++] ?? 0 };
-		}
-	}
 }
 
 /** Apply a pure selection transform, then IPC to Rust to resolve bitmasks and sync the overlay. */
@@ -880,20 +941,11 @@ async function applySelectionUpdate(updater: (sels: Selection[]) => Selection[])
 	selections = updater(selections);
 	pruneGhosted();
 	const sels = buildSyncInputs();
-	let result: SyncSelectionsResult;
-	try {
-		result = await cmd.storeSyncSelections(sels);
-	} catch (e) {
-		log.error("[selection] store_sync_selections failed:", e);
-		return;
-	}
+	const result = await cmd.storeSyncSelections(sels);
 	t.step("ipc");
-	assignCounts(result.counts, true);
-	if (result.bitmask) emitBitmask(result.bitmask);
+	applySelectionSync(result);
 	t.step("apply");
 	t.end({ selected: result.selectedCount });
-
-	bump();
 	emitEvent("selection:change", selections);
 }
 
@@ -901,28 +953,30 @@ async function applySelectionUpdate(updater: (sels: Selection[]) => Selection[])
 function pruneGhosted() {
 	if (ghostedSelections.size === 0) return;
 	const live = new Set(selections.map((s) => s.key));
-	for (const k of ghostedSelections) if (!live.has(k)) ghostedSelections.delete(k);
+	const pruned = new Set([...ghostedSelections].filter((k) => live.has(k)));
+	if (pruned.size !== ghostedSelections.size) ghostedSelections = pruned;
 }
 
 export const useGhostedSelections = makeStoreHook(() => ghostedSelections);
+export const getGhostedSelections = () => ghostedSelections;
 
 /** Toggle a selection's ghosted state and re-sync (excludes/includes it from the overlay). */
 export function toggleGhostSelection(key: string) {
-	if (ghostedSelections.has(key)) ghostedSelections.delete(key);
-	else ghostedSelections.add(key);
+	const next = new Set(ghostedSelections);
+	if (next.has(key)) next.delete(key);
+	else next.add(key);
+	ghostedSelections = next;
 	return applySelectionUpdate((sels) => sels);
 }
 
 /** "Solo" a selection: ghost every other top-level selection, keep this one visible.
  *  If it is already the only visible one, un-ghost everything (toggle back). */
 export function isolateSelection(key: string) {
-	const next = isolateGhostKeys(
+	ghostedSelections = isolateGhostKeys(
 		selections.map((s) => s.key),
 		ghostedSelections,
 		key,
 	);
-	ghostedSelections.clear();
-	for (const k of next) ghostedSelections.add(k);
 	return applySelectionUpdate((sels) => sels);
 }
 
@@ -930,8 +984,7 @@ export function isolateSelection(key: string) {
 export function toggleGhostAllSelections() {
 	const keys = selections.map((s) => s.key);
 	const allGhosted = keys.length > 0 && keys.every((k) => ghostedSelections.has(k));
-	if (allGhosted) ghostedSelections.clear();
-	else for (const k of keys) ghostedSelections.add(k);
+	ghostedSelections = allGhosted ? new Set() : new Set([...ghostedSelections, ...keys]);
 	return applySelectionUpdate((sels) => sels);
 }
 
@@ -986,6 +1039,19 @@ export function selectRandomFromSelection(count: number): number {
 	return picked.length;
 }
 
+/** Replace the current selection with a single Manual selection of ids picked from the
+ *  current selection, spaced apart in Rust: either `count` ids maximizing spacing, or as
+ *  many as fit at `minDistanceM`. No-op when the pick returns nothing. */
+export async function selectSpacedFromSelection(opts: {
+	count?: number;
+	minDistanceM?: number;
+}): Promise<{ picked: number; distanceM: number }> {
+	const result = await cmd.storePickSpaced(opts.count ?? null, opts.minDistanceM ?? null);
+	if (result.ids.length === 0) return { picked: 0, distanceM: 0 };
+	await applySelectionUpdate(() => addSel([], { type: "Manual", locations: result.ids }));
+	return { picked: result.ids.length, distanceM: result.distanceM };
+}
+
 export function selectEverything() {
 	return addSelections([{ type: "Everything" }]);
 }
@@ -1034,9 +1100,9 @@ export async function pruneDuplicates(props: SelectionProps, distance: number): 
 	if (!currentMap) return 0;
 	const ids = await cmd.storeResolveSelection(props);
 	if (ids.length === 0) return 0;
-	const keepTagIds = Object.entries(currentMap.meta.tags)
-		.filter(([, t]) => t.name === "keep pano")
-		.map(([id]) => Number(id));
+	const keepTagIds = getVisibleTags()
+		.filter((t) => t.name === "keep pano")
+		.map((t) => t.id);
 	const r = await mutate(cmd.storePruneDuplicates(ids, distance, keepTagIds));
 	return r.delta.removed.length;
 }
@@ -1072,12 +1138,15 @@ export function updateFilterSelection(oldKey: string, props: SelectionProps) {
 		// existing selection (shrinking the list); the survivor keeps its own ghost state and
 		// pruneGhosted clears the old key, so only migrate when nothing was merged away.
 		if (next.length === sels.length) {
+			let migrated: Set<string> | null = null;
 			for (let i = 0; i < sels.length; i++) {
 				if (next[i].key !== sels[i].key && ghostedSelections.has(sels[i].key)) {
-					ghostedSelections.delete(sels[i].key);
-					ghostedSelections.add(next[i].key);
+					migrated ??= new Set(ghostedSelections);
+					migrated.delete(sels[i].key);
+					migrated.add(next[i].key);
 				}
 			}
+			if (migrated) ghostedSelections = migrated;
 		}
 		return next;
 	});
@@ -1087,8 +1156,6 @@ export function setPolygonName(key: string, name: string) {
 	return applySelectionUpdate((sels) => renamePolygonSel(sels, key, name));
 }
 
-// TODO: debounce — color picker fires this on every drag tick, triggering a full
-// store_sync_selections IPC each time. Laggy on large maps.
 export function setSelectionColors(entries: { key: string; color: [number, number, number] }[]) {
 	applySelectionUpdate((sels) => {
 		let result = sels;
@@ -1142,16 +1209,19 @@ export function toggleTagSelections(tagIds: number[]) {
 	});
 }
 
-export function useSelectedTagIds() {
-	useSyncExternalStore(subscribe, getMapSnapshot);
-	const ids = new Set<number>();
-	for (const s of selections) if (s.props.type === "Tag") ids.add(s.props.tagId);
-	return ids;
-}
+const getSelectedTagIds: () => ReadonlySet<number> = memoOnRefs(
+	() => [selections] as const,
+	(sels) => {
+		const ids = new Set<number>();
+		for (const s of sels) if (s.props.type === "Tag") ids.add(s.props.tagId);
+		return ids;
+	},
+);
 
-// Each preview gets a fresh negative id so its identity changes between previews (the pano
-// viewer re-resolves on active-id change). The kind lives in the location's flags, not the id.
+export const useSelectedTagIds = makeStoreHook(getSelectedTagIds);
+
 let virtualIdSeq = 0;
+/** Each preview gets a fresh negative id so its identity changes between previews (the pano viewer re-resolves on active-id change). */
 const freshVirtualId = () => --virtualIdSeq;
 
 /** Open a staged-import location read-only, "as if" it were active. The location becomes
@@ -1161,7 +1231,11 @@ export async function openStagedLocation(index: number) {
 	activeLocationId = null;
 	// Rust's active_id must not stay pinned to the previous real location.
 	fireAndForget(cmd.storeSetActive(null), "stagedOpen:setActive");
-	cachedActiveLocation = { ...loc, id: freshVirtualId(), flags: loc.flags | LocationFlag.ImportPreview };
+	cachedActiveLocation = {
+		...loc,
+		id: freshVirtualId(),
+		flags: loc.flags | LocationFlag.ImportPreview,
+	};
 	workArea = "location";
 	importMarkerVersion++;
 	bump();
@@ -1173,7 +1247,11 @@ export async function openStagedLocation(index: number) {
 export function previewVirtualLocation(loc: Location) {
 	activeLocationId = null;
 	fireAndForget(cmd.storeSetActive(null), "virtualPreview:setActive");
-	cachedActiveLocation = { ...loc, id: freshVirtualId(), flags: loc.flags | LocationFlag.SeenOverlay };
+	cachedActiveLocation = {
+		...loc,
+		id: freshVirtualId(),
+		flags: loc.flags | LocationFlag.SeenOverlay,
+	};
 	workArea = "location";
 	bump();
 	emitEvent("active:change", null);
@@ -1192,9 +1270,11 @@ export async function setActiveLocation(target: MaybeLocation | null, checkDupli
 		const wasStaged = isImportPreview(cachedActiveLocation);
 		if (id == null) {
 			cachedActiveLocation = null;
+
 			if (wasStaged) workArea = "import";
 			else if (activePluginId) workArea = "plugin";
 			else workArea = "overview";
+
 			bump();
 			emitEvent("active:change", null);
 			t.end();
@@ -1289,7 +1369,9 @@ export async function createTags(names: string[]): Promise<Tag[]> {
 	if (names.length === 0) return [];
 	await mutate(cmd.storeCreateTags(names));
 	const lower = new Set(names.map((n) => n.toLowerCase()));
-	const created = Object.values(currentMap!.meta.tags).filter((t) => lower.has(t.name.toLowerCase()));
+	const created = Object.values(currentMap!.meta.tags).filter((t) =>
+		lower.has(t.name.toLowerCase()),
+	);
 	emitEvent("tag:add", created);
 	return created;
 }
@@ -1372,8 +1454,12 @@ async function setImportStaging(preview: EditorImportPreview, source: "file" | "
 
 /** Import from a known file path. Used by file picker and drag-and-drop. */
 export async function beginImportFromPath(path: string) {
-	const preview = await cmd.storeImportPreview(path);
-	await setImportStaging(preview, "file");
+	await setImportStaging(await cmd.storeImportPreview(path), "file");
+}
+
+/** Stage pasted text for preview. Throws if no locations are found. */
+export async function beginImportPaste(text: string) {
+	await setImportStaging(await cmd.storeImportPastePreview(text), "paste");
 }
 
 /** Pick a file, stage it for preview. No-op if the picker is cancelled. */
@@ -1386,37 +1472,41 @@ export async function beginImportFile() {
 	await beginImportFromPath(path);
 }
 
-/** Stage pasted text for preview. Throws if no locations are found. */
-export async function beginImportPaste(text: string) {
-	const preview = await cmd.storeImportPastePreview(text);
-	await setImportStaging(preview, "paste");
-}
-
 /** Commit the staged import, optionally dropping fields and applying a bulk tag. */
 export async function confirmImport(droppedFields: string[], tagName?: string) {
 	if (!importStaging) return null;
+	await inflightPersist; // don't overlap a prior import's backgrounded commit
+
 	const r = await cmd.storeImportFile(droppedFields, tagName?.trim() || null);
 	cancelImport();
 	await mutate(Promise.resolve(r));
+
 	// Overlay any settings the import carried (extra.settings) onto the open map's
 	// settings. Generic: imported keys win, untouched keys are preserved.
 	if (currentMap && r.settings && Object.keys(r.settings).length) {
 		await updateMapMeta({ settings: { ...currentMap.meta.settings, ...r.settings } });
 	}
-	// Large imports skip the undo stack (Rust); commit them so the baseline advances
-	// with a recorded history entry instead of silently diverging from HEAD. Use the
-	// single-pass commit+bake (builds the Arrow batch once) instead of commitMap.
+
 	if (r.autoCommit && currentMapId) {
-		// A pending autosave would write a delta the bake deletes (wasted + races it).
-		if (autosaveTimer) {
-			clearTimeout(autosaveTimer);
-			autosaveTimer = null;
-		}
-		if (inflightSave) await inflightSave;
-		await cmd.storeCommit(currentMapId, `Import ${r.importedCount} locations`);
-		undoRedoState = { canUndo: false, canRedo: false };
-		cachedCommitDiff = { added: 0, removed: 0, modified: 0 };
-		bump();
+		const mapId = currentMapId;
+		// Let the full render finish (markers on screen) before kicking off the commit --
+		// otherwise the commit's ~1s of Arrow writes stall the render-buffer fetch and the
+		// map stays blank for seconds after the import "returns".
+		await whenSceneSettled();
+		cancelAutosave();
+		await inflightPersist;
+
+		inflightPersist = cmd
+			.storeCommit(mapId, `Import ${r.importedCount} locations`)
+			.then(() => {
+				undoRedoState = { canUndo: false, canRedo: false };
+				cachedCommitDiff = { added: 0, removed: 0, modified: 0 };
+			})
+			.catch((e) => log.error("[import] background commit failed:", e))
+			.finally(() => {
+				inflightPersist = null;
+				bump();
+			});
 	}
 	return r;
 }
@@ -1470,21 +1560,15 @@ export const useUndoRedo = makeStoreHook(() => undoRedoState);
 export async function commitMap(message?: string): Promise<string> {
 	if (!currentMapId) throw new Error("No map open");
 	const t = trace("commit");
-	// A pending/inflight autosave would write a delta sidecar the bake immediately deletes
-	// -- wasted I/O, and its async write can race the delete and leave a stale sidecar.
-	// The commit persists everything, so cancel the autosave first.
-	if (autosaveTimer) {
-		clearTimeout(autosaveTimer);
-		autosaveTimer = null;
-	}
-	if (inflightSave) await inflightSave;
-	// One Rust call: build the delta from the overlay, bake it into the base, record the
-	// commit, and clear undo. A null message is auto-formatted (+a -r ~m) Rust-side.
+	cancelAutosave();
+	await inflightPersist;
+
 	const id = await cmd.storeCommit(currentMapId, message ?? null);
 	t.step("commit");
 	t.end();
 	undoRedoState = { canUndo: false, canRedo: false };
 	cachedCommitDiff = { added: 0, removed: 0, modified: 0 };
+
 	// Commit clears the overlay; commit-sensitive selections (e.g. Uncommitted) must
 	// re-resolve against the new baseline instead of showing now-committed rows.
 	if (selections.length > 0) {

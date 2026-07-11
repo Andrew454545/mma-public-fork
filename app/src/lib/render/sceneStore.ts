@@ -2,12 +2,13 @@ import { useSyncExternalStore } from "react";
 import { CellManager } from "@/lib/render/CellManager";
 import { cmd } from "@/lib/commands";
 import { mmaBufUrl } from "@/lib/util/util";
+import type { RGB } from "@/lib/util/color";
 import { log } from "@/lib/util/log";
 import { trace } from "@/lib/util/debug";
 import {
 	getActiveLocation,
 	getSelectedLocationIds,
-	mapOpenMark,
+	mapOpen,
 	renderDeltaBus,
 	selBitmaskBus,
 	setSelectedLocationIds,
@@ -21,7 +22,7 @@ import type { MarkerStyle } from "@/types";
 // (ignores bounds, rebuilds the picking index, shared file path).
 
 const ACTIVE_HIDDEN: [number, number, number, number] = [0, 0, 0, 0];
-const MARKER_DEFAULT: [number, number, number, number] = [42, 42, 42, 255];
+let markerDefault: [number, number, number, number] = [42, 42, 42, 255];
 
 const scene = new CellManager();
 let version = 0;
@@ -69,16 +70,68 @@ function patchMarker(id: number, rgba: [number, number, number, number]) {
 // it) and restore the previously-active one — unless it's selected. Fast path: no refetch.
 function applyActive() {
 	const activeId = getActiveLocation()?.id ?? null;
-	if (prevActiveId != null && prevActiveId !== activeId && !getSelectedLocationIds().has(prevActiveId)) {
-		patchMarker(prevActiveId, MARKER_DEFAULT);
+	if (
+		prevActiveId != null &&
+		prevActiveId !== activeId &&
+		!getSelectedLocationIds().has(prevActiveId)
+	) {
+		patchMarker(prevActiveId, markerDefault);
 	}
 	prevActiveId = activeId;
 	if (activeId != null) patchMarker(activeId, ACTIVE_HIDDEN);
 }
 
+export function setMarkerDefaultColor(r: number, g: number, b: number) {
+	markerDefault = [r, g, b, 255];
+}
+
+/** Repaint the default marker color in place: patches base cell colors and tells Rust
+ *  (for future deltas). No render rebuild — safe to drive from an interactive picker. */
+export function recolorScene(mc: RGB) {
+	const [or, og, ob] = markerDefault;
+	if (or === mc.r && og === mc.g && ob === mc.b) return;
+	setMarkerDefaultColor(mc.r, mc.g, mc.b);
+	for (const cb of scene.cells.values()) {
+		const colors = cb.colors;
+		for (let i = 0; i < cb.count; i++) {
+			const o = i * 4;
+			if (
+				colors[o + 3] === 255 &&
+				colors[o] === or &&
+				colors[o + 1] === og &&
+				colors[o + 2] === ob
+			) {
+				colors[o] = mc.r;
+				colors[o + 1] = mc.g;
+				colors[o + 2] = mc.b;
+			}
+		}
+		cb.colorVersion++;
+	}
+	void cmd.storeSetMarkerColor([mc.r, mc.g, mc.b]);
+	scene.version++;
+	bumpScene();
+}
+
+export function getMarkerDefaultColor(): [number, number, number, number] {
+	return markerDefault;
+}
+
+let sceneSettled: Promise<void> = Promise.resolve();
+
+/** Resolves when the most recently started full scene load has finished (or immediately if none is in flight). */
+export function whenSceneSettled(): Promise<void> {
+	return sceneSettled;
+}
+
 /** Full (re)load from Rust for the whole world. Editor-driven on open / marker-style change. */
-export async function loadScene(markerStyle: MarkerStyle): Promise<void> {
+export function loadScene(markerStyle: MarkerStyle, mc?: RGB): Promise<void> {
+	return (sceneSettled = doLoadScene(markerStyle, mc));
+}
+
+async function doLoadScene(markerStyle: MarkerStyle, mc?: RGB): Promise<void> {
 	lastMarkerStyle = markerStyle;
+	if (mc) setMarkerDefaultColor(mc.r, mc.g, mc.b);
 	const token = ++loadToken;
 	const t = trace("render", { summary: true });
 	try {
@@ -88,16 +141,18 @@ export async function loadScene(markerStyle: MarkerStyle): Promise<void> {
 			east: 180,
 			north: 90,
 			markerStyle,
+			markerColor: mc ? [mc.r, mc.g, mc.b] : undefined,
 		});
 		t.step("fill");
 		const resp = await fetch(mmaBufUrl(filePath));
 		if (!resp.ok) throw new Error(`render fetch ${resp.status}: ${await resp.text()}`);
+		t.step("fetch-headers");
 		const buf = await resp.arrayBuffer();
-		t.step("fetch");
+		t.step("arraybuffer");
 		if (token !== loadToken) return; // superseded by a newer load
 		scene.initFromBinary(buf);
 		t.step("parse");
-		mapOpenMark("markers");
+		mapOpen.mark("markers");
 		applyActive();
 		// The reloaded binary carries the selection overlay; re-derive the id set from it,
 		// since any bitmask decode in `mutate` ran against the pre-reload scene.
@@ -127,7 +182,10 @@ export function startSceneEngine(): () => void {
 		const aid = getActiveLocation()?.id ?? null;
 		if (aid != null) patchMarker(aid, ACTIVE_HIDDEN);
 		if (delta.colorPatches.length > 0) {
-			const selPatches = delta.colorPatches.filter((cp) => !(cp.r === 42 && cp.g === 42 && cp.b === 42));
+			const selPatches = delta.colorPatches.filter(
+				(cp) =>
+					!(cp.r === markerDefault[0] && cp.g === markerDefault[1] && cp.b === markerDefault[2]),
+			);
 			scene.appendToSelectionOverlay(selPatches);
 		}
 		t.end({ affected: affected.size, added: delta.added.length, removed: delta.removed.length });
@@ -136,7 +194,8 @@ export function startSceneEngine(): () => void {
 
 	const unsubSel = selBitmaskBus.on((selColors, cellEntries, setIds) => {
 		const t = trace("selection", { summary: true });
-		const ids = scene.applySelectionBitmasks(selColors, cellEntries);
+		const [r, g, b] = markerDefault;
+		const ids = scene.applySelectionBitmasks(selColors, cellEntries, [r, g, b]);
 		setIds(ids);
 		t.end({ cells: cellEntries.length, sels: selColors.length, ids: ids.size });
 		bumpScene();

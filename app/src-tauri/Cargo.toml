@@ -1,6 +1,6 @@
 [package]
 name = "map-making-app"
-version = "0.6.7"
+version = "0.7.3"
 description = "Local map-making.app clone"
 authors = ["ccmdi"]
 license = ""
@@ -18,7 +18,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2.5.6", features = [] }
 
 [dependencies]
-serde_json = { version = "1.0", features = ["preserve_order"] }
+serde_json = { version = "1.0", features = ["preserve_order", "raw_value"] }
 serde = { version = "1.0", features = ["derive"] }
 log = "0.4"
 tauri = { version = "2.11.0", features = [] }
@@ -56,10 +56,16 @@ specta = { version = "=2.0.0-rc.25", features = ["derive", "serde_json"] }
 tauri-specta = { version = "=2.0.0-rc.25", features = ["derive", "typescript"] }
 specta-typescript = "0.0.12"
 csv = "1"
+fastrand = "2"
 memchr = "2"
 rustc-hash = "2"
 mimalloc = "0.1"
 tauri-plugin-webserve = { path = "crates/tauri-plugin-webserve", optional = true }
+vali-core = { path = "crates/vali/vali-core" }
+vali-data = { path = "crates/vali/vali-data" }
+vali-generate = { path = "crates/vali/vali-generate" }
+vali-geo = { path = "crates/vali/vali-geo" }
+json5 = "0.4"
 
 [profile.dev]
 opt-level = 1

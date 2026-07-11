@@ -6,9 +6,7 @@ import type {
 } from "@/bindings.gen";
 
 /** Per-cell, per-selection membership: a dense bitmask or a sparse selected-index list. */
-export type SelEntry =
-	| { kind: "mask"; mask: Uint8Array }
-	| { kind: "idx"; indices: Uint32Array };
+export type SelEntry = { kind: "mask"; mask: Uint8Array } | { kind: "idx"; indices: Uint32Array };
 export interface SelCellEntry {
 	cellChar: string;
 	locCount: number;
@@ -462,6 +460,7 @@ export class CellManager {
 	applySelectionBitmasks(
 		selColors: [number, number, number][],
 		cellEntries: SelCellEntry[],
+		defaultColor: [number, number, number] = [42, 42, 42],
 	): SelectedIds {
 		const numSels = selColors.length;
 
@@ -535,8 +534,10 @@ export class CellManager {
 		// incoming/removed), setting their selected bits — no objects, no Set lookups.
 		let oi = 0;
 		if (!isFull) {
-			const sp = this.selOverlayPositions, sc = this.selOverlayColors;
-			const sa = this.selOverlayAngles, sid = this.selOverlayIds;
+			const sp = this.selOverlayPositions,
+				sc = this.selOverlayColors;
+			const sa = this.selOverlayAngles,
+				sid = this.selOverlayIds;
 			const rem = this._removedIds;
 			const inc = incomingBits!;
 			for (let i = 0; i < prevCount; i++) {
@@ -544,14 +545,16 @@ export class CellManager {
 				if ((inc[id >>> 3] & (1 << (id & 7))) !== 0 || rem.has(id)) continue;
 				sp[oi * 2] = prevPos[i * 2];
 				sp[oi * 2 + 1] = prevPos[i * 2 + 1];
-				const o4 = oi * 4, p4 = i * 4;
+				const o4 = oi * 4,
+					p4 = i * 4;
 				sc[o4] = prevCol[p4];
 				sc[o4 + 1] = prevCol[p4 + 1];
 				sc[o4 + 2] = prevCol[p4 + 2];
 				sc[o4 + 3] = prevCol[p4 + 3];
 				sa[oi] = prevAng[i];
 				sid[oi] = id;
-				const w = id >>> 3, m = 1 << (id & 7);
+				const w = id >>> 3,
+					m = 1 << (id & 7);
 				if ((bits[w] & m) === 0) selCount++;
 				bits[w] |= m;
 				oi++;
@@ -568,9 +571,9 @@ export class CellManager {
 			if (n === 0) continue;
 			const colors = cb.colors;
 			const total = n * 4;
-			colors[0] = 42;
-			colors[1] = 42;
-			colors[2] = 42;
+			colors[0] = defaultColor[0];
+			colors[1] = defaultColor[1];
+			colors[2] = defaultColor[2];
 			colors[3] = 255;
 			let filled = 4;
 			while (filled < total) {
@@ -589,25 +592,38 @@ export class CellManager {
 		const sa = this.selOverlayAngles;
 		const sid = this.selOverlayIds;
 		for (let si = 0; si < numSels; si++) {
-			const r = selColors[si][0], g = selColors[si][1], b = selColors[si][2];
+			const r = selColors[si][0],
+				g = selColors[si][1],
+				b = selColors[si][2];
 			for (const entry of cellEntries) {
 				const cb = this.cells.get(entry.cellChar);
 				if (!cb) continue;
 				const n = Math.min(entry.locCount, cb.count);
 				const sel = entry.sels[si];
-				const cc = cb.colors, cpos = cb.positions, cang = cb.angles, cids = cb.ids;
+				const cc = cb.colors,
+					cpos = cb.positions,
+					cang = cb.angles,
+					cids = cb.ids;
 				// Sets the base color transparent (the overlay draws it in the selection color)
 				// and appends an overlay entry, advancing `oi`.
 				const write = (li: number) => {
 					const locId = cids[li];
-					const bw = locId >>> 3, bm = 1 << (locId & 7);
+					const bw = locId >>> 3,
+						bm = 1 << (locId & 7);
 					if ((bits[bw] & bm) === 0) selCount++;
 					bits[bw] |= bm;
 					const c4 = li * 4;
-					cc[c4] = 0; cc[c4 + 1] = 0; cc[c4 + 2] = 0; cc[c4 + 3] = 0;
-					sp[oi * 2] = cpos[li * 2]; sp[oi * 2 + 1] = cpos[li * 2 + 1];
+					cc[c4] = 0;
+					cc[c4 + 1] = 0;
+					cc[c4 + 2] = 0;
+					cc[c4 + 3] = 0;
+					sp[oi * 2] = cpos[li * 2];
+					sp[oi * 2 + 1] = cpos[li * 2 + 1];
 					const o4 = oi * 4;
-					sc[o4] = r; sc[o4 + 1] = g; sc[o4 + 2] = b; sc[o4 + 3] = 255;
+					sc[o4] = r;
+					sc[o4 + 1] = g;
+					sc[o4 + 2] = b;
+					sc[o4 + 3] = 255;
 					sa[oi] = cang[li];
 					sid[oi] = locId;
 					oi++;

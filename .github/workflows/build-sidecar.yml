@@ -4,7 +4,7 @@ on:
   workflow_call:
     inputs:
       crate-path:
-        description: 'Path to the Rust crate (e.g. plugins/vision-sidecar)'
+        description: 'Path to the Rust crate (e.g. plugins/vision/sidecar)'
         required: true
         type: string
       binary-name:
@@ -21,6 +21,21 @@ on:
         required: false
         type: boolean
         default: false
+      features-windows-x64:
+        description: 'Cargo --features value for the windows-x64 build'
+        required: false
+        type: string
+        default: ''
+      features-macos-arm64:
+        description: 'Cargo --features value for the macos-arm64 build'
+        required: false
+        type: string
+        default: ''
+      features-linux-x64:
+        description: 'Cargo --features value for the linux-x64 build'
+        required: false
+        type: string
+        default: ''
 
 jobs:
   build:
@@ -36,11 +51,8 @@ jobs:
             target: aarch64-apple-darwin
             suffix: ''
             label: macos-arm64
-          - os: macos-latest
-            target: x86_64-apple-darwin
-            suffix: ''
-            label: macos-x64
-          - os: ubuntu-22.04
+          # ubuntu-24.04: ort prebuilt onnxruntime needs glibc >= 2.38 (__isoc23_* symbols)
+          - os: ubuntu-24.04
             target: x86_64-unknown-linux-gnu
             suffix: ''
             label: linux-x64
@@ -56,7 +68,13 @@ jobs:
       - uses: swatinem/rust-cache@v2
         with:
           workspaces: ${{ inputs.crate-path }} -> target
-          key: ${{ matrix.target }}
+          key: ${{ matrix.target }}-ort1
+          # ort-sys links against binaries it downloads here; a restored target
+          # without this dir fails at link time
+          cache-directories: |
+            ~/Library/Caches/ort.pyke.io
+            ~/.cache/ort.pyke.io
+            ~\AppData\Local\ort.pyke.io
 
       - uses: actions/setup-python@v5
         if: inputs.pre-build-python
@@ -68,12 +86,30 @@ jobs:
         working-directory: ${{ inputs.crate-path }}
         run: ${{ inputs.pre-build }}
 
+      - name: Resolve features
+        id: features
+        shell: bash
+        run: |
+          case "${{ matrix.label }}" in
+            windows-x64) f="${{ inputs.features-windows-x64 }}" ;;
+            macos-arm64) f="${{ inputs.features-macos-arm64 }}" ;;
+            linux-x64) f="${{ inputs.features-linux-x64 }}" ;;
+          esac
+          if [ -n "$f" ]; then
+            echo "args=--features $f" >> "$GITHUB_OUTPUT"
+          else
+            echo "args=" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Build
         working-directory: ${{ inputs.crate-path }}
-        run: cargo build --release --target ${{ matrix.target }}
+        run: cargo build --release --target ${{ matrix.target }} ${{ steps.features.outputs.args }}
 
       - name: Upload binary
         uses: actions/upload-artifact@v4
         with:
           name: ${{ inputs.binary-name }}-${{ matrix.label }}
-          path: ${{ inputs.crate-path }}/target/${{ matrix.target }}/release/${{ inputs.binary-name }}${{ matrix.suffix }}
+          path: |
+            ${{ inputs.crate-path }}/target/${{ matrix.target }}/release/${{ inputs.binary-name }}${{ matrix.suffix }}
+            ${{ inputs.crate-path }}/target/${{ matrix.target }}/release/DirectML.dll
+          if-no-files-found: ignore

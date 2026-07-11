@@ -5,8 +5,11 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import "@/styles.css";
 import App from "@/App.tsx";
 import { initLogging, log } from "@/lib/util/log";
-import { initStore, flushSave } from "@/store/useMapStore";
+import { initStore, flushSave, getMapList } from "@/store/useMapStore";
 import { initRouter } from "@/store/router";
+import { getSettings } from "@/store/settings";
+import { loadSession, saveSession } from "@/store/session";
+import { openMapWindow, openMapWindowIds, closeAllMapWindows } from "@/lib/window";
 import { cmd } from "@/lib/commands";
 import { checkForUpdate } from "@/lib/util/updateCheck";
 import "@/api";
@@ -32,9 +35,19 @@ async function boot() {
 	if (window.MMA) window.MMA.ready = true;
 	log.info("App booted");
 
+	const isMainWindow = getCurrentWindow().label === "main";
+
 	getCurrentWindow().onCloseRequested(async (event) => {
 		event.preventDefault();
 		log.info("Window close requested, closing map...");
+		// Closing the main (list) window ends the session: remember the maps still
+		// open at this instant, then close them so they restore next launch.
+		if (isMainWindow && getSettings().restoreSession) {
+			const openIds = await openMapWindowIds();
+			saveSession(openIds);
+			log.info(`[session] saved ${openIds.length} open map(s): ${openIds.join(", ")}`);
+			await closeAllMapWindows();
+		}
 		await flushSave();
 		await cmd.storeCloseMap().catch((e) => log.error("[close] store_close_map failed:", e));
 		log.info("Map closed, destroying window");
@@ -64,6 +77,8 @@ async function boot() {
 	const jsTotal = performance.now();
 	mark("show");
 
+	if (isMainWindow && getSettings().restoreSession) restoreSession();
+
 	cmd
 		.appReady()
 		.then((rustTotal) =>
@@ -74,6 +89,18 @@ async function boot() {
 		.catch(() => {});
 
 	setTimeout(checkForUpdate, 5000);
+}
+
+/** Reopen the maps recorded when the session last ended, skipping any since deleted. */
+function restoreSession() {
+	const ids = loadSession();
+	if (!ids.length) return;
+	log.info(`[session] restoring ${ids.length} map(s): ${ids.join(", ")}`);
+	const names = new Map(getMapList().map((m) => [m.id, m.name]));
+	for (const id of ids) {
+		const name = names.get(id);
+		if (name !== undefined) void openMapWindow(id, name);
+	}
 }
 
 boot();

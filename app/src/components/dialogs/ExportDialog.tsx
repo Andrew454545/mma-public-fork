@@ -1,7 +1,7 @@
 import { useState, useEffect, useId } from "react";
 import { save } from "@tauri-apps/plugin-dialog";
 import { Dialog, DialogContent } from "@/components/primitives/Dialog";
-import { useCurrentMap, useSelectedLocationIds } from "@/store/useMapStore";
+import { useCurrentMap, useSelectedLocationIds, getVisibleTags } from "@/store/useMapStore";
 import { cmd } from "@/lib/commands";
 import { mmaBufUrl, isWeb } from "@/lib/util/util";
 import { getAllFieldDefs } from "@/lib/data/fieldDefRegistry";
@@ -76,6 +76,9 @@ export function ExportDialog({ onClose }: Props) {
 
 	const baseName = fileName || map.meta.name || "export";
 	const scopeIds = scope === ExportScope.Selection ? [...selectedIds] : undefined;
+	// Visible tags only — raw meta.tags holds soft-deleted ghosts kept for undo,
+	// which must not resurrect through an export/import round-trip.
+	const tagsJson = () => JSON.stringify(Object.fromEntries(getVisibleTags().map((t) => [t.id, t])));
 
 	const jsonPath = () =>
 		cmd.storeExportJson({
@@ -84,11 +87,11 @@ export function ExportDialog({ onClose }: Props) {
 			exportExtras: saveExtras,
 			scope: scopeIds ?? null,
 			mapName: map.meta.name,
-			tagsJson: JSON.stringify(map.meta.tags),
+			tagsJson: tagsJson(),
 			extraFieldsJson: JSON.stringify(getAllFieldDefs()),
 		});
 	const csvPath = () => cmd.storeExportCsv(scopeIds ?? null);
-	const geojsonPath = () => cmd.storeExportGeojson(scopeIds ?? null, JSON.stringify(map.meta.tags));
+	const geojsonPath = () => cmd.storeExportGeojson(scopeIds ?? null, tagsJson());
 
 	// Prompt for a destination, then move the temp export there. False = cancelled.
 	const saveToFile = async (srcPath: string, ext: string): Promise<boolean> => {
@@ -193,10 +196,10 @@ export function ExportDialog({ onClose }: Props) {
 								checked={saveExtras}
 								onChange={(e) => setSaveExtras(e.target.checked)}
 							/>
-							Save MMA data
+							Save app data
 							<br />
 							<small className="export-modal__help">
-								Include MMA specific data like tags. Not including this makes the file smaller,
+								Include app-specific data like tags. Not including this makes the file smaller,
 								which can help when uploading maps with 100K+ locations to GeoGuessr.
 							</small>
 						</label>

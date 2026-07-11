@@ -1,21 +1,29 @@
 import { useEffect, useRef, useCallback, useState } from "react";
 import * as ContextMenu from "@radix-ui/react-context-menu";
-import { mdiGoogleStreetView, mdiMapMarker } from "@mdi/js";
-import { startSceneEngine, loadScene, clearScene } from "@/lib/render/sceneStore";
+import {
+	mdiGoogleStreetView,
+	mdiMapMarker,
+	mdiPlus,
+	mdiMinus,
+	mdiContentCopy,
+	mdiDelete,
+} from "@mdi/js";
+import { startSceneEngine, loadScene, clearScene, recolorScene } from "@/lib/render/sceneStore";
 import { useMapSurface } from "@/lib/render/useMapSurface";
 import { Icon } from "@/components/primitives/Icon";
 import { Tooltip } from "@/components/primitives/Tooltip";
 import { svThumbnailUrl, svSearchRadius } from "@/lib/sv/lookup";
 import { cmd } from "@/lib/commands";
 import { log } from "@/lib/util/log";
-import { useSetting } from "@/store/settings";
+import { getSettings, useSetting } from "@/store/settings";
 import { useMeasure } from "@/lib/sv/measure";
 import { MeasurementBar } from "@/components/primitives/MeasurementBar";
 import { MapContextMenuContent } from "@/components/editor/map/MapContextMenu";
-import { useCurrentMap, selectPolygon, mapOpenMark } from "@/store/useMapStore";
+import { useCurrentMap, selectPolygon, mapOpen } from "@/store/useMapStore";
 import { loadOpenSV, google } from "@/lib/sv/opensv";
 import { BLOBBY_ZOOM_THRESHOLD } from "@/lib/sv/constants";
-import { setGoogleMap as setGoogleMapInstance, tryInterceptDraw } from "@/lib/map/mapState";
+import { setMapHost, tryInterceptDraw } from "@/lib/map/mapState";
+import { createMapHost, hostKindForMapType, type MapHost } from "@/lib/map/host";
 import { mountSearchRadiusCursor } from "@/lib/map/searchRadiusCursor";
 import { useHotkey } from "@/lib/hooks/useHotkey";
 import { useBinding } from "@/lib/util/hotkeys";
@@ -26,14 +34,30 @@ import { PolygonTools } from "@/components/editor/PolygonTools";
 import { SearchControl } from "@/components/editor/map/SearchControl";
 import type { ParsedLocation } from "@/lib/data/importExport";
 import { MapTypeDropdown, MapSettingsDropdown } from "@/components/editor/map/MapSettingsPanel";
-import { resolveStackForPrefs, CUSTOM_STYLES_KEY, type CustomStyle } from "@/lib/geo/mapStack";
+import { CUSTOM_STYLES_KEY, type CustomStyle } from "@/lib/geo/mapStack";
 import { type MapEmbedPrefs, DEFAULT_PREFS } from "@/store/mapEmbedPrefs";
 import { FpsCounter } from "@/components/editor/map/FpsCounter";
 
-export function MapEmbed({ onAddLocation }: { onAddLocation: (parsed: ParsedLocation) => void | Promise<void> }) {
+/** Live zoom text with its own zoom subscription, so zooming doesn't re-render MapEmbed. */
+function ZoomReadout({ host }: { host: MapHost | null }) {
+	const [zoom, setZoom] = useState(() => host?.getZoom() ?? 2);
+	useEffect(() => {
+		if (!host) return;
+		setZoom(host.getZoom());
+		return host.on("zoom", () => setZoom(Math.round(host.getZoom() * 100) / 100));
+	}, [host]);
+	return <> · zoom {zoom}</>;
+}
+
+export function MapEmbed({
+	onAddLocation,
+}: {
+	onAddLocation: (parsed: ParsedLocation) => void | Promise<void>;
+}) {
 	const map = useCurrentMap();
 	const containerRef = useRef<HTMLDivElement>(null);
-	const gMapRef = useRef<google.maps.Map>(null);
+	const [host, setHost] = useState<MapHost | null>(null);
+	const hostRef = useRef<MapHost | null>(null);
 
 	const [prefs, setPrefs] = useLocalStorage<MapEmbedPrefs>("mapEmbedPrefs", DEFAULT_PREFS);
 	const pref =
@@ -42,16 +66,6 @@ export function MapEmbed({ onAddLocation }: { onAddLocation: (parsed: ParsedLoca
 			setPrefs((p) => ({ ...p, [k]: v }));
 	const {
 		svOpacity,
-		svColor,
-		showLabels,
-		showTerrain,
-		svPanoramas,
-		svCoverageType,
-		svThickness,
-		svBlobby,
-		boldCountryBorders,
-		boldSubdivisionBorders,
-		mapStyleName,
 		mapType,
 		markerStyle,
 		markerOpacity,
@@ -61,7 +75,9 @@ export function MapEmbed({ onAddLocation }: { onAddLocation: (parsed: ParsedLoca
 		selectOnly,
 	} = prefs;
 	const coordDisplayRef = useRef<HTMLSpanElement>(null);
-	const [mapZoom, setMapZoom] = useState(2);
+	// Boolean, not the raw zoom: re-renders only when crossing the blobby threshold.
+	// The live zoom readout subscribes itself (ZoomReadout).
+	const [belowBlobbyZoom, setBelowBlobbyZoom] = useState(2 <= BLOBBY_ZOOM_THRESHOLD);
 
 	const [customStyles, setCustomStyles] = useLocalStorage<CustomStyle[]>(CUSTOM_STYLES_KEY, []);
 	const [showStylesDialog, setShowStylesDialog] = useState(false);
@@ -71,7 +87,6 @@ export function MapEmbed({ onAddLocation }: { onAddLocation: (parsed: ParsedLoca
 	} | null>(null);
 	const previewAbortRef = useRef<AbortController | null>(null);
 	const [opacityTarget, setOpacityTarget] = useState<"sv" | "markers">("sv");
-	const [mapReady, setMapReady] = useState(false);
 	const freehandPathRef = useRef<number[][] | null>(null);
 	const contextTriggerRef = useRef<HTMLSpanElement>(null);
 	const { isMeasuring } = useMeasure();
@@ -83,7 +98,7 @@ export function MapEmbed({ onAddLocation }: { onAddLocation: (parsed: ParsedLoca
 	}, []);
 
 	// The editor map is a consumer of the shared surface, with the full capability set.
-	const { requestUpdate } = useMapSurface(mapReady ? gMapRef.current : null, {
+	const { requestUpdate } = useMapSurface(host, {
 		prefs,
 		measuring: isMeasuring,
 		onContextMenu: dispatchContextMenu,
@@ -95,73 +110,74 @@ export function MapEmbed({ onAddLocation }: { onAddLocation: (parsed: ParsedLoca
 	});
 
 	useEffect(() => {
-		if (!mapReady || !showSearchRadiusCursor) return;
+		if (!host || !showSearchRadiusCursor) return;
 		return mountSearchRadiusCursor();
-	}, [mapReady, showSearchRadiusCursor]);
+	}, [host, showSearchRadiusCursor]);
 
-	const svLayerRef = useRef<google.maps.ImageMapType>(null);
+	// Latest inputs for host creation; only a host-kind change should recreate the host.
+	const buildRef = useRef({ prefs, customStyles });
+	buildRef.current = { prefs, customStyles };
+	// Camera carried across host swaps; also flags that this isn't the first host.
+	const savedCameraRef = useRef<{ center: { lat: number; lng: number }; zoom: number } | null>(
+		null,
+	);
+
+	const hostKind = hostKindForMapType(mapType);
 
 	useEffect(() => {
 		if (!containerRef.current || !map) return;
-		mapOpenMark("mounted");
+		if (!savedCameraRef.current) mapOpen.mark("mounted");
 		let cancelled = false;
+		const offs: (() => void)[] = [];
+		let created: MapHost | null = null;
+		let hostDiv: HTMLDivElement | null = null;
 
-		loadOpenSV().then(() => {
+		// opensv always loads: the Google host renders with it, and every host needs
+		// the SV services (click lookup, previews, pano).
+		loadOpenSV().then(async () => {
 			if (cancelled || !containerRef.current) return;
-			if (!google?.maps) return;
+			if (hostKind === "google" && !google?.maps) return;
 
-			if (!gMapRef.current) {
-				gMapRef.current = new google.maps.Map(containerRef.current, {
-					center: { lat: 0, lng: 0 },
-					zoom: 2,
-					minZoom: 1,
-					disableDefaultUI: true,
-					scaleControl: true,
-					cameraControl: false,
-					zoomControl: false,
-					streetViewControl: false,
-					fullscreenControl: false,
-					mapTypeControl: false,
-					clickableIcons: false,
-					gestureHandling: "greedy",
-					draggableCursor: "crosshair",
-					styles: [{ stylers: [{ visibility: "off" }] }],
-				});
+			const first = !savedCameraRef.current;
+			hostDiv = document.createElement("div");
+			hostDiv.style.cssText = "position:absolute;inset:0";
+			containerRef.current.appendChild(hostDiv);
 
-				const { mapType: stack, svLayer } = resolveStackForPrefs(prefs, {
-					useBlobby: svBlobby,
-					customStyles,
-				});
-				svLayerRef.current = svLayer;
-				gMapRef.current.mapTypes.set("stack", stack);
-				gMapRef.current.setMapTypeId("stack");
-				setGoogleMapInstance(gMapRef.current);
+			const { prefs: p, customStyles: cs } = buildRef.current;
+			created = await createMapHost(hostKind, hostDiv, p, {
+				useBlobby: p.svBlobby,
+				customStyles: cs,
+				camera: savedCameraRef.current ?? undefined,
+			});
+			if (cancelled) {
+				created.destroy();
+				hostDiv.remove();
+				return;
+			}
 
-				gMapRef.current.addListener("mousemove", (e: google.maps.MapMouseEvent) => {
-					if (e.latLng) {
-						if (coordDisplayRef.current) {
-							coordDisplayRef.current.textContent = `${e.latLng.lat().toFixed(6)}° ${e.latLng.lng().toFixed(6)}°`;
-						}
+			offs.push(
+				created.on("mousemove", (ll) => {
+					if (coordDisplayRef.current) {
+						coordDisplayRef.current.textContent = `${ll.lat.toFixed(6)}° ${ll.lng.toFixed(6)}°`;
 					}
-				});
-				gMapRef.current.addListener("zoom_changed", () => {
-					setMapZoom(gMapRef.current?.getZoom() ?? 0);
-				});
-				setMapReady(true);
-				mapOpenMark("map-ready");
-				google.maps.event.addListenerOnce(gMapRef.current, "tilesloaded", () =>
-					mapOpenMark("tiles"),
-				);
+				}),
+				created.on("zoom", () => {
+					setBelowBlobbyZoom((hostRef.current?.getZoom() ?? 0) <= BLOBBY_ZOOM_THRESHOLD);
+				}),
+			);
 
+			hostRef.current = created;
+			setMapHost(created);
+			setHost(created);
+			setBelowBlobbyZoom(created.getZoom() <= BLOBBY_ZOOM_THRESHOLD);
+			if (first) {
+				mapOpen.mark("map-ready");
+				created.once("tilesloaded", () => mapOpen.mark("tiles"));
 				if (map.meta.locationCount > 0) {
 					cmd.storeBounds(false).then((bounds) => {
-						if (cancelled || !gMapRef.current || !bounds) return;
+						if (cancelled || !hostRef.current || !bounds) return;
 						const [west, south, east, north] = bounds;
-						const gm = gMapRef.current!;
-						gm.fitBounds({ west, south, east, north });
-						google.maps.event.addListenerOnce(gm, "bounds_changed", () => {
-							gm.moveCamera({ center: gm.getCenter()!, zoom: gm.getZoom()! });
-						});
+						hostRef.current.fitBounds({ west, south, east, north }, undefined, { snap: true });
 					});
 				}
 			}
@@ -169,47 +185,61 @@ export function MapEmbed({ onAddLocation }: { onAddLocation: (parsed: ParsedLoca
 
 		return () => {
 			cancelled = true;
+			offs.forEach((off) => off());
+			const h = hostRef.current ?? created;
+			if (h) {
+				const center = h.getCenter();
+				if (center) savedCameraRef.current = { center, zoom: h.getZoom() };
+				h.destroy();
+			}
+			hostDiv?.remove();
+			hostRef.current = null;
+			setMapHost(null);
+			setHost(null);
 		};
-	}, []);
+	}, [hostKind]);
 
 	useEffect(() => {
-		if (!svLayerRef.current) return;
-		const blobbySingleType = svBlobby && mapZoom <= BLOBBY_ZOOM_THRESHOLD && svCoverageType !== "default";
-		svLayerRef.current.setOpacity(blobbySingleType ? svOpacity * 0.6 : svOpacity);
-	}, [svOpacity, svBlobby, mapZoom, svCoverageType]);
-
+		if (!host) return;
+		const blobbySingleType =
+			prefs.svBlobby && belowBlobbyZoom && prefs.svCoverageType !== "default";
+		host.setSvOpacity(blobbySingleType ? svOpacity * 0.6 : svOpacity);
+	}, [host, svOpacity, prefs.svBlobby, belowBlobbyZoom, prefs.svCoverageType]);
 
 	// The editor map drives the single scene engine (delta/selection/active subscriptions)
 	useEffect(() => startSceneEngine(), []);
 
 	// Full (re)load on open and on marker-style change; clear when the map isn't ready.
 	useEffect(() => {
-		if (mapReady) void loadScene(markerStyle);
+		if (host) void loadScene(markerStyle, getSettings().markerColor);
 		else clearScene();
-	}, [mapReady, markerStyle]);
+	}, [host, markerStyle]);
+
+	// Marker color repaints buffers in place — never a full scene reload.
+	const markerColor = useSetting("markerColor");
+	useEffect(() => {
+		recolorScene(markerColor);
+	}, [markerColor]);
 
 	useEffect(() => {
 		if (svPreview?.url) return () => URL.revokeObjectURL(svPreview.url);
 	}, [svPreview?.url]);
 
 	useEffect(() => {
-		if (!gMapRef.current || !showPreviews) {
+		if (!host || !showPreviews) {
 			setSvPreview(null);
 			return;
 		}
-		const map = gMapRef.current;
 		if (!google?.maps) return;
 
-		const moveListener = map.addListener("mousemove", async (e: google.maps.MapMouseEvent) => {
-			if (!e.latLng) return;
+		const offMove = host.on("mousemove", async (ll) => {
 			setSvPreview(null);
 			previewAbortRef.current?.abort();
 			const ac = new AbortController();
 			previewAbortRef.current = ac;
 
-			const lat = e.latLng.lat();
-			const lng = e.latLng.lng();
-			const zoom = map.getZoom() ?? 2;
+			const { lat, lng } = ll;
+			const zoom = host.getZoom();
 
 			await new Promise((r) => setTimeout(r, 300));
 			if (ac.signal.aborted) return;
@@ -239,54 +269,49 @@ export function MapEmbed({ onAddLocation }: { onAddLocation: (parsed: ParsedLoca
 			);
 		});
 
-		const outListener = map.addListener("mouseout", () => {
+		const offOut = host.on("mouseout", () => {
 			previewAbortRef.current?.abort();
 			previewAbortRef.current = null;
 			setSvPreview(null);
 		});
 
 		return () => {
-			google.maps.event.removeListener(moveListener);
-			google.maps.event.removeListener(outListener);
+			offMove();
+			offOut();
 			previewAbortRef.current?.abort();
 			setSvPreview(null);
 		};
-	}, [showPreviews]);
+	}, [host, showPreviews]);
 
-	const useBlobby = svBlobby && mapZoom <= BLOBBY_ZOOM_THRESHOLD;
+	const useBlobby = prefs.svBlobby && belowBlobbyZoom;
 
 	useEffect(() => {
-		if (!gMapRef.current) return;
-		if (!google?.maps) return;
-		const { mapType: stack, svLayer } = resolveStackForPrefs(prefs, { useBlobby, customStyles });
-		svLayerRef.current = svLayer;
-		gMapRef.current.mapTypes.set("stack", stack);
-		gMapRef.current.setMapTypeId("stack");
-	}, [prefs, useBlobby, customStyles]);
+		hostRef.current?.applyPrefs(prefs, { useBlobby, customStyles });
+	}, [host, prefs, useBlobby, customStyles]);
 
 	const handleSearchResult = useCallback((lat: number, lng: number, _name: string) => {
-		if (!gMapRef.current) return;
-		if (!google?.maps) return;
-		const bounds = new google.maps.LatLngBounds(
-			{ lat: lat - 0.003, lng: lng - 0.003 },
-			{ lat: lat + 0.003, lng: lng + 0.003 },
-		);
-		gMapRef.current.fitBounds(bounds);
+		hostRef.current?.fitBounds({
+			west: lng - 0.003,
+			south: lat - 0.003,
+			east: lng + 0.003,
+			north: lat + 0.003,
+		});
 	}, []);
 
 	const zoomIn = useCallback(() => {
-		if (gMapRef.current) gMapRef.current.setZoom((gMapRef.current.getZoom() ?? 0) + 1);
+		const h = hostRef.current;
+		if (h) h.setZoom(h.getZoom() + 1);
 	}, []);
 
 	const zoomOut = useCallback(() => {
-		if (gMapRef.current) gMapRef.current.setZoom(Math.max(1, (gMapRef.current.getZoom() ?? 0) - 1));
+		const h = hostRef.current;
+		if (h) h.setZoom(Math.max(1, h.getZoom() - 1));
 	}, []);
 
 	const showFps = useSetting("showFps");
 
 	useHotkey(useBinding("mapZoomReset"), () => {
-		const gm = gMapRef.current;
-		if (gm) gm.moveCamera({ zoom: 1 });
+		hostRef.current?.moveCamera({ zoom: 1 });
 	});
 
 	useHotkey(useBinding("toggleSelectOnly"), () => {
@@ -294,34 +319,24 @@ export function MapEmbed({ onAddLocation }: { onAddLocation: (parsed: ParsedLoca
 	});
 	useHotkey(useBinding("mapZoomBounds"), () => {
 		cmd.storeBounds(false).then((bounds) => {
-			const gm = gMapRef.current;
-			if (!gm || !bounds || !google?.maps) return;
+			if (!hostRef.current || !bounds) return;
 			const [west, south, east, north] = bounds;
-			gm.fitBounds({ west, south, east, north });
-			google.maps.event.addListenerOnce(gm, "bounds_changed", () => {
-				gm.moveCamera({ center: gm.getCenter()!, zoom: gm.getZoom()! });
-			});
+			hostRef.current.fitBounds({ west, south, east, north }, undefined, { snap: true });
 		});
 	});
 
 	useHotkey(useBinding("mapZoomSelection"), () => {
 		cmd.storeBounds(true).then((bounds) => {
-			const gm = gMapRef.current;
-			if (!gm || !bounds || !google?.maps) return;
+			if (!hostRef.current || !bounds) return;
 			const [west, south, east, north] = bounds;
-			gm.fitBounds({ west, south, east, north });
-			google.maps.event.addListenerOnce(gm, "bounds_changed", () => {
-				gm.moveCamera({ center: gm.getCenter()!, zoom: gm.getZoom()! });
-			});
+			hostRef.current.fitBounds({ west, south, east, north }, undefined, { snap: true });
 		});
 	});
-
-
 
 	return (
 		<ContextMenu.Root modal={false}>
 			<div ref={containerRef} style={{ position: "absolute", inset: 0 }} />
-				<div className="embed-controls">
+			<div className="embed-controls">
 				{/* TopLeft: Map dropdown, Search */}
 				<div
 					className="embed-controls__control"
@@ -329,30 +344,11 @@ export function MapEmbed({ onAddLocation }: { onAddLocation: (parsed: ParsedLoca
 				>
 					<MapTypeDropdown
 						layerConfig={{
-							basemap: mapType,
-							setBasemap: pref("mapType"),
-							labels: showLabels,
-							setLabels: pref("showLabels"),
-							supportsLabels: mapType !== "osm",
-							terrain: showTerrain,
-							setTerrain: pref("showTerrain"),
+							prefs,
+							setPref: pref,
+							supportsLabels: mapType !== "osm" && mapType !== "vector",
 							supportsTerrain: mapType === "map" || mapType === "satellite",
-							streetViewPanoramas: svPanoramas,
-							setStreetViewPanoramas: pref("svPanoramas"),
-							streetViewCoverageType: svCoverageType,
-							setStreetViewCoverageType: pref("svCoverageType"),
-							svColor,
-							setSvColor: pref("svColor"),
-							streetViewCoverageThickness: svThickness,
-							setStreetViewCoverageThickness: pref("svThickness"),
-							streetViewBlobby: svBlobby,
-							setStreetViewBlobby: pref("svBlobby"),
-							boldCountryBorders,
-							setBoldCountryBorders: pref("boldCountryBorders"),
-							boldSubdivisionBorders,
-							setBoldSubdivisionBorders: pref("boldSubdivisionBorders"),
-							mapStyleName,
-							setMapStyleName: pref("mapStyleName"),
+							supportsStyling: mapType !== "vector",
 							customStyles,
 							onManageStyles: () => setShowStylesDialog(true),
 						}}
@@ -360,10 +356,10 @@ export function MapEmbed({ onAddLocation }: { onAddLocation: (parsed: ParsedLoca
 					<SearchControl onResult={handleSearchResult} onAddLocation={onAddLocation} />
 				</div>
 				{/* LeftTop: polygon/rectangle drawing tools */}
-				{mapReady && (
+				{host && (
 					<div className="embed-controls__control" style={{ left: 0, top: "52px" }}>
 						<PolygonTools
-							map={gMapRef.current}
+							host={host}
 							onDraw={(rings) => {
 								if (rings.length === 0) return;
 								if (tryInterceptDraw(rings)) return;
@@ -402,14 +398,21 @@ export function MapEmbed({ onAddLocation }: { onAddLocation: (parsed: ParsedLoca
 					/>
 					<div className="map-control sv-opacity-control">
 						<Tooltip
-							content={opacityTarget === "sv" ? "Adjusting Street View opacity" : "Adjusting marker opacity"}
+							content={
+								opacityTarget === "sv"
+									? "Adjusting Street View opacity"
+									: "Adjusting marker opacity"
+							}
 							side="left"
 						>
 							<button
 								className="opacity-target-toggle"
 								onClick={() => setOpacityTarget((t) => (t === "sv" ? "markers" : "sv"))}
 							>
-								<Icon path={opacityTarget === "sv" ? mdiGoogleStreetView : mdiMapMarker} size={20} />
+								<Icon
+									path={opacityTarget === "sv" ? mdiGoogleStreetView : mdiMapMarker}
+									size={20}
+								/>
 							</button>
 						</Tooltip>
 						<input
@@ -426,20 +429,16 @@ export function MapEmbed({ onAddLocation }: { onAddLocation: (parsed: ParsedLoca
 						/>
 					</div>
 				</div>
-				<div className="embed-controls__control" style={{ right: 0, bottom: 0 }}>
+				<div className="embed-controls__control" style={{ right: 0, bottom: 10 }}>
 					<div className="map-control map-control--button white">
 						<Tooltip content="Zoom in" side="left">
 							<button onClick={zoomIn} aria-label="Zoom in">
-								<svg height="18" width="18" viewBox="0 0 24 24" fill="currentColor">
-									<path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z" />
-								</svg>
+								<Icon path={mdiPlus} size={18} />
 							</button>
 						</Tooltip>
 						<Tooltip content="Zoom out" side="left">
 							<button onClick={zoomOut} aria-label="Zoom out">
-								<svg height="18" width="18" viewBox="0 0 24 24" fill="currentColor">
-									<path d="M19,13H5V11H19V13Z" />
-								</svg>
+								<Icon path={mdiMinus} size={18} />
 							</button>
 						</Tooltip>
 					</div>
@@ -461,8 +460,14 @@ export function MapEmbed({ onAddLocation }: { onAddLocation: (parsed: ParsedLoca
 				<MeasurementBar />
 				<div className="embed-controls__control" style={{ bottom: 0, left: 0 }}>
 					<div className="map-control coordinate-control">
-						<span ref={coordDisplayRef} /> · zoom {mapZoom}
-						{showFps && <><span style={{ margin: "0 4px" }}>·</span><FpsCounter /></>}
+						<span ref={coordDisplayRef} />
+						<ZoomReadout host={host} />
+						{showFps && (
+							<>
+								<span style={{ margin: "0 4px" }}>·</span>
+								<FpsCounter />
+							</>
+						)}
 					</div>
 				</div>
 			</div>
@@ -483,9 +488,7 @@ export function MapEmbed({ onAddLocation }: { onAddLocation: (parsed: ParsedLoca
 												}}
 												aria-label="Copy JSON"
 											>
-												<svg height="20" width="20" viewBox="0 0 24 24" fill="currentColor">
-													<path d="M19,21H8V7H19M19,5H8A2,2 0 0,0 6,7V21A2,2 0 0,0 8,23H19A2,2 0 0,0 21,21V7A2,2 0 0,0 19,5M16,1H4A2,2 0 0,0 2,3V17H4V3H16V1Z" />
-												</svg>
+												<Icon path={mdiContentCopy} size={20} />
 											</button>
 											<button
 												className="icon-button"
@@ -493,13 +496,11 @@ export function MapEmbed({ onAddLocation }: { onAddLocation: (parsed: ParsedLoca
 												onClick={() => {
 													const next = customStyles.filter((c) => c.name !== s.name);
 													setCustomStyles(next);
-													if (mapStyleName === s.name) pref("mapStyleName")("default");
+													if (prefs.mapStyleName === s.name) pref("mapStyleName")("default");
 												}}
 												aria-label="Delete style"
 											>
-												<svg height="20" width="20" viewBox="0 0 24 24" fill="currentColor">
-													<path d="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z" />
-												</svg>
+												<Icon path={mdiDelete} size={20} />
 											</button>
 										</div>
 									</li>
@@ -562,7 +563,7 @@ export function MapEmbed({ onAddLocation }: { onAddLocation: (parsed: ParsedLoca
 				<span ref={contextTriggerRef} title="Context menu" />
 			</ContextMenu.Trigger>
 			<ContextMenu.Portal>
-				<MapContextMenuContent mapRef={gMapRef} />
+				<MapContextMenuContent host={host} />
 			</ContextMenu.Portal>
 		</ContextMenu.Root>
 	);

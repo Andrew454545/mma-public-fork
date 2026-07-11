@@ -1,7 +1,8 @@
-import type { MapData, Selection, SelectionProps, PolygonGeometry, FilterOp } from "@/bindings.gen";
-import { buildSelection } from "./selections";
+import type { Selection, SelectionProps, PolygonGeometry, FilterOp } from "@/bindings.gen";
+import { buildSelection, UNARY_TYPES } from "./selections";
+import { isVariant } from "@/types/util";
 import { getSettings, setSetting } from "./settings";
-import { addSelections } from "./useMapStore";
+import { addSelections, getTag, getVisibleTags } from "./useMapStore";
 
 export interface SavedSelectionItem {
 	props: SavedSelectionProps;
@@ -31,11 +32,11 @@ export type SavedSelectionProps =
 	| { type: "Union"; selections: SavedSelectionProps[] }
 	| { type: "Invert"; selections: SavedSelectionProps[] };
 
-export function selectionToSaved(sel: Selection, map: MapData): SavedSelectionProps | null {
-	return propsToSaved(sel.props, map);
+export function selectionToSaved(sel: Selection): SavedSelectionProps | null {
+	return propsToSaved(sel.props);
 }
 
-function propsToSaved(props: SelectionProps, map: MapData): SavedSelectionProps | null {
+function propsToSaved(props: SelectionProps): SavedSelectionProps | null {
 	switch (props.type) {
 		case "Locations":
 		case "Manual":
@@ -43,7 +44,7 @@ function propsToSaved(props: SelectionProps, map: MapData): SavedSelectionProps 
 			return null;
 
 		case "Tag": {
-			const tag = map.meta.tags[String(props.tagId)];
+			const tag = getTag(props.tagId);
 			if (!tag) return null;
 			return { type: "TagName", tagName: tag.name };
 		}
@@ -52,7 +53,7 @@ function propsToSaved(props: SelectionProps, map: MapData): SavedSelectionProps 
 		case "Union":
 		case "Invert": {
 			const children = props.selections
-				.map((child) => propsToSaved(child.props, map))
+				.map((child) => propsToSaved(child.props))
 				.filter((c): c is SavedSelectionProps => c !== null);
 			if (children.length === 0) return null;
 			return { type: props.type, selections: children };
@@ -63,21 +64,19 @@ function propsToSaved(props: SelectionProps, map: MapData): SavedSelectionProps 
 	}
 }
 
-function resolveTagByName(map: MapData, tagName: string): number | null {
+/** Visible tags only — a saved selection must not resurrect a soft-deleted ghost. */
+function resolveTagByName(tagName: string): number | null {
 	const lower = tagName.toLowerCase();
-	for (const tag of Object.values(map.meta.tags)) {
+	for (const tag of getVisibleTags()) {
 		if (tag.name.toLowerCase() === lower) return tag.id;
 	}
 	return null;
 }
 
-export function savedToSelectionProps(
-	saved: SavedSelectionProps,
-	map: MapData,
-): SelectionProps | null {
+export function savedToSelectionProps(saved: SavedSelectionProps): SelectionProps | null {
 	switch (saved.type) {
 		case "TagName": {
-			const tagId = resolveTagByName(map, saved.tagName);
+			const tagId = resolveTagByName(saved.tagName);
 			if (tagId === null) return null;
 			return { type: "Tag", tagId };
 		}
@@ -86,7 +85,7 @@ export function savedToSelectionProps(
 		case "Union":
 		case "Invert": {
 			const children = saved.selections
-				.map((child) => savedToSelectionProps(child, map))
+				.map((child) => savedToSelectionProps(child))
 				.filter((c): c is SelectionProps => c !== null);
 			if (children.length === 0) return null;
 			const builtChildren = children.map((p) => buildSelection(p));
@@ -139,14 +138,10 @@ export function getSavedSelections(): SavedSelection[] {
 	return getSettings().savedSelections;
 }
 
-export function saveCurrentSelections(
-	name: string,
-	selections: Selection[],
-	map: MapData,
-): boolean {
+export function saveCurrentSelections(name: string, selections: Selection[]): boolean {
 	const items: SavedSelectionItem[] = [];
 	for (const sel of selections) {
-		const props = selectionToSaved(sel, map);
+		const props = selectionToSaved(sel);
 		if (props) items.push({ props, color: sel.color });
 	}
 	if (items.length === 0) return false;
@@ -168,10 +163,10 @@ export function deleteSavedSelection(id: string): void {
 	);
 }
 
-export function applySavedSelection(saved: SavedSelection, map: MapData): number {
+export function applySavedSelection(saved: SavedSelection): number {
 	const batch: SelectionProps[] = [];
 	for (const item of saved.items) {
-		const props = savedToSelectionProps(item.props, map);
+		const props = savedToSelectionProps(item.props);
 		if (props) batch.push(props);
 	}
 	if (batch.length > 0) addSelections(batch);
@@ -197,7 +192,7 @@ export function rewriteSavedSelectionFields(
 				.map(rewriteProps)
 				.filter((c): c is SavedSelectionProps => c !== null);
 			if (children.length === 0) return null;
-			if (children.length === 1 && p.type !== "Invert") return children[0];
+			if (children.length === 1 && !isVariant(p, UNARY_TYPES)) return children[0];
 			return { ...p, selections: children };
 		}
 		return p;

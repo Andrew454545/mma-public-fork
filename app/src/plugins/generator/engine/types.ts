@@ -33,6 +33,8 @@ export interface GeneratorSettings {
 	toYear: string;
 	findRegions: boolean;
 	regionRadius: number;
+	skipExisting: boolean;
+	skipExistingRadius: number;
 	randomInTimeline: boolean;
 	showSearchOverlay: boolean;
 	searchInDescription: boolean;
@@ -45,7 +47,10 @@ export interface GeneratorSettings {
 	adjustZoom: boolean;
 	zoomLevel: number;
 	speed: number;
+	samplingMode: SamplingMode;
 }
+
+export type SamplingMode = "random" | "poisson" | "blueline" | "kernels";
 
 export type SearchMode = "contains" | "fullword" | "startswith" | "endswith" | "sectionmatch";
 
@@ -87,6 +92,8 @@ export const DEFAULT_SETTINGS: GeneratorSettings = {
 	toYear: String(now.getFullYear()),
 	findRegions: false,
 	regionRadius: 100,
+	skipExisting: false,
+	skipExistingRadius: 100,
 	randomInTimeline: false,
 	showSearchOverlay: false,
 	searchInDescription: false,
@@ -99,6 +106,7 @@ export const DEFAULT_SETTINGS: GeneratorSettings = {
 	adjustZoom: false,
 	zoomLevel: 0,
 	speed: 1000,
+	samplingMode: "random",
 };
 
 export interface GeneratorRegionMeta {

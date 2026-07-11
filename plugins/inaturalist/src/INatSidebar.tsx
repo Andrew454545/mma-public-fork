@@ -11,8 +11,7 @@ import {
 	setOnUpdate,
 	type Taxon,
 } from "./inat";
-
-const ARROW_LEFT = "M20,11V13H8L13.5,18.5L12.08,19.92L4.16,12L12.08,4.08L13.5,5.5L8,11H20Z";
+import { TaxonomySorter } from "./TaxonomySorter";
 
 const CSS = `
 .inat-sidebar__search { display: flex; gap: 6px; }
@@ -112,17 +111,8 @@ export function INatSidebar({ onClose }: { onClose: () => void }) {
 	const vis = isVisible();
 
 	return (
-		<Sidebar>
-			<header style={{ display: "flex", alignItems: "center", gap: 8, padding: 8, borderBottom: "1px solid var(--color-divider, #333)" }}>
-				<button className="icon-button" onClick={onClose}>
-					<svg viewBox="0 0 24 24" width={20} height={20} fill="currentColor">
-						<path d={ARROW_LEFT} />
-					</svg>
-				</button>
-				<h2 style={{ margin: 0, fontSize: 14, fontWeight: 600 }}>iNaturalist</h2>
-			</header>
-
-			<Section>
+		<Sidebar title="iNaturalist" onBack={onClose}>
+			<Section title="Observations">
 				<div className="inat-sidebar__search">
 					<input
 						className="input"
@@ -178,6 +168,8 @@ export function INatSidebar({ onClose }: { onClose: () => void }) {
 
 				{!taxon && <div className="inat-sidebar__hint">Search for a species to visualize observations on the map.</div>}
 			</Section>
+
+			<TaxonomySorter />
 		</Sidebar>
 	);
 }

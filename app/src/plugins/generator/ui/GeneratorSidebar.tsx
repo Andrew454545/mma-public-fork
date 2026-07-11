@@ -1,6 +1,11 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { createLocation, LocationFlag } from "@/types";
-import type { GeneratorSettings, GeneratorRegion, GeneratorRegionMeta, GeneratedLocation } from "../engine/types";
+import type {
+	GeneratorSettings,
+	GeneratorRegion,
+	GeneratorRegionMeta,
+	GeneratedLocation,
+} from "../engine/types";
 import { DEFAULT_SETTINGS } from "../engine/types";
 import { GenerationEngine } from "../engine/GenerationEngine";
 import { RegionSelector } from "./RegionSelector";
@@ -13,6 +18,7 @@ import type { Selection } from "@/bindings.gen";
 import { createPluginStorage } from "@/plugins/registry";
 import { Sidebar, Section } from "@/components/primitives/Sidebar";
 import { searchCoverage } from "../searchCoverage";
+import { MONTHS } from "@/lib/util/date";
 import "./generator.css";
 
 const genStore = createPluginStorage("map-generator");
@@ -70,11 +76,9 @@ let sessionRunning = false;
 let sessionPaused = false;
 let sessionTagId: number | null = null;
 
-const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-
 function formatYearMonth(ym: string) {
 	const [y, m] = ym.split("-");
-	return `${MONTH_NAMES[parseInt(m, 10) - 1]} ${y}`;
+	return `${MONTHS.short[parseInt(m, 10) - 1]} ${y}`;
 }
 
 function summarizeSettings(s: GeneratorSettings): string {
@@ -94,8 +98,8 @@ function summarizeSettings(s: GeneratorSettings): string {
 
 	// Date range
 	if (s.selectMonths) {
-		const fm = MONTH_NAMES[parseInt(s.fromMonth, 10) - 1];
-		const tm = MONTH_NAMES[parseInt(s.toMonth, 10) - 1];
+		const fm = MONTHS.short[parseInt(s.fromMonth, 10) - 1];
+		const tm = MONTHS.short[parseInt(s.toMonth, 10) - 1];
 		parts.push(`in ${fm}–${tm}, ${s.fromYear}–${s.toYear}`);
 	} else {
 		parts.push(`between ${formatYearMonth(s.fromDate)} and ${formatYearMonth(s.toDate)}`);
@@ -112,6 +116,7 @@ function summarizeSettings(s: GeneratorSettings): string {
 
 	// Radius
 	parts.push(s.radius >= 1000 ? `${s.radius / 1000}km radius` : `${s.radius}m radius`);
+	if (s.samplingMode !== "random") parts.push(`${s.samplingMode} sampling`);
 
 	// Date behavior
 	if (s.checkAllDates) parts.push("checking all dates");
@@ -123,6 +128,7 @@ function summarizeSettings(s: GeneratorSettings): string {
 	if (s.onlyOneInTimeframe) parts.push("unique in timeframe");
 
 	// Search strategy
+	if (s.skipExisting) parts.push(`skipping existing (${s.skipExistingRadius}m)`);
 	if (s.getIntersection) parts.push("intersections");
 	if (s.pinpointSearch) parts.push(`curves >${s.pinpointAngle}°`);
 	if (s.rejectRoadName) parts.push("no road names");
@@ -151,9 +157,15 @@ export function GeneratorSidebar({ onClose }: { onClose: () => void }) {
 	const engineRef = useRef<GenerationEngine | null>(sessionEngine);
 	const selections = useSelections();
 
-	useEffect(() => { sessionMeta = meta; }, [meta]);
-	useEffect(() => { sessionRunning = running; }, [running]);
-	useEffect(() => { sessionPaused = paused; }, [paused]);
+	useEffect(() => {
+		sessionMeta = meta;
+	}, [meta]);
+	useEffect(() => {
+		sessionRunning = running;
+	}, [running]);
+	useEffect(() => {
+		sessionPaused = paused;
+	}, [paused]);
 
 	// If engine is still running from before remount, wire up callbacks
 	useEffect(() => {
@@ -211,7 +223,12 @@ export function GeneratorSidebar({ onClose }: { onClose: () => void }) {
 		const nextMeta = new Map(sessionMeta);
 		const regions: GeneratorRegion[] = [];
 		for (const sel of sels) {
-			const m = nextMeta.get(sel.key) ?? { target: settings.defaultTarget, found: [], checkedPanos: new Set(), isProcessing: false };
+			const m = nextMeta.get(sel.key) ?? {
+				target: settings.defaultTarget,
+				found: [],
+				checkedPanos: new Set(),
+				isProcessing: false,
+			};
 			m.found = [];
 			m.checkedPanos = new Set();
 			m.isProcessing = false;

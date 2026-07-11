@@ -9,6 +9,7 @@
 		"core:window:allow-set-focus",
 		"core:window:allow-is-minimized",
 		"core:window:allow-unminimize",
+		"core:window:allow-close",
 		"core:window:allow-destroy",
 		"core:window:allow-show",
 		"core:window:allow-is-fullscreen",
@@ -19,8 +20,6 @@
 		{
 			"identifier": "shell:allow-execute",
 			"allow": [
-				{ "name": "vali", "cmd": "vali", "args": true },
-				{ "name": "mma-vision", "cmd": "mma-vision", "args": true },
 				{ "name": "sh", "cmd": "sh", "args": true },
 				{ "name": "bash", "cmd": "bash", "args": true },
 				{ "name": "cmd", "cmd": "cmd", "args": true },
@@ -31,8 +30,6 @@
 		{
 			"identifier": "shell:allow-spawn",
 			"allow": [
-				{ "name": "vali", "cmd": "vali", "args": true },
-				{ "name": "mma-vision", "cmd": "mma-vision", "args": true },
 				{ "name": "sh", "cmd": "sh", "args": true },
 				{ "name": "bash", "cmd": "bash", "args": true },
 				{ "name": "cmd", "cmd": "cmd", "args": true },
@@ -44,6 +41,7 @@
 		"shell:allow-kill",
 		"shell:allow-open",
 		"dialog:default",
-		"updater:default"
+		"updater:default",
+		"process:default"
 	]
 }

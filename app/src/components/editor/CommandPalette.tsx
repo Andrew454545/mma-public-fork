@@ -28,6 +28,7 @@ function PaletteItem({
 	shortcut,
 	commandId,
 	pinned,
+	keywords,
 }: {
 	label: string;
 	icon?: React.ReactNode;
@@ -37,6 +38,7 @@ function PaletteItem({
 	shortcut?: string;
 	commandId?: string;
 	pinned?: boolean;
+	keywords?: string[];
 }) {
 	const ctx = useContext(Ctx);
 	const handleSelect = useCallback(() => {
@@ -50,13 +52,18 @@ function PaletteItem({
 	return (
 		<Command.Item
 			value={label}
+			keywords={keywords}
 			onSelect={handleSelect}
 			disabled={disabled}
 			className="command-palette__item"
-			onContextMenu={commandId ? (e) => {
-				e.preventDefault();
-				togglePinnedCommand(commandId);
-			} : undefined}
+			onContextMenu={
+				commandId
+					? (e) => {
+							e.preventDefault();
+							togglePinnedCommand(commandId);
+						}
+					: undefined
+			}
 		>
 			{icon && <span className="command-palette__icon">{icon}</span>}
 			<span className="command-palette__label">{label}</span>
@@ -118,6 +125,7 @@ function MainCommands() {
 								shortcut={cmd.defaultBinding ? formatBinding(getBinding(cmd.id)) : undefined}
 								commandId={cmd.id}
 								pinned={pinnedSet.has(cmd.id)}
+								keywords={cmd.aliases}
 							/>
 						))}
 						{group === "Map" && (

@@ -174,7 +174,7 @@ export async function beginReview(ids: number[], source?: Selection): Promise<vo
 	const order = ids.filter((id) => liveSet.has(id));
 	if (order.length === 0) return;
 
-	const name = source ? selectionDisplayName(map, source) : "Selected locations";
+	const name = source ? selectionDisplayName(source) : "Selected locations";
 	const sourceProps = source?.props ?? { type: "Manual", locations: order };
 	try {
 		session = await cmd.storeReviewCreate({ mapId, name, sourceKey, sourceProps, order });
@@ -273,7 +273,14 @@ export async function renameReview(id: string, name: string): Promise<void> {
 	const trimmed = name.trim();
 	if (!trimmed) return;
 	try {
-		await cmd.storeReviewUpdate({ id, name: trimmed, cursorId: null, reviewed: null, ordering: null, status: null });
+		await cmd.storeReviewUpdate({
+			id,
+			name: trimmed,
+			cursorId: null,
+			reviewed: null,
+			ordering: null,
+			status: null,
+		});
 	} catch (e) {
 		log.error("[review] rename failed:", e);
 		return;
@@ -317,7 +324,8 @@ export async function selectReviewedHistory(): Promise<void> {
  *  refreshProjection's props so the key and color match an in-progress projection. */
 export function selectReviewSet(s: ReviewSession, mode: "reviewed" | "unreviewed") {
 	const reviewedSet = new Set(s.reviewed);
-	const locations = mode === "reviewed" ? [...s.reviewed] : s.order.filter((id) => !reviewedSet.has(id));
+	const locations =
+		mode === "reviewed" ? [...s.reviewed] : s.order.filter((id) => !reviewedSet.has(id));
 	return addSelections([{ type: "Reviewed", locations, sessionId: s.id, mode }]);
 }
 

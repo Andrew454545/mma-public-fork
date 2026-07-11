@@ -1,4 +1,4 @@
-# MMA
+# Map Making App
 
 A local-first desktop alternative to [map-making.app](https://map-making.app).
 

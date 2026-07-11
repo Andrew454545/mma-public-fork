@@ -4,21 +4,30 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { invoke } from "@tauri-apps/api/core";
 import { useCurrentMap } from "@/store/useMapStore";
-import { useTargetMapId, useManualChapter, closeManual, gotoManualChapter, goToList } from "@/store/router";
+import {
+	useTargetMapId,
+	useManualChapter,
+	closeManual,
+	gotoManualChapter,
+	goToList,
+	openManual,
+} from "@/store/router";
 import { MapList, BulkActions } from "@/components/map-list/MapList";
 import { StatsForNerds } from "@/components/dialogs/StatsForNerds";
 import { SettingsPage } from "@/components/dialogs/SettingsPage";
 import { PluginMarketplace } from "@/components/dialogs/PluginMarketplace";
+import { Dialog, DialogContent } from "@/components/primitives/Dialog";
 import { Manual } from "@/components/manual/Manual";
 import { ManualSearch } from "@/components/manual/ManualSearch";
 import { useHotkey } from "@/lib/hooks/useHotkey";
 import { useBinding } from "@/lib/util/hotkeys";
-import { useSetting, useSettings, CSS_VAR_SETTINGS } from "@/store/settings";
-import { Icon } from "@/components/primitives/Icon";
-import { mdiCog, mdiPuzzle, mdiClose } from "@mdi/js";
+import { useSetting, useSettings, setSetting, CSS_VAR_SETTINGS } from "@/store/settings";
+import { Icon, mdiDiscord } from "@/components/primitives/Icon";
+import { mdiCog, mdiPuzzle, mdiClose, mdiBookOpenPageVariantOutline } from "@mdi/js";
 import { ToastContainer } from "@/components/primitives/Toast";
 import { TooltipProvider } from "@/components/primitives/Tooltip";
 import { useUpdateState, dismissUpdate, installUpdate, relaunchApp } from "@/lib/util/updateCheck";
+import { APP_NAME } from "@/lib/util/format";
 import "@/plugins";
 
 // Dynamic import (deck.gl/luma.gl out of the initial bundle) WITHOUT React.lazy/Suspense —
@@ -40,6 +49,7 @@ const Blank = () => <div style={BLANK_STYLE} />;
 // The window label only adds Tauri's "close my window when I back out" behavior.
 export default function App() {
 	const targetMapId = useTargetMapId();
+	const manualOpen = useManualChapter() !== null;
 	// A Tauri map window whose map was backed out of: focus the list window, persist this
 	// window's geometry, then destroy it. Never true on web (no sub-window to close).
 	const closing = isEditorWindow && !targetMapId;
@@ -50,7 +60,7 @@ export default function App() {
 
 	return (
 		<TooltipProvider>
-			{closing ? <Blank /> : targetMapId ? <EditorRoot /> : <MapList />}
+			{closing ? <Blank /> : targetMapId ? <EditorRoot /> : !manualOpen && <MapList />}
 			{!closing && <AppChrome />}
 			<ToastContainer />
 		</TooltipProvider>
@@ -82,10 +92,36 @@ function AppChrome() {
 
 	useHotkey(useBinding("toggleStats"), () => setShowStats((s) => !s));
 	useHotkey(useBinding("openManualSearch"), () => setManualSearchOpen((v) => !v));
-	useHotkey(useBinding("closeMap"), () => { if (map) goToList(); });
+	useHotkey(useBinding("closeMap"), () => {
+		if (map) goToList();
+	});
+
+	const hasSeenWelcome = useSetting("hasSeenWelcome");
 
 	return (
 		<>
+			{!map && !showSettings && !showPlugins && (
+				<div
+					style={{ position: "fixed", bottom: 12, left: 12, zIndex: 5, display: "flex", gap: 4 }}
+				>
+					<a
+						className="settings-gear"
+						href="https://discord.gg/4wPNJTuzD8"
+						target="_blank"
+						rel="noopener noreferrer"
+						title="Join the Discord"
+					>
+						<Icon path={mdiDiscord} />
+					</a>
+					<button className="settings-gear" onClick={() => openManual()} title="Manual">
+						<Icon path={mdiBookOpenPageVariantOutline} />
+					</button>
+				</div>
+			)}
+			<WelcomeDialog
+				open={!map && !hasSeenWelcome}
+				onDismiss={() => setSetting("hasSeenWelcome", true)}
+			/>
 			{!showSettings && !showPlugins && (
 				<div
 					className="bottom-bar"
@@ -155,7 +191,9 @@ function useSelfDestruct(closing: boolean) {
 				await main?.setFocus();
 			})
 			.finally(async () => {
-				await invoke("plugin:window-state|save_window_state", { flags: WINDOW_STATE_ALL }).catch(() => {});
+				await invoke("plugin:window-state|save_window_state", { flags: WINDOW_STATE_ALL }).catch(
+					() => {},
+				);
 				getCurrentWindow().destroy();
 			});
 	}, [closing]);
@@ -185,4 +223,44 @@ function useCustomCss() {
 			el!.textContent = "";
 		};
 	}, [customCss]);
+}
+
+function WelcomeDialog({ open, onDismiss }: { open: boolean; onDismiss: () => void }) {
+	return (
+		<Dialog
+			open={open}
+			onOpenChange={(v) => {
+				if (!v) onDismiss();
+			}}
+		>
+			<DialogContent title={`Welcome to ${APP_NAME}`} className="welcome-dialog">
+				<p>
+					If you're new, the{" "}
+					<a
+						href="#"
+						onClick={(e) => {
+							e.preventDefault();
+							onDismiss();
+							openManual();
+						}}
+					>
+						manual
+					</a>{" "}
+					covers every feature. It's a recommended read and reference point!
+				</p>
+				<p>
+					Got questions or feedback?{" "}
+					<a href="https://discord.gg/4wPNJTuzD8" target="_blank" rel="noopener noreferrer">
+						Join the Discord
+					</a>
+					.
+				</p>
+				<div style={{ display: "flex", justifyContent: "flex-end" }}>
+					<button className="button button--primary" onClick={onDismiss}>
+						Got it
+					</button>
+				</div>
+			</DialogContent>
+		</Dialog>
+	);
 }

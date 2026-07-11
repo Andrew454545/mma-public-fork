@@ -3,6 +3,7 @@ import { createSyncStore } from "@/lib/util/syncStore";
 import type { SavedSelection } from "./savedSelections";
 import type { TagSortMode } from "@/types";
 import type { PinnedEntry } from "./commandDefs";
+import type { RGB } from "@/lib/util/color";
 
 export const MOVEMENT_MODES = {
 	moving: "Moving",
@@ -58,7 +59,7 @@ export const PREVIEW_ASPECT_RATIOS = {
 	"16 / 9": "16:9",
 	"21 / 9": "21:9",
 	"32 / 9": "32:9",
-	"free": "Free",
+	free: "Free",
 } as const;
 
 export type MovementMode = keyof typeof MOVEMENT_MODES;
@@ -109,17 +110,22 @@ const DEFAULTS = {
 	slowModifier: 4,
 	showFps: false,
 	mapListFields: ["locationCount"] as MapListField[],
+	/** Reopen the maps that were open when the session last ended (main window closed). */
+	restoreSession: true,
 	/** Per-label color overrides (hex), keyed by lowercased label name. Shared across all maps. */
 	labelColors: {} as Record<string, string>,
 	geocodeProvider: "local" as GeocodeProvider,
 	nominatimApiKey: "",
 	panToImported: true,
 	followActiveInReview: true,
-	activeLocationColor: { r: 200, g: 0, b: 0 },
-	importPreviewColor: { r: 217, g: 70, b: 239 },
-	panoDotColor: { r: 255, g: 0, b: 0 },
+	markerColor: { r: 42, g: 42, b: 42 } as RGB,
+	activeLocationColor: { r: 200, g: 0, b: 0 } as RGB,
+	importPreviewColor: { r: 217, g: 70, b: 239 } as RGB,
+	panoDotColor: { r: 255, g: 0, b: 0 } as RGB,
 	panoDotScaled: false,
 	tagViewMode: "flat" as TagViewMode,
+	/** Tree view only: render each tag as the shortest path suffix that's still unique. */
+	truncateTagPaths: true,
 	tagSortMode: "default" as TagSortMode,
 	/** Gap between tag pills (px), shared by flat and tree views via `--tag-gap`. */
 	tagGap: 6 as number,
@@ -142,15 +148,15 @@ const DEFAULTS = {
 		"---",
 		"bulk-enrich",
 	] as PinnedEntry[],
+	hasSeenWelcome: false,
 };
 export type AppSettings = typeof DEFAULTS;
 
 /** App settings mirrored to CSS custom properties on `:root`. Add an entry to expose a
  *  setting to CSS; `useCssVarSettings` (App.tsx) keeps them in sync reactively. */
-export const CSS_VAR_SETTINGS: ReadonlyArray<readonly [cssVar: string, value: (s: AppSettings) => string]> = [
-	["--tag-gap", (s) => `${s.tagGap}px`],
-];
-
+export const CSS_VAR_SETTINGS: ReadonlyArray<
+	readonly [cssVar: string, value: (s: AppSettings) => string]
+> = [["--tag-gap", (s) => `${s.tagGap}px`]];
 
 const STORAGE_KEY = "appSettings";
 

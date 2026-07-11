@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { isPluginUpdatable } from "@/plugins/registry";
+import { isPluginUpdatable, needsUpdate } from "@/plugins/registry";
 
 describe("isPluginUpdatable", () => {
 	it("flags an update when versions differ", () => {
@@ -23,5 +23,28 @@ describe("isPluginUpdatable", () => {
 	// Plain inequality, not semver ordering — a downgrade still reads as "differs".
 	it("treats any mismatch as updatable, including lower registry versions", () => {
 		expect(isPluginUpdatable("1.1.0", "1.0.0")).toBe(true);
+	});
+});
+
+describe("needsUpdate (sidecar-aware)", () => {
+	it("flags a JS version drift regardless of sidecar", () => {
+		expect(needsUpdate("1.0.0", "1.1.0", "0.1.0", "0.1.0")).toBe(true);
+	});
+
+	it("flags a sidecar drift even when JS versions match", () => {
+		expect(needsUpdate("1.0.0", "1.0.0", "0.1.0", "0.2.0")).toBe(true);
+	});
+
+	it("flags a missing sidecar (nothing installed yet) as an update", () => {
+		expect(needsUpdate("1.0.0", "1.0.0", null, "0.1.0")).toBe(true);
+		expect(needsUpdate("1.0.0", "1.0.0", undefined, "0.1.0")).toBe(true);
+	});
+
+	it("no update when both JS and sidecar match", () => {
+		expect(needsUpdate("1.0.0", "1.0.0", "0.1.0", "0.1.0")).toBe(false);
+	});
+
+	it("no update for a plugin without a registry sidecar", () => {
+		expect(needsUpdate("1.0.0", "1.0.0", null, undefined)).toBe(false);
 	});
 });

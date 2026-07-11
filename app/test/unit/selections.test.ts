@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
 	colorForKey,
@@ -9,11 +10,14 @@ import {
 	invertSelections,
 	toggleManualSelection,
 	selectionDisplayName,
+	displayTagName,
 	resolveLocations,
 	reorderSelections,
 	composeSelections,
 	decomposeChild,
 	removeFromComposite,
+	composeSiblings,
+	composeWithChild,
 	replaceSelection,
 	sampleIds,
 	polygonSelectionsContaining,
@@ -21,33 +25,36 @@ import {
 	ValidationState,
 } from "@/store/selections";
 import { setUserFieldDefs, resetForMapChange } from "@/lib/data/fieldDefRegistry";
-import type { MapData, Tag } from "@/types";
+import { setSetting } from "@/store/settings";
 
-function makeMap(tags: Record<number, Tag> = {}): MapData {
-	return {
-		meta: {
-			id: "map1",
-			name: "Test",
-			description: "",
-			folder: null,
-			locationCount: 0,
-			tags,
-			settings: {
-				pointAlongRoad: false,
-				preferDirection: null,
-				preferOfficial: false,
-				preferHigherQuality: false,
-				onlyOfficial: false,
-				cameraTypes: null,
-				defaultPanoId: false,
-				exportZoom: false,
-				exportUnpanned: false,
-			},
-			scoreBounds: "auto",
-			createdAt: "",
-			updatedAt: "",
+// The store binds tag lookups internally; back them with a settable fake tag set.
+const h = vi.hoisted(() => ({
+	tags: {} as Record<number, { id: number; name: string; color: string; visible: boolean }>,
+}));
+vi.mock("@/store/useMapStore", () => ({
+	getTag: (id: number) => h.tags[id],
+	getVisibleTags: () => Object.values(h.tags).filter((t) => t.visible !== false),
+}));
+
+beforeEach(() => {
+	h.tags = {};
+});
+
+// This suite runs in node (no DOM); back setSetting's localStorage with a stub.
+if (typeof localStorage === "undefined") {
+	let store: Record<string, string> = {};
+	vi.stubGlobal("localStorage", {
+		getItem: (k: string) => store[k] ?? null,
+		setItem: (k: string, v: string) => {
+			store[k] = v;
 		},
-	};
+		removeItem: (k: string) => {
+			delete store[k];
+		},
+		clear: () => {
+			store = {};
+		},
+	});
 }
 
 describe("colorForKey", () => {
@@ -94,7 +101,9 @@ describe("review overlay colors stay clear of the active marker", () => {
 		expect(circ(hueOf(colorFor("reviewed")), ACTIVE_HUE)).toBeGreaterThanOrEqual(60);
 	});
 	it("reviewed and unreviewed are well separated from each other", () => {
-		expect(circ(hueOf(colorFor("reviewed")), hueOf(colorFor("unreviewed")))).toBeGreaterThanOrEqual(60);
+		expect(circ(hueOf(colorFor("reviewed")), hueOf(colorFor("unreviewed")))).toBeGreaterThanOrEqual(
+			60,
+		);
 	});
 });
 
@@ -249,6 +258,35 @@ describe("invertSelections", () => {
 		expect(result).toHaveLength(1);
 		expect(result[0].props.type).toBe("PanoIds");
 	});
+
+	it("inverts a nested child in place, leaving the parent group intact", () => {
+		const s1 = buildSelection({ type: "PanoIds" });
+		const s2 = buildSelection({ type: "Untagged" });
+		const union = buildSelection({ type: "Union", selections: [s1, s2] });
+		const result = invertSelections([union], [s1.key]);
+		expect(result).toHaveLength(1);
+		const top = result[0].props as { type: "Union"; selections: any[] };
+		expect(top.type).toBe("Union");
+		expect(top.selections).toHaveLength(2);
+		const inverted = top.selections.find((c) => c.props.type === "Invert");
+		expect(inverted).toBeDefined();
+		expect(inverted.props.selections[0].key).toBe(s1.key);
+	});
+
+	it("toggles a nested invert back off without collapsing the group", () => {
+		const s1 = buildSelection({ type: "PanoIds" });
+		const s2 = buildSelection({ type: "Untagged" });
+		const union = buildSelection({ type: "Union", selections: [s1, s2] });
+		const inverted = invertSelections([union], [s1.key]);
+		const invertedChild = (inverted[0].props as { selections: any[] }).selections.find(
+			(c) => c.props.type === "Invert",
+		);
+		const result = invertSelections(inverted, [invertedChild.key]);
+		expect(result).toHaveLength(1);
+		const top = result[0].props as { type: "Union"; selections: any[] };
+		expect(top.type).toBe("Union");
+		expect(top.selections.map((c) => c.key).sort()).toEqual([s1.key, s2.key].sort());
+	});
 });
 
 describe("toggleManualSelection", () => {
@@ -317,36 +355,32 @@ describe("selectionDisplayName", () => {
 	});
 
 	it("returns type name for simple types", () => {
-		const map = makeMap();
 		const sel = buildSelection({ type: "Everything" });
-		expect(selectionDisplayName(map, sel)).toBe("Everything");
+		expect(selectionDisplayName(sel)).toBe("Everything");
 	});
 
 	it("returns tag name for Tag selection", () => {
-		const map = makeMap({ 42: { id: 42, name: "My Tag", color: "#f00", visible: true } });
+		h.tags = { 42: { id: 42, name: "My Tag", color: "#f00", visible: true } };
 		const sel = buildSelection({ type: "Tag", tagId: 42 });
-		expect(selectionDisplayName(map, sel)).toBe("Tag: My Tag");
+		expect(selectionDisplayName(sel)).toBe("Tag: My Tag");
 	});
 
 	it("falls back to tag ID if tag not found", () => {
-		const map = makeMap();
 		const sel = buildSelection({ type: "Tag", tagId: 999 });
-		expect(selectionDisplayName(map, sel)).toBe("Tag: 999");
+		expect(selectionDisplayName(sel)).toBe("Tag: 999");
 	});
 
 	it("display name for Filter eq", () => {
-		const map = makeMap();
 		const sel = buildSelection({
 			type: "Filter",
 			field: "label",
 			op: "eq",
 			value: "BR",
 		});
-		expect(selectionDisplayName(map, sel)).toBe("Country code = BR");
+		expect(selectionDisplayName(sel)).toBe("Country code = BR");
 	});
 
 	it("display name for Filter between", () => {
-		const map = makeMap();
 		const sel = buildSelection({
 			type: "Filter",
 			field: "height",
@@ -354,88 +388,80 @@ describe("selectionDisplayName", () => {
 			value: 0,
 			value2: 3000,
 		});
-		expect(selectionDisplayName(map, sel)).toBe("Altitude between 0..3000");
+		expect(selectionDisplayName(sel)).toBe("Altitude between 0..3000");
 	});
 
 	it("display name for Filter neq", () => {
-		const map = makeMap();
 		const sel = buildSelection({
 			type: "Filter",
 			field: "label",
 			op: "neq",
 			value: "BR",
 		});
-		expect(selectionDisplayName(map, sel)).toBe("Country code != BR");
+		expect(selectionDisplayName(sel)).toBe("Country code != BR");
 	});
 
 	it("display name for Filter gt", () => {
-		const map = makeMap();
 		const sel = buildSelection({
 			type: "Filter",
 			field: "height",
 			op: "gt",
 			value: 500,
 		});
-		expect(selectionDisplayName(map, sel)).toBe("Altitude > 500");
+		expect(selectionDisplayName(sel)).toBe("Altitude > 500");
 	});
 
 	it("display name for Filter lt", () => {
-		const map = makeMap();
 		const sel = buildSelection({
 			type: "Filter",
 			field: "height",
 			op: "lt",
 			value: 100,
 		});
-		expect(selectionDisplayName(map, sel)).toBe("Altitude < 100");
+		expect(selectionDisplayName(sel)).toBe("Altitude < 100");
 	});
 
 	it("display name for Filter gte", () => {
-		const map = makeMap();
 		const sel = buildSelection({
 			type: "Filter",
 			field: "height",
 			op: "gte",
 			value: 200,
 		});
-		expect(selectionDisplayName(map, sel)).toBe("Altitude >= 200");
+		expect(selectionDisplayName(sel)).toBe("Altitude >= 200");
 	});
 
 	it("display name for Filter lte", () => {
-		const map = makeMap();
 		const sel = buildSelection({
 			type: "Filter",
 			field: "height",
 			op: "lte",
 			value: 300,
 		});
-		expect(selectionDisplayName(map, sel)).toBe("Altitude <= 300");
+		expect(selectionDisplayName(sel)).toBe("Altitude <= 300");
 	});
 
 	it("display name for Filter has", () => {
-		const map = makeMap();
 		const sel = buildSelection({
 			type: "Filter",
 			field: "height",
 			op: "has",
 			value: null,
 		});
-		expect(selectionDisplayName(map, sel)).toBe("has Altitude");
+		expect(selectionDisplayName(sel)).toBe("has Altitude");
 	});
 
 	it("display name for Filter nothas", () => {
-		const map = makeMap();
 		const sel = buildSelection({
 			type: "Filter",
 			field: "height",
 			op: "nothas",
 			value: null,
 		});
-		expect(selectionDisplayName(map, sel)).toBe("missing Altitude");
+		expect(selectionDisplayName(sel)).toBe("missing Altitude");
 	});
 
 	it("display name for Filter between_anyyear formats MM-DD as month day", () => {
-		const map = makeMap();
 		const sel = buildSelection({
 			type: "Filter",
 			field: "month",
@@ -443,11 +469,10 @@ describe("selectionDisplayName", () => {
 			value: "01-15",
 			value2: "03-20",
 		});
-		expect(selectionDisplayName(map, sel)).toBe("Image date between (any year) Jan 15..Mar 20");
+		expect(selectionDisplayName(sel)).toBe("Image date between (any year) Jan 15..Mar 20");
 	});
 
 	it("display name for Filter between_anytime uses raw values", () => {
-		const map = makeMap();
 		const sel = buildSelection({
 			type: "Filter",
 			field: "month",
@@ -455,22 +480,20 @@ describe("selectionDisplayName", () => {
 			value: "08:00",
 			value2: "16:00",
 		});
-		expect(selectionDisplayName(map, sel)).toBe("Image date between (any date) 08:00..16:00");
+		expect(selectionDisplayName(sel)).toBe("Image date between (any date) 08:00..16:00");
 	});
 
 	it("display name for Filter enum field shows label not raw value", () => {
-		const map = makeMap();
 		const sel = buildSelection({
 			type: "Filter",
 			field: "cam",
 			op: "eq",
 			value: "gen4",
 		});
-		expect(selectionDisplayName(map, sel)).toBe("Camera type = Gen 4");
+		expect(selectionDisplayName(sel)).toBe("Camera type = Gen 4");
 	});
 
 	it("display name for Filter date field formats unix timestamp", () => {
-		const map = makeMap();
 		const sel = buildSelection({
 			type: "Filter",
 			field: "exact",
@@ -481,11 +504,10 @@ describe("selectionDisplayName", () => {
 		const d = new Date(1700000000 * 1000);
 		const p = (n: number) => String(n).padStart(2, "0");
 		const expected = `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
-		expect(selectionDisplayName(map, sel)).toBe(`Exact date > ${expected}`);
+		expect(selectionDisplayName(sel)).toBe(`Exact date > ${expected}`);
 	});
 
 	it("display name for tzLocal filters renders wall-clock values in UTC", () => {
-		const map = makeMap();
 		const sel = buildSelection({
 			type: "Filter",
 			field: "exact",
@@ -494,27 +516,39 @@ describe("selectionDisplayName", () => {
 			value2: 1583107140, // 2020-03-01 23:59
 			tzLocal: true,
 		});
-		expect(selectionDisplayName(map, sel)).toBe(
+		expect(selectionDisplayName(sel)).toBe(
 			"Exact date between 2020-03-01 00:00..2020-03-01 23:59 (location time)",
 		);
 	});
 
 	it("tzLocal filters get a distinct key from absolute-frame filters", () => {
-		const abs = buildSelection({ type: "Filter", field: "exact", op: "between", value: 1, value2: 2 });
-		const local = buildSelection({ type: "Filter", field: "exact", op: "between", value: 1, value2: 2, tzLocal: true });
+		const abs = buildSelection({
+			type: "Filter",
+			field: "exact",
+			op: "between",
+			value: 1,
+			value2: 2,
+		});
+		const local = buildSelection({
+			type: "Filter",
+			field: "exact",
+			op: "between",
+			value: 1,
+			value2: 2,
+			tzLocal: true,
+		});
 		expect(abs.key).not.toBe(local.key);
 		expect(local.key.endsWith(":local")).toBe(true);
 	});
 
 	it("display name for Filter uses raw field name when no fieldDef exists", () => {
-		const map = makeMap();
 		const sel = buildSelection({
 			type: "Filter",
 			field: "unknownField",
 			op: "eq",
 			value: "test",
 		});
-		expect(selectionDisplayName(map, sel)).toBe("unknownField = test");
+		expect(selectionDisplayName(sel)).toBe("unknownField = test");
 	});
 
 	it("display name for Filter enum uses user-defined field defs", () => {
@@ -526,101 +560,131 @@ describe("selectionDisplayName", () => {
 				labels: { a: "Alpha", b: "Beta" },
 			},
 		});
-		const map = makeMap();
 		const sel = buildSelection({
 			type: "Filter",
 			field: "myCustomField",
 			op: "eq",
 			value: "a",
 		});
-		expect(selectionDisplayName(map, sel)).toBe("Custom = Alpha");
+		expect(selectionDisplayName(sel)).toBe("Custom = Alpha");
 	});
 
 	it("display name for Locations with name", () => {
-		const map = makeMap();
 		const sel = buildSelection({ type: "Locations", locations: [1, 2], name: "My Set" });
-		expect(selectionDisplayName(map, sel)).toBe("My Set");
+		expect(selectionDisplayName(sel)).toBe("My Set");
 	});
 
 	it("display name for Locations without name", () => {
-		const map = makeMap();
 		const sel = buildSelection({ type: "Locations", locations: [1], name: null });
-		expect(selectionDisplayName(map, sel)).toBe("Selection");
+		expect(selectionDisplayName(sel)).toBe("Selection");
 	});
 
 	it("display name for Polygon without name", () => {
-		const map = makeMap();
 		const sel = buildSelection({
 			type: "Polygon",
-			polygon: { coordinates: [[[0, 0], [1, 0], [1, 1], [0, 0]]] },
+			polygon: {
+				coordinates: [
+					[
+						[0, 0],
+						[1, 0],
+						[1, 1],
+						[0, 0],
+					],
+				],
+			},
 			includeInformational: false,
 		});
-		expect(selectionDisplayName(map, sel)).toBe("Polygon");
+		expect(selectionDisplayName(sel)).toBe("Polygon");
 	});
 
 	it("display name for Polygon with name", () => {
-		const map = makeMap();
 		const sel = buildSelection({
 			type: "Polygon",
-			polygon: { coordinates: [[[0, 0], [1, 0], [1, 1], [0, 0]]], properties: { name: "Europe" } },
+			polygon: {
+				coordinates: [
+					[
+						[0, 0],
+						[1, 0],
+						[1, 1],
+						[0, 0],
+					],
+				],
+				properties: { name: "Europe" },
+			},
 			includeInformational: false,
 		});
-		expect(selectionDisplayName(map, sel)).toBe("Polygon: Europe");
+		expect(selectionDisplayName(sel)).toBe("Polygon: Europe");
 	});
 
 	it("display name for Duplicates", () => {
-		const map = makeMap();
 		const sel = buildSelection({ type: "Duplicates", distance: 100 });
-		expect(selectionDisplayName(map, sel)).toBe("Duplicates (100m)");
+		expect(selectionDisplayName(sel)).toBe("Duplicates (100m)");
 	});
 
 	it("display name for Manual", () => {
-		const map = makeMap();
 		const sel = buildSelection({ type: "Manual", locations: [1, 2, 3] });
-		expect(selectionDisplayName(map, sel)).toBe("Manual selection");
+		expect(selectionDisplayName(sel)).toBe("Manual selection");
 	});
 
 	it("display name for ValidationState", () => {
-		const map = makeMap();
 		const sel = buildSelection({
 			type: "ValidationState",
 			locations: [1],
 			state: ValidationState.NotFound,
 		});
-		expect(selectionDisplayName(map, sel)).toBe("Not found");
+		expect(selectionDisplayName(sel)).toBe("Not found");
 	});
 
 	it("display name for ValidationState PanoIdBroke", () => {
-		const map = makeMap();
 		const sel = buildSelection({
 			type: "ValidationState",
 			locations: [2],
 			state: ValidationState.PanoIdBroke,
 		});
-		expect(selectionDisplayName(map, sel)).toBe("Pano ID broke");
+		expect(selectionDisplayName(sel)).toBe("Pano ID broke");
 	});
 
 	it("display name for Intersection", () => {
-		const map = makeMap();
 		const s1 = buildSelection({ type: "PanoIds" });
 		const s2 = buildSelection({ type: "Untagged" });
 		const inter = intersectSelections([s1, s2], null);
-		expect(selectionDisplayName(map, inter[0])).toBe("Intersection");
+		expect(selectionDisplayName(inter[0])).toBe("Intersection");
 	});
 
 	it("display name for Union", () => {
-		const map = makeMap();
 		const s1 = buildSelection({ type: "PanoIds" });
 		const s2 = buildSelection({ type: "Untagged" });
 		const union = unionSelections([s1, s2], null);
-		expect(selectionDisplayName(map, union[0])).toBe("Union");
+		expect(selectionDisplayName(union[0])).toBe("Union");
 	});
 
 	it("display name for Invert includes child name", () => {
-		const map = makeMap();
 		const s1 = buildSelection({ type: "PanoIds" });
 		const inverted = invertSelections([s1], null);
-		expect(selectionDisplayName(map, inverted[0])).toBe("Invert: Pano ID locations");
+		expect(selectionDisplayName(inverted[0])).toBe("Invert: Pano ID locations");
+	});
+});
+
+describe("displayTagName", () => {
+	afterEach(() => {
+		setSetting("tagViewMode", "flat");
+		setSetting("truncateTagPaths", false);
+	});
+
+	it("computes unique suffixes over visible tags only, ignoring soft-deleted ghosts", () => {
+		setSetting("tagViewMode", "tree");
+		setSetting("truncateTagPaths", true);
+		h.tags = {
+			1: { id: 1, name: "Europe/France", color: "#111", visible: true },
+			// Deleted tag kept for undo — must not widen the survivor's suffix.
+			2: { id: 2, name: "Asia/France", color: "#222", visible: false },
+		};
+		expect(displayTagName("Europe/France")).toBe("France");
+	});
+
+	it("returns the name verbatim outside tree/truncate mode", () => {
+		h.tags = { 1: { id: 1, name: "Europe/France", color: "#111", visible: true } };
+		expect(displayTagName("Europe/France")).toBe("Europe/France");
 	});
 });
 
@@ -704,12 +768,7 @@ describe("composeSelections", () => {
 		const s2 = buildSelection({ type: "Untagged" });
 		const composed = composeSelections([s1, s2], s2.key, s1.key, "Intersection");
 		const s3 = buildSelection({ type: "Unpanned" });
-		const result = composeSelections(
-			[...composed, s3],
-			s3.key,
-			composed[0].key,
-			"Intersection",
-		);
+		const result = composeSelections([...composed, s3], s3.key, composed[0].key, "Intersection");
 		expect(result).toHaveLength(1);
 		const children = (result[0].props as { selections: any[] }).selections;
 		expect(children).toHaveLength(3);
@@ -725,6 +784,35 @@ describe("composeSelections", () => {
 		const s1 = buildSelection({ type: "PanoIds" });
 		const result = composeSelections([s1], "nonexistent", s1.key, "Intersection");
 		expect(result).toEqual([s1]);
+	});
+});
+
+describe("composeSiblings / composeWithChild preserve the Invert wrapper", () => {
+	const invertedGroup = () => {
+		const a = buildSelection({ type: "PanoIds" });
+		const b = buildSelection({ type: "Untagged" });
+		const c = buildSelection({ type: "Unpanned" });
+		const group = buildSelection({ type: "Union", selections: [a, b, c] });
+		const inv = buildSelection({ type: "Invert", selections: [group] });
+		return { a, b, c, inv };
+	};
+
+	it("composeSiblings keeps Invert when nesting two children of an inverted group", () => {
+		const { a, b, inv } = invertedGroup();
+		const result = composeSiblings([inv], inv.key, a.key, b.key, "Intersection");
+		expect(result).toHaveLength(1);
+		expect(result[0].props.type).toBe("Invert");
+		const innerGroup = (result[0].props as { selections: any[] }).selections[0];
+		expect(innerGroup.props.type).toBe("Union");
+	});
+
+	it("composeWithChild keeps Invert when nesting a top-level selection onto a child", () => {
+		const { a, inv } = invertedGroup();
+		const drag = buildSelection({ type: "Tag", tagId: 7 });
+		const result = composeWithChild([inv, drag], drag.key, inv.key, a.key, "Intersection");
+		expect(result.some((s) => s.props.type === "Invert")).toBe(true);
+		const invResult = result.find((s) => s.props.type === "Invert")!;
+		expect((invResult.props as { selections: any[] }).selections[0].props.type).toBe("Union");
 	});
 });
 
@@ -759,10 +847,42 @@ describe("removeFromComposite", () => {
 		const children = (result[0].props as { selections: any[] }).selections;
 		expect(children.every((c: any) => c.key !== s2.key)).toBe(true);
 	});
+
+	it("preserves the Invert wrapper when removing a child from an inverted group", () => {
+		const s1 = buildSelection({ type: "PanoIds" });
+		const s2 = buildSelection({ type: "Untagged" });
+		const s3 = buildSelection({ type: "Unpanned" });
+		const group = buildSelection({ type: "Intersection", selections: [s1, s2, s3] });
+		const inv = buildSelection({ type: "Invert", selections: [group] });
+		const result = removeFromComposite([inv], inv.key, s1.key);
+		expect(result).toHaveLength(1);
+		expect(result[0].props.type).toBe("Invert");
+		const innerGroup = (result[0].props as { selections: any[] }).selections[0];
+		expect(innerGroup.props.type).toBe("Intersection");
+		const children = (innerGroup.props as { selections: any[] }).selections;
+		expect(children.map((c: any) => c.key).sort()).toEqual([s2.key, s3.key].sort());
+	});
+
+	it("keeps Invert when the inverted group collapses to a single child", () => {
+		const s1 = buildSelection({ type: "PanoIds" });
+		const s2 = buildSelection({ type: "Untagged" });
+		const group = buildSelection({ type: "Intersection", selections: [s1, s2] });
+		const inv = buildSelection({ type: "Invert", selections: [group] });
+		const result = removeFromComposite([inv], inv.key, s1.key);
+		expect(result).toHaveLength(1);
+		expect(result[0].props.type).toBe("Invert");
+		expect((result[0].props as { selections: any[] }).selections[0].key).toBe(s2.key);
+	});
 });
 
 describe("replaceSelection", () => {
-	const filterA = { type: "Filter" as const, field: "year", op: "between", value: 2010, value2: 2015 };
+	const filterA = {
+		type: "Filter" as const,
+		field: "year",
+		op: "between",
+		value: 2010,
+		value2: 2015,
+	};
 	const filterAEdited = { ...filterA, value: 2012, value2: 2020 };
 
 	it("replaces a top-level selection and updates its key", () => {
@@ -772,6 +892,21 @@ describe("replaceSelection", () => {
 		expect(result[0].key).toBe(buildSelection(filterAEdited).key);
 		expect(result[0].key).not.toBe(sel.key);
 		expect((result[0].props as typeof filterAEdited).value).toBe(2012);
+	});
+
+	it("preserves the Invert wrapper when editing a child of an inverted group", () => {
+		const a = buildSelection(filterA);
+		const b = buildSelection({ type: "Untagged" });
+		const group = buildSelection({ type: "Union", selections: [a, b] });
+		const inv = buildSelection({ type: "Invert", selections: [group] });
+		const result = replaceSelection([inv], a.key, filterAEdited);
+		expect(result).toHaveLength(1);
+		expect(result[0].props.type).toBe("Invert");
+		const innerGroup = (result[0].props as { selections: any[] }).selections[0];
+		expect(innerGroup.props.type).toBe("Union");
+		const children = (innerGroup.props as { selections: any[] }).selections;
+		expect(children.some((c: any) => c.key === buildSelection(filterAEdited).key)).toBe(true);
+		expect(children.some((c: any) => c.key === b.key)).toBe(true);
 	});
 
 	it("replaces a child inside a composite and rebuilds the parent key", () => {
@@ -908,7 +1043,17 @@ describe("polygonSelectionsContaining", () => {
 	const square = (key: string, ox: number, oy: number) =>
 		buildSelection({
 			type: "Polygon",
-			polygon: { coordinates: [[[ox, oy], [ox + 2, oy], [ox + 2, oy + 2], [ox, oy + 2], [ox, oy]]] },
+			polygon: {
+				coordinates: [
+					[
+						[ox, oy],
+						[ox + 2, oy],
+						[ox + 2, oy + 2],
+						[ox, oy + 2],
+						[ox, oy],
+					],
+				],
+			},
 			includeInformational: false,
 		});
 
@@ -936,8 +1081,26 @@ describe("polygonSelectionsContaining", () => {
 			...buildSelection({
 				type: "Polygon",
 				polygon: {
-					coordinates: [[[0, 0], [2, 0], [2, 2], [0, 2], [0, 0]]],
-					extraPolygons: [[[[10, 10], [12, 10], [12, 12], [10, 12], [10, 10]]]],
+					coordinates: [
+						[
+							[0, 0],
+							[2, 0],
+							[2, 2],
+							[0, 2],
+							[0, 0],
+						],
+					],
+					extraPolygons: [
+						[
+							[
+								[10, 10],
+								[12, 10],
+								[12, 12],
+								[10, 12],
+								[10, 10],
+							],
+						],
+					],
 				},
 				includeInformational: false,
 			}),

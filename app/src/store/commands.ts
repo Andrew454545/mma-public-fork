@@ -5,6 +5,7 @@ export interface CommandDef {
 	icon?: string;
 	group: CommandGroup;
 	defaultBinding?: string;
+	aliases?: string[];
 	execute: () => void;
 	enabled?: () => boolean;
 }

@@ -28,6 +28,7 @@ function redraw(): void {
 				bounds: data.bounds,
 				opacity: 0.35,
 				pickable: false,
+				_imageCoordinateSystem: "lnglat" as const,
 			}),
 		],
 	});

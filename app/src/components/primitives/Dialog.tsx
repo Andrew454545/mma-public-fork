@@ -34,7 +34,17 @@ export function DialogContent({
 	return (
 		<RadixDialog.Portal>
 			<RadixDialog.Overlay className="modal__backdrop" />
-			<RadixDialog.Content {...props} className="modal" aria-describedby={undefined}>
+			<RadixDialog.Content
+				{...props}
+				className="modal"
+				aria-describedby={undefined}
+				onInteractOutside={(e) => {
+					// A portaled SuggestInput dropdown lives outside the content in the DOM;
+					// interacting with it must not dismiss the dialog.
+					if ((e.target as Element | null)?.closest?.(".suggest-portal")) e.preventDefault();
+					else props.onInteractOutside?.(e);
+				}}
+			>
 				<div className={clsx("modal__dialog", className)}>
 					<header className={clsx("modal__header", className ? `${className}__header` : null)}>
 						<RadixDialog.Title className="modal__title">{title}</RadixDialog.Title>

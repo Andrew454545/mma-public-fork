@@ -4,7 +4,13 @@ import type {
 	GeneratedLocation,
 	GenerationCallbacks,
 } from "./types";
-import { randomPointInBounds, getBoundingBox, pointInGeoJsonGeometry } from "./geo";
+import {
+	randomPointInBounds,
+	getBoundingBox,
+	pointInGeoJsonGeometry,
+	poissonDiskSample,
+} from "./geo";
+import { blueLineSample } from "./blueLineSampler";
 import {
 	passesInitialFilters,
 	passesDateFilters,
@@ -12,8 +18,11 @@ import {
 	computeHeading,
 	resolveRoadName,
 } from "./filters";
+import { fetchSvMetadata } from "@/lib/sv/svMeta";
 import { distMeters } from "@/lib/geo/geo";
 import { searchCoverage } from "../searchCoverage";
+import { cmd } from "@/lib/commands";
+import { log } from "@/lib/util/log";
 import type { LatLng } from "@/types";
 
 function chunk<T>(arr: T[], n: number): T[][] {
@@ -39,6 +48,10 @@ export class GenerationEngine {
 	private globalFoundPanoIds = new Set<string>();
 	private pendingBatch: GeneratedLocation[] = [];
 	private flushTimer: ReturnType<typeof setTimeout> | null = null;
+	private poissonPoints = new Map<string, LatLng[]>();
+	private poissonIndex = new Map<string, number>();
+	private bluelinePoints = new Map<string, LatLng[]>();
+	private bluelineIndex = new Map<string, number>();
 
 	constructor(
 		google: Google,
@@ -187,7 +200,226 @@ export class GenerationEngine {
 	}
 
 	private async generateRegion(region: GeneratorRegion): Promise<void> {
+		const mode = this.settings.samplingMode;
+		if (mode === "poisson") await this.generateRegionPoisson(region);
+		else if (mode === "blueline") await this.generateRegionBlueline(region);
+		else if (mode === "kernels") await this.generateRegionKernels(region);
+		else await this.generateRegionRandom(region);
+
+		region.isProcessing = false;
+		this.callbacks.onRegionComplete(region.id);
+	}
+
+	private async generateRegionPoisson(region: GeneratorRegion): Promise<void> {
+		if (!this.poissonPoints.has(region.id)) {
+			const points = poissonDiskSample(region.feature, 2 * this.settings.radius);
+			this.poissonPoints.set(region.id, points);
+			this.poissonIndex.set(region.id, 0);
+			log.info(`[generator] Poisson disk: ${points.length} probes for ${region.name}`);
+		}
+		const allPoints = this.poissonPoints.get(region.id)!;
+
+		while (
+			region.found.length < region.target &&
+			this.running &&
+			!this.cancelledRegions.has(region.id)
+		) {
+			await this.waitIfPaused();
+			if (!this.running || this.cancelledRegions.has(region.id)) break;
+
+			region.isProcessing = true;
+			const startIdx = this.poissonIndex.get(region.id) ?? 0;
+			const endIdx = Math.min(startIdx + this.settings.speed, allPoints.length);
+			this.poissonIndex.set(region.id, endIdx);
+			let coords = allPoints.slice(startIdx, endIdx);
+			if (coords.length === 0) break;
+
+			if (this.settings.skipExisting) {
+				try {
+					// eslint-disable-next-line local/no-ipc-in-loop -- bulk form: one IPC per batch
+					const near = await cmd.storeNearAny(
+						coords.map((c) => c.lat),
+						coords.map((c) => c.lng),
+						this.settings.skipExistingRadius,
+					);
+					coords = coords.filter((_, i) => !near[i]);
+				} catch (e) {
+					log.warn("[generator] storeNearAny failed, probing unfiltered:", e);
+				}
+			}
+			if (coords.length === 0) continue;
+
+			const batchSize = this.settings.findRegions ? 1 : 75;
+			for (const batch of chunk(coords, batchSize)) {
+				if (
+					!this.running ||
+					this.cancelledRegions.has(region.id) ||
+					region.found.length >= region.target
+				)
+					break;
+				await this.waitIfPaused();
+				await Promise.allSettled(batch.map((coord) => this.getLoc(coord, region)));
+			}
+		}
+
+		this.poissonPoints.delete(region.id);
+		this.poissonIndex.delete(region.id);
+	}
+
+	private async generateRegionBlueline(region: GeneratorRegion): Promise<void> {
+		if (!this.bluelinePoints.has(region.id)) {
+			const points = await blueLineSample(region.feature);
+			this.bluelinePoints.set(region.id, points);
+			this.bluelineIndex.set(region.id, 0);
+		}
+		const allPoints = this.bluelinePoints.get(region.id)!;
+
+		while (
+			region.found.length < region.target &&
+			this.running &&
+			!this.cancelledRegions.has(region.id)
+		) {
+			await this.waitIfPaused();
+			if (!this.running || this.cancelledRegions.has(region.id)) break;
+
+			region.isProcessing = true;
+			const startIdx = this.bluelineIndex.get(region.id) ?? 0;
+			const endIdx = Math.min(startIdx + this.settings.speed, allPoints.length);
+			this.bluelineIndex.set(region.id, endIdx);
+			let coords = allPoints.slice(startIdx, endIdx);
+			if (coords.length === 0) break;
+
+			if (this.settings.skipExisting) {
+				try {
+					// eslint-disable-next-line local/no-ipc-in-loop -- bulk form: one IPC per batch
+					const near = await cmd.storeNearAny(
+						coords.map((c) => c.lat),
+						coords.map((c) => c.lng),
+						this.settings.skipExistingRadius,
+					);
+					coords = coords.filter((_, i) => !near[i]);
+				} catch (e) {
+					log.warn("[generator] storeNearAny failed, probing unfiltered:", e);
+				}
+			}
+			if (coords.length === 0) continue;
+
+			const batchSize = this.settings.findRegions ? 1 : 75;
+			for (const batch of chunk(coords, batchSize)) {
+				if (
+					!this.running ||
+					this.cancelledRegions.has(region.id) ||
+					region.found.length >= region.target
+				)
+					break;
+				await this.waitIfPaused();
+				await Promise.allSettled(batch.map((coord) => this.getLoc(coord, region)));
+			}
+		}
+
+		this.bluelinePoints.delete(region.id);
+		this.bluelineIndex.delete(region.id);
+	}
+
+	private async generateRegionKernels(region: GeneratorRegion): Promise<void> {
 		const [west, south, east, north] = getBoundingBox(region.feature);
+		const centroidLat = (south + north) / 2;
+		const centroidLng = (west + east) / 2;
+		const coveringRadius = distMeters(
+			{ lat: centroidLat, lng: centroidLng },
+			{ lat: north, lng: east },
+		);
+
+		let seeds: string[];
+		try {
+			const locs = await cmd.storeFindNearby(centroidLat, centroidLng, coveringRadius);
+			seeds = locs
+				.filter((l) => l.panoId && pointInGeoJsonGeometry(l.lng, l.lat, region.feature.geometry))
+				.map((l) => l.panoId!);
+		} catch (e) {
+			log.warn("[generator] Failed to fetch seed locations:", e);
+			return;
+		}
+
+		if (seeds.length === 0) {
+			log.warn(`[generator] Kernels: no existing locations with panoId in ${region.name}`);
+			return;
+		}
+		log.info(`[generator] Kernels: ${seeds.length} seeds in ${region.name}`);
+
+		const visited = region.checkedPanos;
+		const depthMap = new Map<string, number>();
+		const queue: string[] = [];
+		for (const id of seeds) {
+			if (!visited.has(id)) {
+				visited.add(id);
+				queue.push(id);
+				depthMap.set(id, 0);
+			}
+		}
+
+		const maxDepth = this.settings.linksDepth;
+		const s = this.settings;
+
+		while (
+			queue.length > 0 &&
+			region.found.length < region.target &&
+			this.running &&
+			!this.cancelledRegions.has(region.id)
+		) {
+			await this.waitIfPaused();
+			if (!this.running || this.cancelledRegions.has(region.id)) break;
+
+			region.isProcessing = true;
+			const frontier = queue.splice(0, Math.max(s.speed, 50));
+			const results = await fetchSvMetadata(frontier);
+
+			for (let i = 0; i < results.length; i++) {
+				if (region.found.length >= region.target) break;
+
+				const pano = results[i];
+				if (!pano) continue;
+
+				if (pano.extra?.drivingDirection != null && pano.tiles) {
+					pano.tiles.centerHeading = pano.extra.drivingDirection;
+				}
+
+				const lat = pano.location.latLng.lat();
+				const lng = pano.location.latLng.lng();
+				if (!pointInGeoJsonGeometry(lng, lat, region.feature.geometry)) continue;
+
+				const depth = depthMap.get(frontier[i]) ?? 0;
+
+				if (isPanoGood(pano, s)) {
+					await this.finalizeLoc(pano, region);
+				}
+
+				// Enqueue linked panos
+				if (depth < maxDepth) {
+					for (const link of pano.links) {
+						if (link.pano && !visited.has(link.pano)) {
+							visited.add(link.pano);
+							queue.push(link.pano);
+							depthMap.set(link.pano, depth + 1);
+						}
+					}
+					if (s.checkAllDates && pano.time) {
+						for (const entry of pano.time) {
+							if (entry.pano && !visited.has(entry.pano)) {
+								visited.add(entry.pano);
+								queue.push(entry.pano);
+								depthMap.set(entry.pano, depth + 1);
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	private async generateRegionRandom(region: GeneratorRegion): Promise<void> {
+		const [west, south, east, north] = getBoundingBox(region.feature);
+		let coveredRounds = 0;
 
 		while (
 			region.found.length < region.target &&
@@ -199,9 +431,7 @@ export class GenerationEngine {
 
 			region.isProcessing = true;
 			const n = Math.min(region.target * 100, this.settings.speed);
-			const randomCoords: LatLng[] = [];
-			// Cap attempts so a degenerate/near-zero-area polygon can never spin forever.
-			// The bbox reject in pointInGeoJsonGeometry keeps each attempt cheap.
+			let randomCoords: LatLng[] = [];
 			let attempts = 0;
 			const maxAttempts = n * 200;
 			while (randomCoords.length < n && attempts < maxAttempts) {
@@ -210,6 +440,24 @@ export class GenerationEngine {
 				if (pointInGeoJsonGeometry(pt.lng, pt.lat, region.feature.geometry)) {
 					randomCoords.push(pt);
 				}
+			}
+			if (this.settings.skipExisting && randomCoords.length > 0) {
+				try {
+					// eslint-disable-next-line local/no-ipc-in-loop -- bulk form: one IPC per batch
+					const near = await cmd.storeNearAny(
+						randomCoords.map((c) => c.lat),
+						randomCoords.map((c) => c.lng),
+						this.settings.skipExistingRadius,
+					);
+					randomCoords = randomCoords.filter((_, i) => !near[i]);
+				} catch (e) {
+					log.warn("[generator] storeNearAny failed, probing unfiltered:", e);
+				}
+				if (randomCoords.length === 0) {
+					if (++coveredRounds >= 20) break;
+					continue;
+				}
+				coveredRounds = 0;
 			}
 			if (randomCoords.length === 0) break;
 
@@ -225,9 +473,6 @@ export class GenerationEngine {
 				await Promise.allSettled(batch.map((coord) => this.getLoc(coord, region)));
 			}
 		}
-
-		region.isProcessing = false;
-		this.callbacks.onRegionComplete(region.id);
 	}
 
 	private getLoc(coord: LatLng, region: GeneratorRegion): Promise<void> {
@@ -379,7 +624,7 @@ export class GenerationEngine {
 						}
 					}
 
-					if (good) this.finalizeLoc(pano, region);
+					if (good) void this.finalizeLoc(pano, region);
 				})().catch(() => {
 					// Drop this candidate on metadata errors; the generator will keep probing.
 				});
@@ -387,10 +632,10 @@ export class GenerationEngine {
 		);
 	}
 
-	private finalizeLoc(
+	private async finalizeLoc(
 		pano: google.maps.StreetViewResolvedPanoramaData,
 		region: GeneratorRegion,
-	): void {
+	): Promise<void> {
 		if (!this.running || this.paused || this.cancelledRegions.has(region.id)) return;
 		const s = this.settings;
 		const panoId: string = pano.location.pano;
@@ -399,6 +644,23 @@ export class GenerationEngine {
 		if (region.found.length >= region.target) return;
 
 		this.globalFoundPanoIds.add(panoId);
+
+		// A link-walked or snapped pano can sit near an existing location even when
+		// its probe coordinate didn't — final skip-existing gate before accepting.
+		if (s.skipExisting) {
+			try {
+				const covered = await cmd.storeNearAny(
+					[pano.location.latLng.lat()],
+					[pano.location.latLng.lng()],
+					s.skipExistingRadius,
+				);
+				if (covered[0]) return;
+			} catch (e) {
+				log.warn("[generator] storeNearAny failed, accepting unchecked:", e);
+			}
+			if (!this.running || this.paused || this.cancelledRegions.has(region.id)) return;
+			if (region.found.length >= region.target) return;
+		}
 
 		const loc: GeneratedLocation = {
 			panoId,

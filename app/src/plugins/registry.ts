@@ -1,4 +1,4 @@
-import type { ComponentType } from "react";
+import { useState, useCallback, type ComponentType, type SetStateAction } from "react";
 import { createSyncStore } from "@/lib/util/syncStore";
 import { runAsPlugin, disposePlugin } from "@/plugins/scope";
 
@@ -17,10 +17,19 @@ export interface Plugin {
 	comingSoon?: boolean;
 	core?: boolean;
 	settings?: PluginSettingDef[];
+	/** Keep the sidebar mounted (hidden) when the user leaves plugin mode.
+	 *  Only for plugins whose state can't be serialized (e.g. an iframe). */
+	keepAlive?: boolean;
 	activate(): void | (() => void);
 	modal?: ComponentType<{ onClose: () => void }>;
 	sidebar?: ComponentType<{ onClose: () => void }>;
 	locationPanel?: ComponentType;
+}
+
+export interface PluginSidecarRef {
+	name: string;
+	version: string;
+	sha256?: string | null;
 }
 
 export interface PluginManifest {
@@ -30,6 +39,7 @@ export interface PluginManifest {
 	icon: string;
 	main: string;
 	version: string;
+	sidecar?: PluginSidecarRef | null;
 }
 
 export type PluginBehavior = Partial<Plugin> & {
@@ -44,6 +54,19 @@ export function isPluginUpdatable(
 	latestVersion: string | undefined,
 ): boolean {
 	return !!installedVersion && !!latestVersion && installedVersion !== latestVersion;
+}
+
+// A plugin needs updating when its JS version drifts OR its sidecar drifts. A registry
+// sidecar version that differs from what's installed (including a missing sidecar, where
+// the installed version is null/undefined) means the sidecar must be (re)downloaded.
+export function needsUpdate(
+	installedVersion: string | undefined,
+	latestVersion: string | undefined,
+	installedSidecarVersion: string | null | undefined,
+	latestSidecarVersion: string | undefined,
+): boolean {
+	if (isPluginUpdatable(installedVersion, latestVersion)) return true;
+	return !!latestSidecarVersion && installedSidecarVersion !== latestSidecarVersion;
 }
 
 // --- Registry ---
@@ -161,6 +184,29 @@ export function createPluginStorage(id: string): PluginStorage {
 			return Object.keys(readPluginStore(id));
 		},
 	};
+}
+
+/** useState persisted through the plugin's namespaced store. UI state saved this
+ *  way survives sidebar unmount and app restart. Values are global, not per-map —
+ *  callers must fall back gracefully when a stored value doesn't resolve against
+ *  the current map (e.g. a field key or saved-selection id). */
+export function usePluginState<T>(pluginId: string, key: string, initial: T | (() => T)) {
+	const [value, setValue] = useState<T>(() => {
+		const data = readPluginStore(pluginId);
+		if (key in data) return data[key] as T;
+		return typeof initial === "function" ? (initial as () => T)() : initial;
+	});
+	const set = useCallback(
+		(action: SetStateAction<T>) => {
+			setValue((prev) => {
+				const next = typeof action === "function" ? (action as (p: T) => T)(prev) : action;
+				createPluginStorage(pluginId).set(key, next);
+				return next;
+			});
+		},
+		[pluginId, key],
+	);
+	return [value, set] as const;
 }
 
 // Declarative settings (Plugin.settings) are backed by the same namespaced store,

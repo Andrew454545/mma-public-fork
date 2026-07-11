@@ -1,5 +1,6 @@
 import type { GeneratorSettings } from "../engine/types";
 import { DatePicker } from "@/components/primitives/DatePicker";
+import { NSelect } from "@/components/primitives/NSelect";
 import { Section, SegmentedControl } from "@/components/primitives/Sidebar";
 
 function Check({
@@ -291,6 +292,19 @@ export function SettingsPanel({
 					min={10}
 					max={1000000}
 				/>
+				<label className="generator-settings__number">
+					Sampling
+					<SegmentedControl
+						value={settings.samplingMode}
+						onChange={(v) => set("samplingMode", v as GeneratorSettings["samplingMode"])}
+						options={[
+							{ value: "random", label: "Random" },
+							{ value: "poisson", label: "Uniform" },
+							{ value: "blueline", label: "Coverage" },
+							{ value: "kernels", label: "Grow" },
+						]}
+					/>
+				</label>
 				<NumberInput
 					label="Generators"
 					value={settings.numGenerators}
@@ -322,11 +336,7 @@ export function SettingsPanel({
 						</label>
 						<label className="generator-settings__date-label">
 							To{" "}
-							<DatePicker
-								mode="month"
-								value={settings.toDate}
-								onChange={(v) => set("toDate", v)}
-							/>
+							<DatePicker mode="month" value={settings.toDate} onChange={(v) => set("toDate", v)} />
 						</label>
 					</div>
 				)}
@@ -402,6 +412,20 @@ export function SettingsPanel({
 					</>
 				)}
 				<Check
+					label="Skip near existing map locations"
+					checked={settings.skipExisting}
+					onChange={(v) => set("skipExisting", v)}
+				/>
+				{settings.skipExisting && (
+					<NumberInput
+						label="m"
+						value={settings.skipExistingRadius}
+						onChange={(v) => set("skipExistingRadius", v)}
+						min={1}
+						indent
+					/>
+				)}
+				<Check
 					label="Check all dates"
 					checked={settings.checkAllDates}
 					onChange={(v) => set("checkAllDates", v)}
@@ -424,17 +448,19 @@ export function SettingsPanel({
 									{ value: "exclude", label: "Exclude" },
 								]}
 							/>
-							<select
-								className="nselect nselect--compact"
+							<NSelect
+								className="nselect--compact"
 								value={settings.searchMode}
-								onChange={(e) => set("searchMode", e.target.value as GeneratorSettings["searchMode"])}
+								onChange={(e) =>
+									set("searchMode", e.target.value as GeneratorSettings["searchMode"])
+								}
 							>
 								<option value="contains">Contains</option>
 								<option value="fullword">Full word</option>
 								<option value="startswith">Starts with</option>
 								<option value="endswith">Ends with</option>
 								<option value="sectionmatch">Section match</option>
-							</select>
+							</NSelect>
 						</div>
 						<input
 							className="input"

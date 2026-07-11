@@ -14,8 +14,17 @@ export const commands = {
 	appReady: () => __TAURI_INVOKE<number>("app_ready"),
 	/**  Return the platform-specific app data directory path (e.g., `%LOCALAPPDATA%/app.map-making.local`). */
 	getAppDataDir: () => typedError<string, string>(__TAURI_INVOKE("get_app_data_dir")),
+	/**  Report where map data is currently stored. */
+	getDataLocation: () => typedError<DataLocation, string>(__TAURI_INVOKE("get_data_location")),
+	/**
+	 *  Set (`Some`) or clear (`None`) the data-folder override. Takes effect after relaunch.
+	 *  Does not move existing data -- the caller warns the user.
+	 */
+	setDataLocation: (path: string | null) => typedError<null, string>(__TAURI_INVOKE("set_data_location", { path })),
 	/**  Open the app data directory in the OS file explorer. */
 	openDataFolder: () => typedError<null, string>(__TAURI_INVOKE("open_data_folder")),
+	/**  Open the current log file in the OS default handler. */
+	openLogFile: () => typedError<null, string>(__TAURI_INVOKE("open_log_file")),
 	/**  Scan the `plugins/` directory under app data and return manifests for all installed plugins. */
 	listUserPlugins: () => __TAURI_INVOKE<PluginManifest[]>("list_user_plugins"),
 	/**
@@ -25,6 +34,21 @@ export const commands = {
 	installPlugin: (id: string) => typedError<PluginManifest, string>(__TAURI_INVOKE("install_plugin", { id })),
 	/**  Remove a plugin by deleting its directory from the local plugins folder. */
 	uninstallPlugin: (id: string) => typedError<null, string>(__TAURI_INVOKE("uninstall_plugin", { id })),
+	/**
+	 *  Download a plugin's sidecar bundle from GitHub Releases and extract it under
+	 *  `{appData}/plugins/{plugin_id}/sidecar/`. Emits `sidecar-install-progress`.
+	 */
+	sidecarInstall: (pluginId: string, name: string, version: string) => typedError<null, string>(__TAURI_INVOKE("sidecar_install", { pluginId, name, version })),
+	/**  Installed sidecar version for a plugin (from `sidecar/version.txt`), or `None`. */
+	sidecarInstalledVersion: (pluginId: string) => typedError<string | null, string>(__TAURI_INVOKE("sidecar_installed_version", { pluginId })),
+	/**
+	 *  Spawn a plugin's installed sidecar binary. Streams stdout/stderr lines as
+	 *  `sidecar-stdout` / `sidecar-stderr` events and the exit as `sidecar-exit`,
+	 *  keyed by the returned run id. Runs in the sidecar dir so co-located dlls resolve.
+	 */
+	sidecarSpawn: (pluginId: string, name: string, args: string[]) => typedError<number, string>(__TAURI_INVOKE("sidecar_spawn", { pluginId, name, args })),
+	/**  Kill a running sidecar process by run id (no-op if already exited). */
+	sidecarKill: (runId: number) => typedError<null, string>(__TAURI_INVOKE("sidecar_kill", { runId })),
 	checkBorderFile: (level: string) => typedError<boolean, string>(__TAURI_INVOKE("check_border_file", { level })),
 	downloadBorderFile: (level: string) => typedError<null, string>(__TAURI_INVOKE("download_border_file", { level })),
 	borderLookup: (lat: number, lng: number, level: string) => typedError<PolygonGeometry | null, string>(__TAURI_INVOKE("border_lookup", { lat, lng, level })).then((v) => ((v.status === "ok" ? { ...v, data: v.data==null?v.data:({...v.data,coordinates:v.data.coordinates.map(i=>i.map(i=>i.map(i=>i))),extraPolygons:v.data.extraPolygons==null?v.data.extraPolygons:v.data.extraPolygons.map(i=>i.map(i=>i.map(i=>i.map(i=>i))))}) } : v) as typeof v)),
@@ -44,8 +68,12 @@ export const commands = {
 	 */
 	storeCloseMap: () => typedError<null, string>(__TAURI_INVOKE("store_close_map")),
 	/**
-	 *  Delta-only autosave: writes only dirty geohash chunks to disk (~17ms).
-	 *  Does NOT bake the overlay — `store_commit` does a full merge.
+	 *  Autosave: serialize the overlay (uncommitted changes) to the delta sidecar, plus
+	 *  dirty tags and the location count. Skips entirely when nothing changed since the
+	 *  last save. Does NOT bake the overlay — `store_commit` does the full merge.
+	 *  `overlay.dirty` is cleared only after the write lands, and only if the overlay
+	 *  wasn't mutated while the write was in flight (rev guard), so a failed or raced
+	 *  save keeps the data flagged for the next attempt.
 	 */
 	storeSaveDirty: () => typedError<SaveResult, string>(__TAURI_INVOKE("store_save_dirty")),
 	/**
@@ -116,6 +144,11 @@ export const commands = {
 	 *  JS patches the cell buffer synchronously to hide/show the active marker.
 	 */
 	storeSetActive: (id: number | null) => typedError<null, string>(__TAURI_INVOKE("store_set_active", { id })),
+	/**
+	 *  Set the default marker color used by the render delta path. Fire-and-forget from JS;
+	 *  the JS side recolors its cell buffers in place (no full rebuild).
+	 */
+	storeSetMarkerColor: (color: [number, number, number]) => typedError<null, string>(__TAURI_INVOKE("store_set_marker_color", { color })),
 	/**  Fetch a single location by ID. Returns `None` if the ID is dead or doesn't exist. */
 	storeGetLocation: (id: number) => typedError<Location | null, string>(__TAURI_INVOKE("store_get_location", { id })).then((v) => ((v.status === "ok" ? { ...v, data: v.data==null?v.data:v.data } : v) as typeof v)),
 	/**  Fetch multiple locations by ID. Silently skips IDs that don't exist. */
@@ -142,11 +175,17 @@ export const commands = {
 	/**
 	 *  Find all locations within `radius_m` metres of (`lat`, `lng`).
 	 * 
-	 *  O(n) linear scan with a cheap bounding-box pre-filter (degree margin)
-	 *  that rejects 99.9%+ of points before haversine is called.
-	 *  At 1M locations this is sub-millisecond on a modern CPU.
+	 *  Backed by the store's lazy spatial index: O(cells in radius) per query after a
+	 *  one-time O(N) build, maintained incrementally across mutations. Called on every
+	 *  marker click (duplicate check), so it must not scan.
 	 */
 	storeFindNearby: (lat: number, lng: number, radiusM: number) => typedError<Location[], string>(__TAURI_INVOKE("store_find_nearby", { lat, lng, radiusM })).then((v) => ((v.status === "ok" ? { ...v, data: v.data.map(i=>i) } : v) as typeof v)),
+	/**
+	 *  For each input point, whether any existing location lies within `radius_m` metres.
+	 *  Bulk form so callers probing many coordinates (e.g. the map generator skipping
+	 *  already-covered spots) pay one IPC round-trip, not one per point.
+	 */
+	storeNearAny: (lats: number[], lngs: number[], radiusM: number) => typedError<boolean[], string>(__TAURI_INVOKE("store_near_any", { lats: lats.map(i=>i), lngs: lngs.map(i=>i), radiusM })),
 	/**
 	 *  Collect all distinct values for an `extra` field across all alive locations. O(N).
 	 *  Used by the filter UI to populate dropdown options.
@@ -181,17 +220,25 @@ export const commands = {
 	/**  Clear both undo and redo stacks. Called after a commit to start fresh. */
 	storeResetUndo: () => typedError<null, string>(__TAURI_INVOKE("store_reset_undo")),
 	/**
-	 *  Compute the net diff since last commit by walking the undo stack.
-	 *  Returns (added, removed, modified) counts for the commit dialog.
+	 *  Net diff since last commit for the commit dialog, derived from the overlay --
+	 *  the same changeset `store_commit` will record. The undo stack is NOT consulted:
+	 *  it is capped, and non-undoable edits (enrichment, field renames, plugin batches)
+	 *  bypass it entirely while still being part of the commit.
 	 */
 	storeCommitDiff: () => typedError<[number, number, number], string>(__TAURI_INVOKE("store_commit_diff")),
 	/**
 	 *  Replace all selections, resolve bitmasks against current data, and write a binary
 	 *  patch file for JS to apply to the render overlay. Returns per-selection counts.
 	 */
-	storeSyncSelections: (sels: SelectionInput[]) => typedError<SyncSelectionsResult, string>(__TAURI_INVOKE("store_sync_selections", { sels })),
+	storeSyncSelections: (sels: SelectionInput[]) => typedError<SelectionSync, string>(__TAURI_INVOKE("store_sync_selections", { sels })),
 	/**  Return the union of all currently selected location IDs. */
 	storeGetSelectedIdsList: () => typedError<number[], string>(__TAURI_INVOKE("store_get_selected_ids_list")),
+	/**
+	 *  Pick an evenly spaced subset of the current selection. Exactly one of `target_count`
+	 *  (thin to N, maximizing spacing) or `min_distance_m` (keep as many as fit at that spacing)
+	 *  must be provided.
+	 */
+	storePickSpaced: (targetCount: number | null, minDistanceM: number | null) => typedError<SpacedPickResult, string>(__TAURI_INVOKE("store_pick_spaced", { targetCount, minDistanceM })),
 	/**
 	 *  Resolve a single selection to its matching location IDs without persisting it.
 	 *  Used by plugins and one-off queries (e.g., tag merge, export filtered).
@@ -371,6 +418,17 @@ export const commands = {
 	storeCheckoutCommit: (mapId: string, commitId: string) => typedError<null, string>(__TAURI_INVOKE("store_checkout_commit", { mapId, commitId })),
 	/**  Read a single commit's delta (created/removed locations) for the diff viewer. */
 	storeGetCommitDelta: (mapId: string, commitId: string) => typedError<CommitDelta, string>(__TAURI_INVOKE("store_get_commit_delta", { mapId, commitId })).then((v) => ((v.status === "ok" ? { ...v, data: ({...v.data,created:v.data.created.map(i=>i),removed:v.data.removed.map(i=>i)}) } : v) as typeof v)),
+	/**
+	 *  Generate locations from a Vali map definition (JSON/JSONC text). Missing country
+	 *  data is auto-downloaded like the Vali CLI. Returns the generated locations.
+	 */
+	valiGenerate: (definition: string) => typedError<ValiLocation[], string>(__TAURI_INVOKE("vali_generate", { definition })).then((v) => ((v.status === "ok" ? { ...v, data: v.data.map(i=>({...i,zoom:i.zoom==null?i.zoom:i.zoom,pitch:i.pitch==null?i.pitch:i.pitch})) } : v) as typeof v)),
+	/**  Download Vali coverage data. `country` = code/continent alias/None for all. */
+	valiDownload: (country: string | null, full: boolean, updates: boolean) => typedError<null, string>(__TAURI_INVOKE("vali_download", { country, full, updates })),
+	/**  Cancel an in-flight vali generate or download. */
+	valiCancel: () => __TAURI_INVOKE<void>("vali_cancel"),
+	/**  Subdivision weights for a country (JSON text, same shape as `vali subdivisions`). */
+	valiSubdivisions: (country: string) => typedError<string, string>(__TAURI_INVOKE("vali_subdivisions", { country })),
 };
 
 /* Types */
@@ -435,6 +493,16 @@ export type CopyToMapResult = {
 	copied: number,
 	skipped: number,
 	targetName: string,
+};
+
+/**  The active and default data-folder paths, plus whether a custom override is in effect. */
+export type DataLocation = {
+	/**  Folder currently in use this session (default or override). */
+	path: string,
+	/**  OS default, ignoring any override -- used for the "reset" affordance. */
+	default_path: string,
+	/**  True when `path` differs from the OS default. */
+	is_custom: boolean,
 };
 
 /**  A calendar component to group dates by. */
@@ -760,6 +828,11 @@ export type MapSettings = {
 	keyBindings?: MapKeyBinding[],
 	/**  Virtual tag-tree nodes keyed by full slash path. Tree-view only. */
 	virtualTags?: { [key in string]: VirtualTag },
+	/**
+	 *  Tag aliases: a second tree location (full slash path) -> the real tag id shown
+	 *  there. Tree-view only; clicking the alias leaf toggles the real tag.
+	 */
+	aliases?: { [key in string]: number },
 };
 
 /**
@@ -791,6 +864,19 @@ export type PartitionBucket = {
 };
 
 /**  Metadata for a user-installed plugin, read from `plugins/{id}/manifest.json`. */
+
+/**  Metadata for a user-installed plugin, read from `plugins/{id}/manifest.json`. */
+export type PluginManifest_Deserialize = {
+	id: string,
+	name: string,
+	description: string,
+	icon: string,
+	main: string,
+	version: string,
+	sidecar: PluginSidecar_Deserialize | null,
+};
+
+/**  Metadata for a user-installed plugin, read from `plugins/{id}/manifest.json`. */
 export type PluginManifest = {
 	id: string,
 	name: string,
@@ -798,6 +884,25 @@ export type PluginManifest = {
 	icon: string,
 	main: string,
 	version: string,
+	sidecar?: PluginSidecar | null,
+};
+
+/**  A plugin's declared sidecar binary (downloaded from GitHub Releases on install). */
+
+/**  A plugin's declared sidecar binary (downloaded from GitHub Releases on install). */
+export type PluginSidecar_Deserialize = {
+	name: string,
+	version: string,
+	/**  Expected SHA-256 hex digest of the platform-specific zip archive. */
+	sha256: string | null,
+};
+
+/**  A plugin's declared sidecar binary (downloaded from GitHub Releases on install). */
+export type PluginSidecar = {
+	name: string,
+	version: string,
+	/**  Expected SHA-256 hex digest of the platform-specific zip archive. */
+	sha256?: string | null,
 };
 
 /**
@@ -857,6 +962,7 @@ export type RenderRequest = {
 	north?: number,
 	selectedIds?: number[] | null,
 	markerStyle?: string,
+	markerColor?: [number, number, number] | null,
 };
 
 /**
@@ -902,9 +1008,9 @@ export type ReviewUpdate = {
 	status: string | null,
 };
 
-/**  Result of `store_save_dirty`: how many bytes were written to the delta file. */
+/**  Result of `store_save_dirty`: bytes written to the delta sidecar (0 = skipped). */
 export type SaveResult = {
-	savedChunks: number,
+	savedBytes: number,
 };
 
 /**
@@ -982,12 +1088,12 @@ export type Selection = {
 	key: string,
 	color: [number, number, number],
 	props: SelectionProps,
-	/**  JS-only: cached resolved count for sidebar display. Rust never sets this. */
-	count?: number | null,
 };
 
 /**  Input for `store_sync_selections`: selection criteria + display color. */
 export type SelectionInput = {
+	/**  Deterministic selection key (e.g. `"tag:5"`), used to return per-node counts back keyed. */
+	key: string,
 	props: SelectionProps,
 	color: [number, number, number],
 	/**  Counted, but kept out of the overlay and the selected set. */
@@ -1008,9 +1114,15 @@ export type SelectionProps = { type: "Locations"; locations: number[]; name: str
  *  mutations). `None` when nothing changed. `counts` gives per-selection match counts.
  */
 export type SelectionSync = {
-	counts: number[],
+	/**  Resolved count per selection node, keyed by `Selection.key` (top-level and nested). */
+	counts: { [key in string]: number },
 	bitmask: number[] | null,
 	selectedCount: number,
+};
+
+export type SpacedPickResult = {
+	ids: number[],
+	distanceM: number,
 };
 
 /**
@@ -1025,7 +1137,11 @@ export type StoreStatus = {
 	locationCount: number,
 	canUndo: boolean,
 	canRedo: boolean,
-	tagCounts: { [key in number]: number },
+	/**
+	 *  `None` when the mutation did not change any tag count (`finish_mutation`
+	 *  strips it), so JS keeps its reference and consumers skip re-rendering.
+	 */
+	tagCounts: { [key in number]: number } | null,
 	knownFieldKeys: string[],
 };
 
@@ -1034,13 +1150,6 @@ export type SummaryResult = {
 	locationCount: number,
 	version: number,
 	dirtyCount: number,
-};
-
-/**  Result of `store_sync_selections`: per-selection counts and the inline bitmask bytes. */
-export type SyncSelectionsResult = {
-	counts: number[],
-	bitmask: number[] | null,
-	selectedCount: number,
 };
 
 /**
@@ -1085,6 +1194,27 @@ export type TagPatch = {
 export type Update<P> = {
 	id: number,
 	patch: P,
+};
+
+
+export type ValiLocation_Deserialize = {
+	lat: number,
+	lng: number,
+	heading: number,
+	zoom: number | null,
+	pitch: number | null,
+	panoId: string | null,
+	tags: string[],
+};
+
+export type ValiLocation = {
+	lat: number,
+	lng: number,
+	heading: number,
+	zoom?: number | null,
+	pitch?: number | null,
+	panoId?: string | null,
+	tags: string[],
 };
 
 /**

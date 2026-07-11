@@ -1,3 +1,50 @@
+## v0.7.3 - 2026-07-05
+- Bulk operations now show throughput (items/sec) and elapsed time
+- Copyright plugin is more accurate
+- Plugin sidecar downloads are now verified against release checksums
+- Fixed deleted metadata fields reappearing after saving
+- Fixed unofficial panoramas failing to load
+- Fixed metadata field labels showing incorrect capitalization
+- Fixed plugin sidecar processes not always shutting down on exit
+
+## v0.7.2 — 2026-07-03
+- Fixed sidecar plugins opening a console window on Windows
+
+## v0.7.1 — 2026-07-03
+- Poisson disk, blue line coverage, and BFS kernel sampling modes for the map generator
+- Vali generate and download can now be cancelled mid-operation
+- Welcome dialog on first launch with links to the manual and Discord
+- Discord and manual shortcut buttons on the map list screen
+- App is now referred to as "Map Making App" in the UI
+- Fixed plugin type declarations exporting mangled names
+- Fixed map list scrollbar visible behind the manual
+
+## v0.7.0 — 2026-07-03
+- **Vali generation is now 5x faster, runs directly in the sidebar, and requires no additional installation**
+- **New Vision plugin: search your locations by describing what they look like, or find ones that look alike**
+- **New Copyright Year plugin: read the copyright year Google stamps on Street View imagery**
+- Plugins with companion tools now download and update them straight from the plugin manager
+- More built-in map style presets
+- Setting to choose a default color for markers
+- Map generator option to skip locations you already have
+- iNaturalist plugin can auto-sort observations by taxonomy
+- Setting to reopen your previously open maps on next launch
+- Tag aliases in the tag tree
+- Searchable aliases for command palette commands
+- Support for typing directly into date pickers
+- Unknown field names now display with sentence-case labels
+- Faster nearby and radius location lookups
+- Inverting a nested selection now works at any depth in the selection tree
+- Fixed plugin manager UI flash for "Additional" tab
+- Fixed the map not zooming out fully on wide windows
+- Fixed the map generator's coverage search being offset
+
+## v0.6.8 — 2026-06-29
+- Choose where your map data is stored on disk
+- Tag names are shortened to their shortest unique path in tree view
+- Fixed country and subdivision selection failing when its border data wasn't downloaded yet
+- Fixed a rendering glitch when opening dropdowns in Settings
+
 ## v0.6.7 — 2026-06-28
 - Vastly improved support for tag folders
 - Renaming a tag folder now cascades to all the tags within it

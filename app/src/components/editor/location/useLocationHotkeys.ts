@@ -1,7 +1,14 @@
-import { useEffect, type RefObject } from "react";
-import type { Location, MapData } from "@/bindings.gen";
+import {
+	useEffect,
+	useEffectEvent,
+	type Dispatch,
+	type RefObject,
+	type SetStateAction,
+} from "react";
+import type { Location } from "@/bindings.gen";
 import {
 	getActiveLocation,
+	getCurrentMap,
 	getVisibleTags,
 	getTagCounts,
 	duplicateLocation,
@@ -32,14 +39,13 @@ import { google } from "@/lib/sv/opensv";
 
 interface LocationHotkeyDeps {
 	location: Location | null;
-	map: MapData | null;
 	isReviewMode: boolean;
 	panoDates: PanoReference[];
 	selectedPanoId: string | null;
 	currentPano: Pick<google.maps.StreetViewPanoramaData, "location" | "imageDate"> | null;
 	cancelTweenRef: RefObject<(() => void) | null>;
-	pendingTagsRef: RefObject<string[]>;
-	setPendingTags: (tags: string[]) => void;
+	pendingTags: string[];
+	setPendingTags: Dispatch<SetStateAction<string[]>>;
 	fullscreenContainerRef: RefObject<HTMLDivElement | null>;
 	panoContainerRef: RefObject<HTMLDivElement | null>;
 	handleSave: () => void;
@@ -52,12 +58,22 @@ interface LocationHotkeyDeps {
 
 export function useLocationHotkeys(deps: LocationHotkeyDeps) {
 	const {
-		location, map, isReviewMode,
-		panoDates, selectedPanoId, currentPano,
-		cancelTweenRef, pendingTagsRef, setPendingTags,
-		fullscreenContainerRef, panoContainerRef,
-		handleSave, handleClose, handleDelete,
-		handleReturnToSpawn, handleFullscreen, handleDateChange,
+		location,
+		isReviewMode,
+		panoDates,
+		selectedPanoId,
+		currentPano,
+		cancelTweenRef,
+		pendingTags,
+		setPendingTags,
+		fullscreenContainerRef,
+		panoContainerRef,
+		handleSave,
+		handleClose,
+		handleDelete,
+		handleReturnToSpawn,
+		handleFullscreen,
+		handleDateChange,
 	} = deps;
 
 	useHotkey(useBinding("locationSave"), () => {
@@ -114,18 +130,16 @@ export function useLocationHotkeys(deps: LocationHotkeyDeps) {
 	});
 	useHotkey(useBinding("zoomIn"), () => {
 		if (singletonPano) {
-			singletonPano.setZoom(Math.min(PANO_ZOOM.max, singletonPano.getZoom() + 1));
+			singletonPano.setZoom(Math.min(PANO_ZOOM.max, Math.max(0, singletonPano.getZoom()) + 1));
 		}
 	});
 	useHotkey(useBinding("zoomOut"), () => {
 		if (singletonPano) {
-			singletonPano.setZoom(Math.max(PANO_ZOOM.min, singletonPano.getZoom() - 1));
+			singletonPano.setZoom(Math.max(0, singletonPano.getZoom() - 1));
 		}
 	});
 	useHotkey(useBinding("panoZoomReset"), () => {
-		if (singletonPano) {
-			singletonPano.setZoom(0);
-		}
+		if (singletonPano) singletonPano.setZoom(PANO_ZOOM.min);
 	});
 	useHotkey(
 		useBinding("copyLink"),
@@ -133,7 +147,12 @@ export function useLocationHotkeys(deps: LocationHotkeyDeps) {
 			if (!location) return;
 			const btn = document.querySelector<HTMLButtonElement>('button[aria-label^="Copy link"]');
 			btn?.dispatchEvent(
-				new MouseEvent("click", { bubbles: true, cancelable: true, shiftKey: e.shiftKey, altKey: e.altKey }),
+				new MouseEvent("click", {
+					bubbles: true,
+					cancelable: true,
+					shiftKey: e.shiftKey,
+					altKey: e.altKey,
+				}),
 			);
 		},
 		{ ignoreAlt: true, ignoreShift: true },
@@ -210,28 +229,28 @@ export function useLocationHotkeys(deps: LocationHotkeyDeps) {
 	});
 
 	const quicktagSlot = (idx: number) => {
-		if (!location || !map) return;
+		if (!location || !getCurrentMap()) return;
 		const tags = sortTagsByMode(getVisibleTags(), getSettings().tagSortMode, getTagCounts());
 		if (idx >= tags.length) return;
 		const tag = tags[idx];
-		const cur = pendingTagsRef.current;
-		const has = cur.includes(tag.name);
-		setPendingTags(has ? cur.filter((t) => t !== tag.name) : [...cur, tag.name]);
+		const has = pendingTags.includes(tag.name);
+		setPendingTags(has ? pendingTags.filter((t) => t !== tag.name) : [...pendingTags, tag.name]);
 	};
+
+	const onApplyTag = useEffectEvent(({ tagId }: { tagId: number }) => {
+		const active = getActiveLocation();
+		if (!active || isVirtualLocation(active)) return false;
+		const tag = getVisibleTags().find((t) => t.id === tagId);
+		if (!tag) return false;
+		setPendingTags((cur) =>
+			cur.includes(tag.name) ? cur.filter((t) => t !== tag.name) : [...cur, tag.name],
+		);
+	});
 
 	const hasLocation = location != null;
 	useEffect(() => {
 		if (!hasLocation) return;
-		const unregisterApply = registerMapKeyActionHandler("applyTag", ({ tagId }) => {
-			const active = getActiveLocation();
-			if (!active || isVirtualLocation(active)) return false;
-			const tag = getVisibleTags().find((t) => t.id === tagId);
-			if (!tag) return false;
-			const cur = pendingTagsRef.current;
-			setPendingTags(
-				cur.includes(tag.name) ? cur.filter((t) => t !== tag.name) : [...cur, tag.name],
-			);
-		});
+		const unregisterApply = registerMapKeyActionHandler("applyTag", (action) => onApplyTag(action));
 		const unregisterCopy = registerMapKeyActionHandler("copyToMap", ({ mapId }) => {
 			const loc = getActiveLocation();
 			if (!loc || isVirtualLocation(loc)) return false;
@@ -244,9 +263,7 @@ export function useLocationHotkeys(deps: LocationHotkeyDeps) {
 					if (!container) return;
 					showToast(
 						container,
-						res.copied > 0
-							? `Copied to "${res.targetName}"`
-							: `Already in "${res.targetName}"`,
+						res.copied > 0 ? `Copied to "${res.targetName}"` : `Already in "${res.targetName}"`,
 					);
 				})
 				.catch((e) => {
@@ -258,7 +275,7 @@ export function useLocationHotkeys(deps: LocationHotkeyDeps) {
 			unregisterApply();
 			unregisterCopy();
 		};
-	}, [hasLocation]);
+	}, [hasLocation, fullscreenContainerRef, panoContainerRef]);
 
 	useHotkey(useBinding("quicktag1"), () => quicktagSlot(0));
 	useHotkey(useBinding("quicktag2"), () => quicktagSlot(1));

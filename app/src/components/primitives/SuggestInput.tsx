@@ -1,4 +1,12 @@
-import { useState, useEffect, useRef, type ReactNode, type CSSProperties } from "react";
+import {
+	useState,
+	useEffect,
+	useLayoutEffect,
+	useRef,
+	type ReactNode,
+	type CSSProperties,
+} from "react";
+import { createPortal } from "react-dom";
 
 /** Autocomplete input: owns open/close state, outside-click dismissal,
  *  Enter-picks-first, and Escape-closes. Suggestion sourcing stays at the call
@@ -21,6 +29,7 @@ export function SuggestInput<T>({
 	autoFocus,
 	disabled,
 	pickOnEnter = true,
+	portal = false,
 }: {
 	value: string;
 	onChange: (v: string) => void;
@@ -38,11 +47,28 @@ export function SuggestInput<T>({
 	disabled?: boolean;
 	/** When false, Enter closes the dropdown and falls through (e.g. to a form submit). */
 	pickOnEnter?: boolean;
+	/** Render the dropdown in a body portal (fixed, anchored to the input) so it floats
+	 *  over clipping ancestors like `.modal__content`. Clicks on it are exempted from
+	 *  dialog outside-dismissal via the `suggest-portal` class (see DialogContent). */
+	portal?: boolean;
 }) {
 	const [open, setOpen] = useState(false);
 	const [highlight, setHighlight] = useState(0);
+	const [anchor, setAnchor] = useState<DOMRect | null>(null);
 	const containerRef = useRef<HTMLDivElement>(null);
 	const listRef = useRef<HTMLOListElement>(null);
+
+	useLayoutEffect(() => {
+		if (!portal || !open) return;
+		const update = () => setAnchor(containerRef.current?.getBoundingClientRect() ?? null);
+		update();
+		window.addEventListener("resize", update);
+		window.addEventListener("scroll", update, true);
+		return () => {
+			window.removeEventListener("resize", update);
+			window.removeEventListener("scroll", update, true);
+		};
+	}, [portal, open]);
 
 	useEffect(() => {
 		setHighlight(0);
@@ -56,7 +82,12 @@ export function SuggestInput<T>({
 	useEffect(() => {
 		if (!open) return;
 		const handler = (e: MouseEvent) => {
-			if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+			const t = e.target as Node;
+			if (
+				containerRef.current &&
+				!containerRef.current.contains(t) &&
+				!listRef.current?.contains(t)
+			) {
 				setOpen(false);
 			}
 		};
@@ -68,6 +99,40 @@ export function SuggestInput<T>({
 		onPick(item);
 		setOpen(false);
 	};
+
+	const list = (
+		<ol
+			ref={listRef}
+			className={portal ? `${listClassName} suggest-portal` : listClassName}
+			hidden={!open || suggestions.length === 0}
+			style={
+				portal
+					? {
+							position: "fixed",
+							top: anchor?.bottom ?? 0,
+							left: anchor?.left ?? 0,
+							width: anchor?.width,
+							zIndex: 100,
+							pointerEvents: "auto",
+							...listStyle,
+						}
+					: listStyle
+			}
+		>
+			{suggestions.map((item, i) => (
+				<li key={getKey(item)} aria-selected={i === highlight}>
+					<button
+						type="button"
+						className={itemClassName}
+						onMouseMove={() => setHighlight(i)}
+						onClick={() => pick(item)}
+					>
+						{renderItem(item)}
+					</button>
+				</li>
+			))}
+		</ol>
+	);
 
 	return (
 		<div
@@ -111,20 +176,7 @@ export function SuggestInput<T>({
 					}
 				}}
 			/>
-			<ol ref={listRef} className={listClassName} hidden={!open || suggestions.length === 0} style={listStyle}>
-				{suggestions.map((item, i) => (
-					<li key={getKey(item)} aria-selected={i === highlight}>
-						<button
-							type="button"
-							className={itemClassName}
-							onMouseMove={() => setHighlight(i)}
-							onClick={() => pick(item)}
-						>
-							{renderItem(item)}
-						</button>
-					</li>
-				))}
-			</ol>
+			{portal ? createPortal(list, document.body) : list}
 		</div>
 	);
 }

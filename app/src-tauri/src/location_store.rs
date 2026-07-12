@@ -583,9 +583,9 @@ impl Store {
         }
         let selection_sync = if has_selections {
             if full_resolve {
-                Some(self.rebuild_selection_bitmask())
+                Some(self.build_selection_bitmask(None))
             } else {
-                Some(self.build_selection_bitmask_for_cells(&bitmask_cells))
+                Some(self.build_selection_bitmask(Some(&bitmask_cells)))
             }
         } else {
             None
@@ -834,61 +834,6 @@ impl Store {
         MembershipDelta { gained, lost }
     }
 
-    /// Build the bitmask file for only the specified cell indices.
-    fn build_selection_bitmask_for_cells(&self, affected: &HashSet<u8>) -> SelectionSync {
-        let counts = self.selections.node_counts.clone();
-        let selected_count = self.selections.ids.len() as usize;
-
-        if affected.is_empty() {
-            return SelectionSync {
-                counts,
-                bitmask: None,
-                selected_count,
-            };
-        }
-
-        let num_sels = self.selections.all.len();
-        // Route selections to per-cell indices (parallel over selections, O(selected)),
-        // then serialize affected cells in parallel; segments are self-describing so
-        // order is irrelevant.
-        let routed: Vec<[Vec<u32>; 32]> = self
-            .selections
-            .loc_sets
-            .par_iter()
-            .map(|set| selection_cell_indices(&self.render, set, Some(affected)))
-            .collect();
-        let segments: Vec<Vec<u8>> = self
-            .render
-            .cells
-            .par_iter()
-            .enumerate()
-            .filter_map(|(ci, opt)| {
-                if !affected.contains(&(ci as u8)) {
-                    return None;
-                }
-                let cr = opt.as_ref()?;
-                Some(serialize_cell_segment(ci, cr, &routed))
-            })
-            .collect();
-
-        let buf =
-            assemble_selection_bitmask(self.selections.all.iter().map(|s| &s.color), &segments);
-
-        log::debug!(
-            "[sel-incr] sels={} selected={} affected={} buf={}",
-            num_sels,
-            selected_count,
-            affected.len(),
-            buf.len()
-        );
-
-        SelectionSync {
-            counts,
-            bitmask: Some(buf),
-            selected_count,
-        }
-    }
-
     /// Full selection membership resolve: recomputes selection_loc_sets, selected_ids,
     /// selected_colors from scratch. O(S * N). Does NOT build the bitmask file.
     fn resolve_selection_membership(&mut self) {
@@ -908,19 +853,31 @@ impl Store {
         self.selections.version += 1;
     }
 
-    /// Build the bitmask file from current render_cells + selection_loc_sets (all cells).
-    fn rebuild_selection_bitmask(&self) -> SelectionSync {
-        let t0 = std::time::Instant::now();
+    /// Build the selection bitmask file from current render_cells + selection_loc_sets.
+    /// `affected = None` rebuilds all cells (full resolve path); `Some` restricts the
+    /// rebuild to those cell indices (incremental delta path).
+    fn build_selection_bitmask(&self, affected: Option<&HashSet<u8>>) -> SelectionSync {
         let counts = self.selections.node_counts.clone();
         let selected_count = self.selections.ids.len() as usize;
 
+        if affected.is_some_and(|a| a.is_empty()) {
+            return SelectionSync {
+                counts,
+                bitmask: None,
+                selected_count,
+            };
+        }
+
+        let t0 = std::time::Instant::now();
         let num_sels = self.selections.all.len();
-        // Route selections to per-cell indices, then serialize all populated cells in parallel.
+        // Route selections to per-cell indices (parallel over selections, O(selected)),
+        // then serialize affected cells in parallel; segments are self-describing so
+        // order is irrelevant.
         let routed: Vec<[Vec<u32>; 32]> = self
             .selections
             .loc_sets
             .par_iter()
-            .map(|set| selection_cell_indices(&self.render, set, None))
+            .map(|set| selection_cell_indices(&self.render, set, affected))
             .collect();
         let segments: Vec<Vec<u8>> = self
             .render
@@ -928,6 +885,11 @@ impl Store {
             .par_iter()
             .enumerate()
             .filter_map(|(ci, opt)| {
+                if let Some(a) = affected {
+                    if !a.contains(&(ci as u8)) {
+                        return None;
+                    }
+                }
                 let cr = opt.as_ref()?;
                 Some(serialize_cell_segment(ci, cr, &routed))
             })
@@ -936,15 +898,15 @@ impl Store {
 
         let buf =
             assemble_selection_bitmask(self.selections.all.iter().map(|s| &s.color), &segments);
-
         let bitmask = if num_cells > 0 { Some(buf) } else { None };
 
         log::debug!(
-            "[sel-rebuild] total={}ms sels={} selected={} cells={}",
+            "[sel] total={}ms sels={} selected={} cells={} incremental={}",
             t0.elapsed().as_millis(),
             num_sels,
             selected_count,
-            num_cells
+            num_cells,
+            affected.is_some()
         );
 
         SelectionSync {
@@ -1043,12 +1005,8 @@ impl Store {
     fn commit_tag_update(&mut self, updated: Vec<(Location, Location)>) -> ChangeSet {
         let old_locs: Vec<Location> = updated.iter().map(|(o, _)| o.clone()).collect();
         self.remove_tag_counts(&old_locs);
-        for (_, new_loc) in &updated {
-            let patch = LocationPatch {
-                tags: Some(new_loc.tags.clone()),
-                ..Default::default()
-            };
-            self.overlay_update(new_loc.id, &patch);
+        for (old, new_loc) in &updated {
+            self.overlay_write(new_loc.id, new_loc.clone(), (old.lat, old.lng));
         }
         let new_locs: Vec<Location> = updated.iter().map(|(_, n)| n.clone()).collect();
         self.add_tag_counts(&new_locs);
@@ -1550,12 +1508,6 @@ impl Store {
         if let Some(v) = patch.lng {
             loc.lng = v;
         }
-        if (loc.lat, loc.lng) != old_coords {
-            if let Some(ix) = self.spatial.as_mut() {
-                ix.remove(id, old_coords.0, old_coords.1);
-                ix.insert(id, loc.lat, loc.lng);
-            }
-        }
         if let Some(v) = patch.heading {
             loc.heading = v;
         }
@@ -1582,6 +1534,20 @@ impl Store {
         }
         if let Some(v) = patch.modified_at {
             loc.modified_at = v;
+        }
+        self.overlay_write(id, loc, old_coords);
+    }
+
+    /// Write an already-computed Location into the overlay (adds/patches), given the id
+    /// and its pre-mutation coords for spatial-index maintenance. Shared by `overlay_update`
+    /// (which fetches+mutates a patch itself) and callers that already hold the fully-built
+    /// new Location (e.g. `commit_tag_update`), so the latter skip a redundant re-fetch.
+    fn overlay_write(&mut self, id: u32, mut loc: Location, old_coords: (f64, f64)) {
+        if (loc.lat, loc.lng) != old_coords {
+            if let Some(ix) = self.spatial.as_mut() {
+                ix.remove(id, old_coords.0, old_coords.1);
+                ix.insert(id, loc.lat, loc.lng);
+            }
         }
         if let Ok(pos) = self.overlay.adds.binary_search_by_key(&id, |l| l.id) {
             // Stamp only on a real change (parity with the base-row branch below): a

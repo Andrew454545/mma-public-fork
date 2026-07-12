@@ -16,6 +16,7 @@ import { mdiChevronDown, mdiChevronRight, mdiPencil, mdiFolder } from "@mdi/js";
 import { textColorFor } from "@/lib/util/color";
 import { fmt } from "@/lib/util/format";
 import { toggleTagSelections, reorderTags } from "@/store/useMapStore";
+import { useSetting } from "@/store/settings";
 import { TagContextMenuContent } from "./TagManager";
 import {
 	rangeToggleTagIds,
@@ -602,11 +603,12 @@ function useSwapAnimation(
 	display: TagTreeNode[],
 	dragPath: string | null,
 ) {
+	const animate = useSetting("animateTagReorder");
 	const prevRects = useRef(new Map<string, DOMRect>());
 	useLayoutEffect(() => {
 		const ul = ulRef.current;
 		const rects = new Map<string, DOMRect>();
-		if (ul) {
+		if (ul && animate) {
 			display.forEach((node, i) => {
 				const el = ul.children[i] as HTMLElement | undefined;
 				if (!el) return;

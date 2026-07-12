@@ -454,6 +454,31 @@ fn relay(resp: reqwest::blocking::Response, default_ct: &str) -> tauri::http::Re
     }
 }
 
+/// mma-buf POST: write an uploaded file into its session dir. The target must
+/// sit directly inside a valid `mma_upload_*` session dir (see
+/// [`export::upload_session_dir`]) -- anything else is rejected.
+pub(crate) fn write_upload(path: &str, body: &[u8]) -> tauri::http::Response<Vec<u8>> {
+    let target = std::path::Path::new(path);
+    let session_ok = target
+        .parent()
+        .and_then(|p| p.to_str())
+        .is_some_and(|p| crate::export::upload_session_dir(p).is_ok());
+    let resp = tauri::http::Response::builder().header("Access-Control-Allow-Origin", "*");
+    if !session_ok {
+        return resp
+            .status(403)
+            .body(b"upload outside session dir".to_vec())
+            .unwrap();
+    }
+    match std::fs::write(target, body) {
+        Ok(()) => resp.status(200).body(vec![]).unwrap(),
+        Err(e) => resp
+            .status(500)
+            .body(format!("upload write failed: {e}").into_bytes())
+            .unwrap(),
+    }
+}
+
 /// svtile: StreetView photosphere tiles via lh3.ggpht.com.
 pub(crate) fn fetch_svtile(url: &str) -> tauri::http::Response<Vec<u8>> {
     match proxy_client().get(url).send() {
@@ -638,6 +663,9 @@ pub fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             export::store_export_geojson,
             export::store_save_export_file,
             export::store_export_bulk_zip,
+            export::store_upload_begin,
+            export::store_upload_finish,
+            export::store_upload_abort,
             // --- Version control ---
             map_meta::store_db_clear_table,
             map_meta::store_db_stats,
@@ -676,6 +704,21 @@ pub fn run() {
             let raw = percent_encoding::percent_decode_str(req.uri().path())
                 .decode_utf8_lossy()
                 .into_owned();
+            // Uploads POST binary bodies (image/jpeg), which makes the browser
+            // preflight the cross-origin request first.
+            if req.method() == tauri::http::Method::OPTIONS {
+                responder.respond(
+                    tauri::http::Response::builder()
+                        .status(204)
+                        .header("Access-Control-Allow-Origin", "*")
+                        .header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+                        .header("Access-Control-Allow-Headers", "*")
+                        .body(Vec::new())
+                        .unwrap(),
+                );
+                return;
+            }
+            let post_body = (req.method() == tauri::http::Method::POST).then(|| req.body().clone());
             std::thread::spawn(move || {
                 let _t = std::time::Instant::now();
                 let trimmed = raw.trim_start_matches('/');
@@ -686,6 +729,10 @@ pub fn run() {
                 } else {
                     &raw
                 };
+                if let Some(body) = post_body {
+                    responder.respond(write_upload(clean, &body));
+                    return;
+                }
                 let resp = match std::fs::read(clean) {
                     Ok(data) => {
                         log::debug!(

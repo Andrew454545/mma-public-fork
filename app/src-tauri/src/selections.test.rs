@@ -1903,3 +1903,318 @@ fn bound_label_matches_js_fmt() {
     assert_eq!(bound_label(42.567, 43.0), "42.57–43");
     assert_eq!(bound_label(-500.0, 0.0), "-500–0");
 }
+
+// -----------------------------------------------------------------------
+// Property-based oracle tests for resolve_set / resolve / resolve_forest.
+//
+// The oracle is a naive HashSet-based evaluator over an explicit alive-id
+// snapshot (id -> effective tags), built to mirror LocView's overlay rules:
+// dead batch rows are excluded, a patch's tags win over the batch row's, and
+// adds carry their own tags untouched. Composite semantics are copied
+// verbatim from resolve_set: Intersection([]) = empty (not universe), Union
+// = fold with |, Invert uses only its FIRST child (extra children ignored
+// for the set, only for resolve_forest's per-node counts).
+// -----------------------------------------------------------------------
+
+use proptest::prelude::*;
+
+#[derive(Clone, Debug)]
+enum OracleProps {
+    Tag(u32),
+    Manual(Vec<u32>),
+    Intersection(Vec<OracleProps>),
+    Union(Vec<OracleProps>),
+    Invert(Vec<OracleProps>),
+}
+
+fn oracle_resolve(alive: &[(u32, Vec<u32>)], props: &OracleProps) -> HashSet<u32> {
+    match props {
+        OracleProps::Tag(t) => alive
+            .iter()
+            .filter(|(_, tags)| tags.contains(t))
+            .map(|(id, _)| *id)
+            .collect(),
+        OracleProps::Manual(ids) => {
+            let want: HashSet<u32> = ids.iter().copied().collect();
+            alive
+                .iter()
+                .filter(|(id, _)| want.contains(id))
+                .map(|(id, _)| *id)
+                .collect()
+        }
+        OracleProps::Intersection(children) => {
+            if children.is_empty() {
+                return HashSet::new();
+            }
+            let mut acc = oracle_resolve(alive, &children[0]);
+            for c in &children[1..] {
+                let next = oracle_resolve(alive, c);
+                acc = acc.intersection(&next).copied().collect();
+            }
+            acc
+        }
+        OracleProps::Union(children) => {
+            let mut acc = HashSet::new();
+            for c in children {
+                acc.extend(oracle_resolve(alive, c));
+            }
+            acc
+        }
+        OracleProps::Invert(children) => {
+            let universe: HashSet<u32> = alive.iter().map(|(id, _)| *id).collect();
+            match children.first() {
+                Some(first) => universe
+                    .difference(&oracle_resolve(alive, first))
+                    .copied()
+                    .collect(),
+                None => universe,
+            }
+        }
+    }
+}
+
+fn to_selection(o: &OracleProps, counter: &mut u32) -> Selection {
+    *counter += 1;
+    let key = format!("k{counter}");
+    let props = match o {
+        OracleProps::Tag(t) => SelectionProps::Tag { tag_id: *t },
+        OracleProps::Manual(ids) => SelectionProps::Manual {
+            locations: ids.clone(),
+        },
+        OracleProps::Intersection(cs) => SelectionProps::Intersection {
+            selections: cs.iter().map(|c| to_selection(c, counter)).collect(),
+        },
+        OracleProps::Union(cs) => SelectionProps::Union {
+            selections: cs.iter().map(|c| to_selection(c, counter)).collect(),
+        },
+        OracleProps::Invert(cs) => SelectionProps::Invert {
+            selections: cs.iter().map(|c| to_selection(c, counter)).collect(),
+        },
+    };
+    Selection {
+        key,
+        color: [0, 0, 0],
+        props,
+    }
+}
+
+fn tags_from_mask(mask: u8) -> Vec<u32> {
+    (0..6u32)
+        .filter(|b| mask & (1 << b) != 0)
+        .map(|b| b + 1)
+        .collect()
+}
+
+fn masks_strategy(max: usize) -> impl Strategy<Value = Vec<u8>> {
+    prop::collection::vec(0u8..64, 1..=max)
+}
+
+// (tag mask, role, patch tag mask). role 0 = plain base row, 1 = dead base row,
+// 2 = patched base row (patch_mask replaces mask's tags), 3 = overlay add.
+fn entries_strategy(max: usize) -> impl Strategy<Value = Vec<(u8, u8, u8)>> {
+    prop::collection::vec((0u8..64, 0u8..4, 0u8..64), 1..=max)
+}
+
+fn oracle_tree_strategy() -> impl Strategy<Value = OracleProps> {
+    let leaf = prop_oneof![
+        (1u32..=6).prop_map(OracleProps::Tag),
+        prop::collection::vec(1u32..=60, 0..5).prop_map(OracleProps::Manual),
+    ];
+    leaf.prop_recursive(3, 12, 3, |inner| {
+        prop_oneof![
+            prop::collection::vec(inner.clone(), 0..3).prop_map(OracleProps::Intersection),
+            prop::collection::vec(inner.clone(), 0..3).prop_map(OracleProps::Union),
+            prop::collection::vec(inner, 0..2).prop_map(OracleProps::Invert),
+        ]
+    })
+}
+
+// All ids as overlay adds, no dead/patches.
+fn build_adds_view(masks: &[u8]) -> (Vec<Location>, Vec<(u32, Vec<u32>)>) {
+    let mut adds = Vec::new();
+    let mut alive = Vec::new();
+    for (i, &m) in masks.iter().enumerate() {
+        let id = (i + 1) as u32;
+        let tags = tags_from_mask(m);
+        let mut l = loc(id, 0.0, 0.0);
+        l.tags = tags.clone();
+        adds.push(l);
+        alive.push((id, tags));
+    }
+    (adds, alive)
+}
+
+// Mixed batch + overlay: dead/patched rows only take effect for ids that live in
+// the Arrow batch (LocView only consults dead/patches while scanning batch rows),
+// so roles 0/1/2 go into the batch and role 3 goes straight into adds.
+#[allow(clippy::type_complexity)]
+fn build_overlay_view(
+    entries: &[(u8, u8, u8)],
+) -> (
+    RecordBatch,
+    HashSet<u32>,
+    HashMap<u32, Location>,
+    Vec<Location>,
+    Vec<(u32, Vec<u32>)>,
+) {
+    let mut base_locs = Vec::new();
+    let mut dead = HashSet::new();
+    let mut patches = HashMap::new();
+    let mut adds = Vec::new();
+    let mut alive = Vec::new();
+    for (i, &(mask, role, patch_mask)) in entries.iter().enumerate() {
+        let id = (i + 1) as u32;
+        let tags = tags_from_mask(mask);
+        match role {
+            0 => {
+                let mut l = loc(id, 0.0, 0.0);
+                l.tags = tags.clone();
+                base_locs.push(l);
+                alive.push((id, tags));
+            }
+            1 => {
+                let mut l = loc(id, 0.0, 0.0);
+                l.tags = tags;
+                base_locs.push(l);
+                dead.insert(id);
+            }
+            2 => {
+                let mut l = loc(id, 0.0, 0.0);
+                l.tags = tags;
+                base_locs.push(l);
+                let patch_tags = tags_from_mask(patch_mask);
+                let mut p = loc(id, 0.0, 0.0);
+                p.tags = patch_tags.clone();
+                patches.insert(id, p);
+                alive.push((id, patch_tags));
+            }
+            _ => {
+                let mut l = loc(id, 0.0, 0.0);
+                l.tags = tags.clone();
+                adds.push(l);
+                alive.push((id, tags));
+            }
+        }
+    }
+    let batch = locations_to_batch(&base_locs);
+    (batch, dead, patches, adds, alive)
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(64))]
+
+    #[test]
+    fn resolve_matches_oracle_adds_only(masks in masks_strategy(60), tree in oracle_tree_strategy()) {
+        let (adds, alive) = build_adds_view(&masks);
+        let dead = HashSet::new();
+        let patches = HashMap::new();
+        let view = make_view(None, &dead, &patches, &adds);
+        let props = to_selection(&tree, &mut 0).props;
+        let got: HashSet<u32> = resolve_set(&view, &props).into_iter().collect();
+        let want = oracle_resolve(&alive, &tree);
+        prop_assert_eq!(got, want);
+    }
+
+    #[test]
+    fn resolve_matches_oracle_with_overlay(entries in entries_strategy(60), tree in oracle_tree_strategy()) {
+        let (batch, dead, patches, adds, alive) = build_overlay_view(&entries);
+        let view = make_view(Some(&batch), &dead, &patches, &adds);
+        let props = to_selection(&tree, &mut 0).props;
+        let got: HashSet<u32> = resolve_set(&view, &props).into_iter().collect();
+        let want = oracle_resolve(&alive, &tree);
+        prop_assert_eq!(got, want);
+    }
+
+    #[test]
+    fn resolve_output_is_sorted_and_dedup(masks in masks_strategy(60), tree in oracle_tree_strategy()) {
+        let (adds, _alive) = build_adds_view(&masks);
+        let dead = HashSet::new();
+        let patches = HashMap::new();
+        let view = make_view(None, &dead, &patches, &adds);
+        let props = to_selection(&tree, &mut 0).props;
+        let ids = resolve(&view, &props);
+        for w in ids.windows(2) {
+            prop_assert!(w[0] < w[1]);
+        }
+    }
+
+    #[test]
+    fn resolve_forest_agrees_with_resolve_set(
+        masks in masks_strategy(60),
+        trees in prop::collection::vec(oracle_tree_strategy(), 1..=4),
+    ) {
+        let (adds, _alive) = build_adds_view(&masks);
+        let dead = HashSet::new();
+        let patches = HashMap::new();
+        let view = make_view(None, &dead, &patches, &adds);
+        let mut counter = 0u32;
+        let sels: Vec<Selection> = trees.iter().map(|t| to_selection(t, &mut counter)).collect();
+        let (sets, _counts) = resolve_forest(&view, &sels);
+        prop_assert_eq!(sets.len(), sels.len());
+        for (i, sel) in sels.iter().enumerate() {
+            prop_assert_eq!(&sets[i], &resolve_set(&view, &sel.props));
+        }
+    }
+
+    // Invert = universe - resolve(first child), and a leaf/composite's own set is
+    // always a subset of the alive universe, so double-inverting is the identity.
+    #[test]
+    fn invert_is_involutive_on_alive_set(masks in masks_strategy(60), tree in oracle_tree_strategy()) {
+        let (adds, _alive) = build_adds_view(&masks);
+        let dead = HashSet::new();
+        let patches = HashMap::new();
+        let view = make_view(None, &dead, &patches, &adds);
+        let inner = to_selection(&tree, &mut 0);
+        let x_set = resolve_set(&view, &inner.props);
+        let double_invert = SelectionProps::Invert {
+            selections: vec![Selection {
+                key: "outer".into(),
+                color: [0, 0, 0],
+                props: SelectionProps::Invert {
+                    selections: vec![inner],
+                },
+            }],
+        };
+        let got = resolve_set(&view, &double_invert);
+        prop_assert_eq!(got, x_set);
+    }
+}
+
+// -----------------------------------------------------------------------
+// Composite edge pins: empty selections vecs. resolve_set explicitly checks
+// `is_empty()` before indexing, so none of these panic -- pinning the chosen
+// (non-obvious) semantics rather than reproducing a crash.
+// -----------------------------------------------------------------------
+
+#[test]
+fn intersection_of_empty_selections_is_empty_not_universe() {
+    let dead = HashSet::new();
+    let patches = HashMap::new();
+    let adds = vec![loc(1, 0.0, 0.0), loc(2, 0.0, 0.0)];
+    let view = make_view(None, &dead, &patches, &adds);
+    let ids = resolve(&view, &SelectionProps::Intersection { selections: vec![] });
+    assert!(
+        ids.is_empty(),
+        "empty Intersection is vacuously empty, not the universe: {ids:?}"
+    );
+}
+
+#[test]
+fn union_of_empty_selections_is_empty() {
+    let dead = HashSet::new();
+    let patches = HashMap::new();
+    let adds = vec![loc(1, 0.0, 0.0), loc(2, 0.0, 0.0)];
+    let view = make_view(None, &dead, &patches, &adds);
+    let ids = resolve(&view, &SelectionProps::Union { selections: vec![] });
+    assert!(ids.is_empty());
+}
+
+#[test]
+fn invert_of_empty_selections_is_the_alive_universe() {
+    let dead = HashSet::new();
+    let patches = HashMap::new();
+    let adds = vec![loc(1, 0.0, 0.0), loc(2, 0.0, 0.0), loc(3, 0.0, 0.0)];
+    let view = make_view(None, &dead, &patches, &adds);
+    let ids = resolve(&view, &SelectionProps::Invert { selections: vec![] });
+    assert_eq!(ids, vec![1, 2, 3]);
+}

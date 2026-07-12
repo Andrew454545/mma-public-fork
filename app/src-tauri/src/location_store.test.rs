@@ -3166,3 +3166,329 @@ fn pick_spaced_empty_selection() {
     assert!(dist.ids.is_empty());
     assert_eq!(dist.distance_m, 0);
 }
+
+// -----------------------------------------------------------------------
+// Delta corruption pinning
+// -----------------------------------------------------------------------
+
+// A store with a real (non-empty) base batch, plus all three overlay kinds
+// populated: adds (fresh id 10), dead (removed id 2, which lives in the base),
+// patches (updated id 1, which lives in the base).
+fn store_with_full_overlay() -> Store {
+    let base = vec![loc(1, 1.0, 1.0), loc(2, 2.0, 2.0), loc(3, 3.0, 3.0)];
+    let mut store = Store::new();
+    store.map_id = Some("test-full-overlay".to_string());
+    store.batch = Some(arrow_bridge::locations_to_batch(&base));
+    store.alive_count = base.len();
+    store.next_id = 10;
+
+    let mut p = patch();
+    p.heading = Some(99.0);
+    store.overlay_update(1, &p);
+
+    let l2 = store.get_loc_by_id(2).unwrap();
+    store.overlay_remove(std::slice::from_ref(&l2));
+
+    let new_id = store.alloc_id();
+    store.overlay_add(loc(new_id, 9.0, 9.0));
+
+    store
+}
+
+#[test]
+fn delta_parse_never_panics_on_corrupt_bytes() {
+    let cases: Vec<Vec<u8>> = vec![
+        Vec::new(),
+        vec![0xff, 0x00, 0x13, 0x37, 0xde, 0xad, 0xbe, 0xef],
+    ];
+    for bytes in &cases {
+        let result = std::panic::catch_unwind(|| rmp_serde::from_slice::<DeltaOverlay>(bytes));
+        assert!(result.is_ok(), "parsing must not panic: {:?}", bytes);
+        assert!(result.unwrap().is_err(), "must fail to parse: {:?}", bytes);
+    }
+}
+
+#[test]
+fn delta_parse_never_panics_on_truncated_bytes() {
+    let store = store_with_full_overlay();
+    let full_bytes = overlay_delta_bytes(&store).unwrap();
+    assert!(full_bytes.len() > 1, "sanity: overlay has real content");
+    let truncated = &full_bytes[..full_bytes.len() / 2];
+
+    let result = std::panic::catch_unwind(|| rmp_serde::from_slice::<DeltaOverlay>(truncated));
+    assert!(result.is_ok(), "parsing must not panic on truncated bytes");
+    assert!(
+        result.unwrap().is_err(),
+        "truncated bytes must fail to parse"
+    );
+}
+
+#[test]
+fn delta_bytes_roundtrip_exact() {
+    let store = store_with_full_overlay();
+    let bytes = overlay_delta_bytes(&store).unwrap();
+    let parsed: DeltaOverlay = rmp_serde::from_slice(&bytes).unwrap();
+
+    assert_eq!(parsed.adds, store.overlay.adds, "adds preserved exactly");
+
+    let mut expected_dead: Vec<u32> = store.overlay.dead.iter().cloned().collect();
+    expected_dead.sort_unstable();
+    let mut got_dead = parsed.dead_ids.clone();
+    got_dead.sort_unstable();
+    assert_eq!(got_dead, expected_dead, "dead ids preserved exactly");
+
+    let mut expected_patches: Vec<Location> = store.overlay.patches.values().cloned().collect();
+    expected_patches.sort_by_key(|l| l.id);
+    let mut got_patches = parsed.patches.clone();
+    got_patches.sort_by_key(|l| l.id);
+    assert_eq!(got_patches, expected_patches, "patches preserved exactly");
+}
+
+// -----------------------------------------------------------------------
+// Crash-window double-apply: save_arrow_inner renames the base file, then
+// deletes the delta sidecar non-atomically. A crash between the two leaves a
+// stale delta whose `adds` duplicate what the (now up to date) base already
+// holds. store_open_map applies the parsed delta unconditionally -- mirror
+// that application exactly (location_store.rs ~2024-2039) and pin whatever
+// the store ends up doing with the collision.
+// -----------------------------------------------------------------------
+
+#[test]
+fn crash_window_stale_delta_double_applies_baked_locations() {
+    let x = vec![loc(5, 5.0, 5.0), loc(6, 6.0, 6.0)];
+    let mut store = Store::new();
+    store.map_id = Some("test-crash-window".to_string());
+    store.batch = Some(arrow_bridge::locations_to_batch(&x));
+    store.alive_count = x.len();
+
+    // Stale delta from before the bake: re-adds the same ids the base now already has.
+    let delta = DeltaOverlay {
+        adds: x.clone(),
+        dead_ids: vec![],
+        patches: vec![],
+    };
+
+    // Mirror store_open_map's delta-application block exactly.
+    store.overlay.dead = delta.dead_ids.into_iter().collect();
+    for p in delta.patches {
+        store.overlay.patches.insert(p.id, p);
+    }
+    store.overlay.adds = delta.adds;
+    store.overlay.dirty = true;
+
+    // Mirror the post-load alive_count recompute via scan_locations.
+    let LocationAggregates { alive, .. } = store.scan_locations();
+    store.alive_count = alive;
+
+    // SUSPECTED BUG: loc_view's for_each has no dedup between base rows and
+    // overlay.adds, so a stale post-bake delta double-counts every id it
+    // re-adds. This pins the current (corrupt) behavior, not a fixed one.
+    assert_eq!(
+        store.alive_count, 4,
+        "stale delta double-counts ids already in the baked base"
+    );
+
+    let all = store.collect_all_locations();
+    assert_eq!(all.len(), 4, "collect_all_locations also yields duplicates");
+    let ids: Vec<u32> = all.iter().map(|l| l.id).collect();
+    assert_eq!(
+        ids.iter().filter(|&&id| id == 5).count(),
+        2,
+        "id 5 appears twice"
+    );
+    assert_eq!(
+        ids.iter().filter(|&&id| id == 6).count(),
+        2,
+        "id 6 appears twice"
+    );
+
+    // get_loc_by_id resolves via overlay.adds (binary search) before ever touching
+    // the batch, so single-id lookups don't see the duplicate -- only bulk
+    // enumeration (alive_count, collect_all_locations, tag counts, render) is corrupted.
+    assert_eq!(store.get_loc_by_id(5), Some(loc(5, 5.0, 5.0)));
+}
+
+// -----------------------------------------------------------------------
+// Model-based undo/redo (proptest)
+// -----------------------------------------------------------------------
+
+#[derive(Debug, Clone)]
+enum ModelOp {
+    Add {
+        lat: f64,
+        lng: f64,
+    },
+    Remove {
+        pick: usize,
+    },
+    Update {
+        pick: usize,
+        heading: f64,
+        tags: Vec<u32>,
+    },
+}
+
+fn arb_initial() -> impl proptest::strategy::Strategy<Value = Vec<Location>> {
+    use proptest::strategy::Strategy;
+    proptest::collection::btree_set(1u32..40, 0..10)
+        .prop_map(|ids| ids.into_iter().map(|id| loc(id, 0.0, 0.0)).collect())
+}
+
+fn arb_ops() -> impl proptest::strategy::Strategy<Value = Vec<ModelOp>> {
+    use proptest::prelude::*;
+    let op = prop_oneof![
+        (-90.0f64..90.0, -180.0f64..180.0).prop_map(|(lat, lng)| ModelOp::Add { lat, lng }),
+        (0usize..1000).prop_map(|pick| ModelOp::Remove { pick }),
+        (
+            0usize..1000,
+            0.0f64..360.0,
+            proptest::collection::vec(0u32..6, 0..3)
+        )
+            .prop_map(|(pick, heading, tags)| ModelOp::Update {
+                pick,
+                heading,
+                tags
+            }),
+    ];
+    proptest::collection::vec(op, 0..15)
+}
+
+// Apply one op to both the real store (mirroring store_add_locations /
+// store_remove_locations / store_update_locations exactly) and the parallel model.
+fn apply_model_op(
+    store: &mut Store,
+    model: &mut std::collections::BTreeMap<u32, Location>,
+    alive_ids: &mut Vec<u32>,
+    op: &ModelOp,
+) {
+    match op {
+        ModelOp::Add { lat, lng } => {
+            let id = store.alloc_id();
+            let l = loc(id, *lat, *lng);
+            store.push_undo(EditEntry {
+                created: vec![l.clone()],
+                removed: vec![],
+            });
+            store.edits.redo.clear();
+            store.add_tag_counts(std::slice::from_ref(&l));
+            store.overlay_add(l.clone());
+            model.insert(id, l);
+            let pos = alive_ids.partition_point(|&x| x < id);
+            alive_ids.insert(pos, id);
+        }
+        ModelOp::Remove { pick } => {
+            if alive_ids.is_empty() {
+                return;
+            }
+            let idx = pick % alive_ids.len();
+            let id = alive_ids[idx];
+            let l = store.get_loc_by_id(id).unwrap();
+            store.remove_tag_counts(std::slice::from_ref(&l));
+            store.overlay_remove(std::slice::from_ref(&l));
+            store.push_undo(EditEntry {
+                created: vec![],
+                removed: vec![l],
+            });
+            store.edits.redo.clear();
+            model.remove(&id);
+            alive_ids.remove(idx);
+        }
+        ModelOp::Update {
+            pick,
+            heading,
+            tags,
+        } => {
+            if alive_ids.is_empty() {
+                return;
+            }
+            let idx = pick % alive_ids.len();
+            let id = alive_ids[idx];
+            let old = store.get_loc_by_id(id).unwrap();
+            let mut p = patch();
+            p.heading = Some(*heading);
+            p.tags = Some(tags.clone());
+            store.overlay_update(id, &p);
+            let new_loc = store.get_loc_by_id(id).unwrap();
+            let updated = vec![(old.clone(), new_loc.clone())];
+            store.remove_tag_counts(std::slice::from_ref(&old));
+            store.add_tag_counts(std::slice::from_ref(&new_loc));
+            store.record_update_undo(&updated);
+            model.insert(id, new_loc);
+        }
+    }
+}
+
+// modified_at is stamped from the wall clock on a real change; it is not part of
+// the undo/redo correctness invariant under test, so normalize it away before
+// comparing the store snapshot against the hand-rolled model.
+fn model_snapshot(model: &std::collections::BTreeMap<u32, Location>) -> Vec<Location> {
+    let mut v: Vec<Location> = model.values().cloned().collect();
+    v.sort_by_key(|l| l.id);
+    for l in &mut v {
+        l.modified_at = None;
+    }
+    v
+}
+
+fn store_snapshot(store: &Store) -> Vec<Location> {
+    let mut v = store.collect_all_locations();
+    v.sort_by_key(|l| l.id);
+    for l in &mut v {
+        l.modified_at = None;
+    }
+    v
+}
+
+proptest::proptest! {
+    #![proptest_config(proptest::prelude::ProptestConfig::with_cases(200))]
+
+    #[test]
+    fn undo_redo_matches_model(
+        initial in arb_initial(),
+        ops in arb_ops(),
+        k_raw in 0usize..20,
+    ) {
+        let mut store = setup_store_with(&initial);
+        let max_initial = initial.iter().map(|l| l.id).max().unwrap_or(0);
+        store.next_id = max_initial + 1;
+
+        let mut model: std::collections::BTreeMap<u32, Location> =
+            initial.iter().map(|l| (l.id, l.clone())).collect();
+        let mut alive_ids: Vec<u32> = initial.iter().map(|l| l.id).collect();
+        alive_ids.sort_unstable();
+
+        let initial_snapshot = model_snapshot(&model);
+
+        for op in &ops {
+            apply_model_op(&mut store, &mut model, &mut alive_ids, op);
+            proptest::prop_assert_eq!(store.alive_count, model.len(), "alive_count drifted from model mid-script");
+        }
+
+        let final_snapshot = model_snapshot(&model);
+        let pushed = store.edits.undo.len();
+
+        for _ in 0..pushed {
+            press_undo(&mut store);
+        }
+        proptest::prop_assert_eq!(store_snapshot(&store), initial_snapshot.clone(), "full undo did not reach initial state");
+        proptest::prop_assert_eq!(store.alive_count, initial.len());
+
+        for _ in 0..pushed {
+            press_redo(&mut store);
+        }
+        proptest::prop_assert_eq!(store_snapshot(&store), final_snapshot.clone(), "full redo did not reach final state");
+        proptest::prop_assert_eq!(store.alive_count, model.len());
+
+        // Interleaved: undo k then redo k, starting from the final state above, must
+        // land back on the final state.
+        let k = if pushed == 0 { 0 } else { k_raw % (pushed + 1) };
+        for _ in 0..k {
+            press_undo(&mut store);
+        }
+        for _ in 0..k {
+            press_redo(&mut store);
+        }
+        proptest::prop_assert_eq!(store_snapshot(&store), final_snapshot, "interleaved undo/redo(k) did not land on final state");
+        proptest::prop_assert_eq!(store.alive_count, model.len());
+    }
+}

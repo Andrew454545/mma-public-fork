@@ -44,8 +44,22 @@ export function waitForGoogleMap(): Promise<google.maps.Map | null> {
 	return waitForMapHost().then((host) => hostInstance(host, "google"));
 }
 
-export function fitMapToBounds(bounds: Bounds | null | undefined, padding = 0) {
+/** Expand any axis narrower than `2 * minExtent` (degrees) to that span, centered.
+ *  A single-point paste has zero-area bounds; without this, fitBounds maxes out the zoom. */
+function padBoundsToMin(b: Bounds, minExtent: number): Bounds {
+	const pad = (lo: number, hi: number): [number, number] => {
+		if (hi - lo >= minExtent * 2) return [lo, hi];
+		const mid = (lo + hi) / 2;
+		return [mid - minExtent, mid + minExtent];
+	};
+	const [south, north] = pad(b.south, b.north);
+	const [west, east] = pad(b.west, b.east);
+	return { west, south, east, north };
+}
+
+export function fitMapToBounds(bounds: Bounds | null | undefined, padding = 0, minExtent?: number) {
 	if (!bounds) return;
+	if (minExtent != null) bounds = padBoundsToMin(bounds, minExtent);
 	mapHost?.fitBounds(bounds, padding);
 }
 

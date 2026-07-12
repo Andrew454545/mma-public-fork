@@ -117,6 +117,8 @@ const DEFAULTS = {
 	geocodeProvider: "local" as GeocodeProvider,
 	nominatimApiKey: "",
 	panToImported: true,
+	/** Min half-extent (degrees) a single pasted/imported point is padded to before fitBounds */
+	pastePadding: 0.003 as number,
 	followActiveInReview: true,
 	markerColor: { r: 42, g: 42, b: 42 } as RGB,
 	activeLocationColor: { r: 200, g: 0, b: 0 } as RGB,

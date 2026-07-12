@@ -352,6 +352,19 @@ export const commands = {
 	 */
 	storeExportBulkZip: () => typedError<string, string>(__TAURI_INVOKE("store_export_bulk_zip")),
 	/**
+	 *  Create a temp session dir for binary uploads from the frontend. Files are
+	 *  written into it via `mma-buf://` POST, then packaged by [`store_upload_finish`].
+	 */
+	storeUploadBegin: () => typedError<string, string>(__TAURI_INVOKE("store_upload_begin")),
+	/**
+	 *  Package an upload session and remove its dir: a single file is moved out
+	 *  as-is, multiple are packed into a Stored ZIP (entries like JPEG/PNG are
+	 *  already compressed). Returns a temp path for [`store_save_export_file`].
+	 */
+	storeUploadFinish: (sessionDir: string) => typedError<string, string>(__TAURI_INVOKE("store_upload_finish", { sessionDir })),
+	/**  Remove an abandoned upload session dir (e.g. cancelled operation). */
+	storeUploadAbort: (sessionDir: string) => typedError<null, string>(__TAURI_INVOKE("store_upload_abort", { sessionDir })),
+	/**
 	 *  Delete all rows from a table. Returns the number of deleted rows.
 	 *  Used in the debug panel for cache/history cleanup.
 	 */

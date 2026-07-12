@@ -58,7 +58,7 @@ import { range, clamp } from "@/types/util";
 
 function zoomToPasted(bounds: Bounds | null, padding = 0) {
 	if (!getSettings().panToImported) return;
-	fitMapToBounds(bounds, padding);
+	fitMapToBounds(bounds, padding, getSettings().pastePadding);
 }
 
 async function addParsedLocations(parsed: ParsedLocation[]) {

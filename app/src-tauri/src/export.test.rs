@@ -125,3 +125,73 @@ fn tag_meta_roundtrips_color_and_order() {
     assert_eq!(meta["blue"]["color"], serde_json::json!([0, 0, 255]));
     assert!(meta["blue"].get("order").is_none());
 }
+
+#[test]
+fn upload_session_dir_rejects_outside_paths() {
+    assert!(upload_session_dir("C:/somewhere/mma_upload_1_1").is_err());
+    let not_pano = std::env::temp_dir().join("other_dir");
+    assert!(upload_session_dir(&not_pano.to_string_lossy()).is_err());
+    let nested = std::env::temp_dir().join("nested").join("mma_upload_1_1");
+    assert!(upload_session_dir(&nested.to_string_lossy()).is_err());
+}
+
+#[test]
+fn upload_session_begin_finish_multiple_zips_stored() {
+    let session = store_upload_begin().unwrap();
+    let dir = std::path::PathBuf::from(&session);
+    assert!(dir.is_dir());
+    assert!(upload_session_dir(&session).is_ok());
+
+    std::fs::write(dir.join("1.jpg"), b"aaa").unwrap();
+    std::fs::write(dir.join("2.jpg"), b"bbbb").unwrap();
+
+    let out = store_upload_finish(session).unwrap();
+    assert!(out.ends_with(".zip"));
+    assert!(!dir.exists(), "session dir removed after finish");
+
+    let file = std::fs::File::open(&out).unwrap();
+    let mut zip = zip::ZipArchive::new(file).unwrap();
+    let names: Vec<String> = (0..zip.len())
+        .map(|i| zip.by_index(i).unwrap().name().to_string())
+        .collect();
+    assert_eq!(names, vec!["1.jpg", "2.jpg"]);
+    {
+        use std::io::Read;
+        let mut entry = zip.by_name("2.jpg").unwrap();
+        assert_eq!(entry.compression(), zip::CompressionMethod::Stored);
+        let mut buf = Vec::new();
+        entry.read_to_end(&mut buf).unwrap();
+        assert_eq!(buf, b"bbbb");
+    }
+    let _ = std::fs::remove_file(&out);
+}
+
+#[test]
+fn upload_session_finish_single_file_passes_through() {
+    let session = store_upload_begin().unwrap();
+    let dir = std::path::PathBuf::from(&session);
+    std::fs::write(dir.join("42.png"), b"img").unwrap();
+
+    let out = store_upload_finish(session).unwrap();
+    assert!(out.ends_with(".png"));
+    assert!(!dir.exists());
+    assert_eq!(std::fs::read(&out).unwrap(), b"img");
+    let _ = std::fs::remove_file(&out);
+}
+
+#[test]
+fn upload_session_finish_empty_errors_and_cleans_up() {
+    let session = store_upload_begin().unwrap();
+    let dir = std::path::PathBuf::from(&session);
+    assert!(store_upload_finish(session).is_err());
+    assert!(!dir.exists());
+}
+
+#[test]
+fn upload_session_abort_removes_dir() {
+    let session = store_upload_begin().unwrap();
+    let dir = std::path::PathBuf::from(&session);
+    std::fs::write(dir.join("1.jpg"), b"x").unwrap();
+    store_upload_abort(session).unwrap();
+    assert!(!dir.exists());
+}

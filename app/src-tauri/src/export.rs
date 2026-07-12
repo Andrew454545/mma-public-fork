@@ -304,6 +304,89 @@ pub fn store_save_export_file(src_path: String, dest_path: String) -> AppResult<
     Ok(())
 }
 
+/// Validate that `path` is an upload session dir: a direct child of the
+/// system temp dir named `mma_upload_*`. Guards both the session commands and
+/// the `mma-buf` POST handler against arbitrary file writes.
+pub(crate) fn upload_session_dir(path: &str) -> AppResult<std::path::PathBuf> {
+    let p = std::path::PathBuf::from(path);
+    let valid = p.parent() == Some(std::env::temp_dir().as_path())
+        && p.file_name()
+            .and_then(|n| n.to_str())
+            .is_some_and(|n| n.starts_with("mma_upload_"));
+    if !valid {
+        return Err("invalid upload session dir".into());
+    }
+    Ok(p)
+}
+
+/// Create a temp session dir for binary uploads from the frontend. Files are
+/// written into it via `mma-buf://` POST, then packaged by [`store_upload_finish`].
+#[tauri::command]
+#[specta::specta]
+pub fn store_upload_begin() -> AppResult<String> {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+    let dir = std::env::temp_dir().join(format!("mma_upload_{}_{n}", std::process::id()));
+    std::fs::create_dir_all(&dir)?;
+    Ok(dir.to_string_lossy().into_owned())
+}
+
+/// Package an upload session and remove its dir: a single file is moved out
+/// as-is, multiple are packed into a Stored ZIP (entries like JPEG/PNG are
+/// already compressed). Returns a temp path for [`store_save_export_file`].
+#[tauri::command]
+#[specta::specta]
+pub fn store_upload_finish(session_dir: String) -> AppResult<String> {
+    let dir = upload_session_dir(&session_dir)?;
+    let mut files: Vec<std::path::PathBuf> = std::fs::read_dir(&dir)?
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .filter(|p| p.is_file())
+        .collect();
+    files.sort();
+
+    if files.is_empty() {
+        let _ = std::fs::remove_dir_all(&dir);
+        return Err("no files in session".into());
+    }
+
+    let out = if let [single] = files.as_slice() {
+        let ext = single
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("bin")
+            .to_string();
+        let out = export_temp_path("mma_upload_file", &ext);
+        std::fs::rename(single, &out)?;
+        out
+    } else {
+        let out = export_temp_path("mma_upload", "zip");
+        let mut zip = zip::ZipWriter::new(std::io::BufWriter::new(std::fs::File::create(&out)?));
+        let options = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Stored);
+        for f in &files {
+            let name = f.file_name().unwrap_or_default().to_string_lossy();
+            zip.start_file(name, options)?;
+            zip.write_all(&std::fs::read(f)?)?;
+        }
+        zip.finish()?.flush()?;
+        out
+    };
+
+    let _ = std::fs::remove_dir_all(&dir);
+    Ok(out.to_string_lossy().into_owned())
+}
+
+/// Remove an abandoned upload session dir (e.g. cancelled operation).
+#[tauri::command]
+#[specta::specta]
+pub fn store_upload_abort(session_dir: String) -> AppResult<()> {
+    let dir = upload_session_dir(&session_dir)?;
+    let _ = std::fs::remove_dir_all(&dir);
+    Ok(())
+}
+
 /// Export every map in the database as a deflate-compressed ZIP of JSON files.
 ///
 /// Each map becomes one `{name}.json` file in the archive, with full location

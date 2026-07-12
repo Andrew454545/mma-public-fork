@@ -1,5 +1,7 @@
+import { save } from "@tauri-apps/plugin-dialog";
 import type { Tag } from "@/bindings.gen";
 import type { TagSortMode } from "@/types";
+import { cmd } from "@/lib/commands";
 import { colorForName, textColorFor } from "@/lib/util/color";
 
 /** Base URL for a Tauri custom URI scheme. Windows WebView2 uses http://<scheme>.localhost/. */
@@ -18,6 +20,53 @@ export function isWeb(): boolean {
 	return Boolean(
 		(window as { __TAURI_INTERNALS__?: { __webserve?: boolean } }).__TAURI_INTERNALS__?.__webserve,
 	);
+}
+
+// In a browser (web-serve) there's no native save dialog that returns a path for the
+// backend to write to. Use the File System Access API to let the user pick a destination
+// and stream the already-built temp export straight into it (no full read into memory).
+// Falls back to a plain download where that API is unavailable. Returns false if cancelled.
+async function downloadInBrowser(srcPath: string, fileName: string): Promise<boolean> {
+	const url = mmaBufUrl(srcPath);
+	const picker = (
+		window as unknown as {
+			showSaveFilePicker?: (o: { suggestedName?: string }) => Promise<FileSystemFileHandle>;
+		}
+	).showSaveFilePicker;
+	if (picker) {
+		let handle: FileSystemFileHandle;
+		try {
+			handle = await picker({ suggestedName: fileName });
+		} catch (e) {
+			if (e instanceof DOMException && e.name === "AbortError") return false;
+			throw e;
+		}
+		const res = await fetch(url);
+		if (!res.body) throw new Error("export stream unavailable");
+		await res.body.pipeTo((await handle.createWritable()) as unknown as WritableStream<Uint8Array>);
+		return true;
+	}
+	const objUrl = URL.createObjectURL(await (await fetch(url)).blob());
+	const a = document.createElement("a");
+	a.href = objUrl;
+	a.download = fileName;
+	a.click();
+	URL.revokeObjectURL(objUrl);
+	return true;
+}
+
+/** Prompt for a destination and move a temp export file there (native dialog in
+ *  Tauri, File System Access / download in the browser). False = cancelled. */
+export async function saveExportTempFile(srcPath: string, fileName: string): Promise<boolean> {
+	if (isWeb()) return downloadInBrowser(srcPath, fileName);
+	const ext = fileName.split(".").pop() ?? "";
+	const dest = await save({
+		defaultPath: fileName,
+		filters: [{ name: ext.toUpperCase(), extensions: [ext] }],
+	});
+	if (!dest) return false;
+	await cmd.storeSaveExportFile(srcPath, dest);
+	return true;
 }
 
 // Order strings with embedded numbers by numeric value, not lexically

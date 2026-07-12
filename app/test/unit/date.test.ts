@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
+import fc from "fast-check";
 import { parseTypedDate, MONTHS } from "@/lib/util/date";
-import { partsToEpoch } from "@/lib/data/fieldOps";
+import { partsToEpoch, dateParts } from "@/lib/data/fieldOps";
 
 describe("MONTHS", () => {
 	it("short and full names align by index", () => {
@@ -71,5 +72,39 @@ describe("parseTypedDate", () => {
 		expect(parseTypedDate("14:30", { mode: "date", anyTime: true })).toBe("14:30");
 		expect(parseTypedDate("9", { mode: "date", anyTime: true })).toBe("09:00");
 		expect(parseTypedDate("25:00", { mode: "date", anyTime: true })).toBeNull();
+	});
+});
+
+describe("dateParts / partsToEpoch (property-based)", () => {
+	const epochArb = fc.integer({ min: 0, max: 2 ** 31 - 1 });
+
+	it("roundtrips arbitrary epochs in the UTC (wallClock) frame", () => {
+		fc.assert(
+			fc.property(epochArb, (epoch) => {
+				expect(partsToEpoch(dateParts(epoch, true), true)).toBe(epoch);
+			}),
+		);
+	});
+
+	// Local-frame (wallClock: false) roundtrip is not tested here: DST transitions
+	// make some wall-clock times ambiguous or nonexistent, so the property is only
+	// true outside those hours, and that varies by the machine's timezone.
+
+	it("dateParts stays within calendar bounds", () => {
+		fc.assert(
+			fc.property(epochArb, (epoch) => {
+				const p = dateParts(epoch, true);
+				expect(p.mo).toBeGreaterThanOrEqual(0);
+				expect(p.mo).toBeLessThanOrEqual(11);
+				expect(p.d).toBeGreaterThanOrEqual(1);
+				expect(p.d).toBeLessThanOrEqual(31);
+				expect(p.h).toBeGreaterThanOrEqual(0);
+				expect(p.h).toBeLessThanOrEqual(23);
+				expect(p.mi).toBeGreaterThanOrEqual(0);
+				expect(p.mi).toBeLessThanOrEqual(59);
+				expect(p.s).toBeGreaterThanOrEqual(0);
+				expect(p.s).toBeLessThanOrEqual(59);
+			}),
+		);
 	});
 });

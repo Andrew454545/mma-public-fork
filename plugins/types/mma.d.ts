@@ -855,6 +855,37 @@ export declare const commands: {
 		error: string;
 	}>;
 	/**
+	 *  Create a temp session dir for binary uploads from the frontend. Files are
+	 *  written into it via `mma-buf://` POST, then packaged by [`store_upload_finish`].
+	 */
+	storeUploadBegin: () => Promise<{
+		status: "ok";
+		data: string;
+	} | {
+		status: "error";
+		error: string;
+	}>;
+	/**
+	 *  Package an upload session and remove its dir: a single file is moved out
+	 *  as-is, multiple are packed into a Stored ZIP (entries like JPEG/PNG are
+	 *  already compressed). Returns a temp path for [`store_save_export_file`].
+	 */
+	storeUploadFinish: (sessionDir: string) => Promise<{
+		status: "ok";
+		data: string;
+	} | {
+		status: "error";
+		error: string;
+	}>;
+	/**  Remove an abandoned upload session dir (e.g. cancelled operation). */
+	storeUploadAbort: (sessionDir: string) => Promise<{
+		status: "error";
+		error: string;
+	} | {
+		status: "ok";
+		data: null;
+	}>;
+	/**
 	 *  Delete all rows from a table. Returns the number of deleted rows.
 	 *  Used in the debug panel for cache/history cleanup.
 	 */
@@ -2837,6 +2868,13 @@ declare const COMMANDS: {
 		aliases: string[];
 		execute: () => boolean;
 	};
+	"bulk-download-panoramas": {
+		label: string;
+		icon: string;
+		group: "Bulk Operations";
+		aliases: string[];
+		execute: () => boolean;
+	};
 	"delete-selected-tags": {
 		label: string;
 		icon: string;
@@ -2976,6 +3014,8 @@ declare const DEFAULTS: {
 	geocodeProvider: GeocodeProvider;
 	nominatimApiKey: string;
 	panToImported: boolean;
+	/** Min half-extent (degrees) a single pasted/imported point is padded to before fitBounds */
+	pastePadding: number;
 	followActiveInReview: boolean;
 	markerColor: RGB;
 	activeLocationColor: RGB;
@@ -3134,6 +3174,9 @@ declare const mma: {
 		storeExportGeojson: (scope: number[] | null, tagsJson: string) => Promise<string>;
 		storeSaveExportFile: (srcPath: string, destPath: string) => Promise<null>;
 		storeExportBulkZip: () => Promise<string>;
+		storeUploadBegin: () => Promise<string>;
+		storeUploadFinish: (sessionDir: string) => Promise<string>;
+		storeUploadAbort: (sessionDir: string) => Promise<null>;
 		storeDbClearTable: (table: string) => Promise<number>;
 		storeDbStats: () => Promise<DbStats>;
 		storeSeenWrite: (entry: SeenWriteEntry) => Promise<null>;
@@ -3232,6 +3275,7 @@ declare const mma: {
 		geocodeProvider: GeocodeProvider;
 		nominatimApiKey: string;
 		panToImported: boolean;
+		pastePadding: number;
 		followActiveInReview: boolean;
 		markerColor: RGB;
 		activeLocationColor: RGB;

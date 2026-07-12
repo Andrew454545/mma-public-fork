@@ -26,7 +26,14 @@ import { enrichAll, type EnrichResult } from "@/lib/sv/enrich";
 import { getEnrichFieldOptions, getDefaultEnrichKeys, isFieldEnabled } from "@/lib/data/fieldDefs";
 import { bulkPinToPano } from "@/lib/sv/pinPano";
 import { bulkPanHeading, type RoadDirection } from "@/lib/sv/headingRoad";
+import {
+	bulkDownloadPanoramas,
+	type BulkDownloadResult,
+	type PanoRenderMode,
+} from "@/lib/sv/panoDownload";
+import { saveExportTempFile } from "@/lib/util/util";
 import { fmt } from "@/lib/util/format";
+import { toast } from "@/lib/util/toast";
 
 const TITLES = {
 	validate: "Validate locations",
@@ -35,6 +42,7 @@ const TITLES = {
 	clearFields: "Clear metadata fields",
 	setField: "Set metadata field",
 	headingRoad: "Pan headings along road",
+	downloadPanoramas: "Download panoramas",
 } as const;
 export type BulkOperation = keyof typeof TITLES;
 
@@ -49,6 +57,8 @@ interface BulkRunContext {
 interface BulkRunResult {
 	doneMessage?: string;
 	doneContent?: React.ReactNode;
+	/** Extra buttons rendered in the actions row next to Close when done. */
+	doneActions?: React.ReactNode;
 }
 
 type BulkRunner = (ctx: BulkRunContext) => Promise<BulkRunResult>;
@@ -493,9 +503,169 @@ function HeadingRoadSetup({ scopeCtl, onReady }: SetupProps) {
 	);
 }
 
+function DownloadPanoramasSetup({ scopeCtl, scopedLocs, onReady }: SetupProps) {
+	const [mode, setMode] = useState<PanoRenderMode>("equirectangular");
+	const [zoom, setZoom] = useState(5);
+	const [tileX, setTileX] = useState(0);
+	const [tileY, setTileY] = useState(0);
+	const noPano = scopedLocs.filter((l) => !l.panoId).length;
+
+	return (
+		<div className="bulk-operation">
+			<ScopeSelector ctl={scopeCtl} />
+			{noPano > 0 && (
+				<div className="bulk-operation__status">
+					{fmt.format(noPano)} without pano ID will be resolved from coordinates.
+				</div>
+			)}
+			<label className="bulk-operation__option">
+				Mode
+				<NSelect value={mode} onChange={(e) => setMode(e.target.value as PanoRenderMode)}>
+					<option value="equirectangular">Equirectangular (full panorama)</option>
+					<option value="perspective">Perspective (1920×1080)</option>
+					<option value="thumbnail">Thumbnail (1024×768)</option>
+					<option value="tile">Tile (512×512)</option>
+				</NSelect>
+			</label>
+			{mode !== "thumbnail" && (
+				<label className="bulk-operation__option">
+					Zoom level
+					<NSelect
+						style={{ width: 100 }}
+						value={String(zoom)}
+						onChange={(e) => setZoom(Number(e.target.value))}
+					>
+						{[1, 2, 3, 4, 5].map((z) => (
+							<option key={z} value={z}>
+								{z}
+							</option>
+						))}
+					</NSelect>
+				</label>
+			)}
+			{mode === "tile" && (
+				<>
+					<label className="bulk-operation__option">
+						Tile X
+						<input
+							className="input"
+							type="number"
+							min={0}
+							step={1}
+							value={tileX}
+							onChange={(e) => setTileX(Math.max(0, Number(e.target.value) || 0))}
+							style={{ width: 100 }}
+						/>
+					</label>
+					<label className="bulk-operation__option">
+						Tile Y
+						<input
+							className="input"
+							type="number"
+							min={0}
+							step={1}
+							value={tileY}
+							onChange={(e) => setTileY(Math.max(0, Number(e.target.value) || 0))}
+							style={{ width: 100 }}
+						/>
+					</label>
+				</>
+			)}
+			<div className="bulk-operation__actions">
+				<button
+					className="button button--primary"
+					type="button"
+					onClick={() => {
+						const config = { mode, zoom, tileX, tileY };
+						onReady(async ({ locations, signal, onProgress }) => {
+							const result = await bulkDownloadPanoramas(locations, config, {
+								signal,
+								onProgress,
+							});
+							// Prompt for the destination right away; the button below
+							// only reappears as a retry if the dialog is cancelled.
+							let saved = false;
+							try {
+								saved = await saveDownloadResult(result);
+							} catch {
+								toast("Save failed");
+							}
+							return {
+								doneMessage:
+									`Done -- ${fmt.format(result.succeeded.length)} downloaded` +
+									(result.failed.length > 0
+										? `, ${fmt.format(result.failed.length)} failed.`
+										: "."),
+								doneActions: <DownloadDoneActions result={result} initiallySaved={saved} />,
+							};
+						});
+					}}
+				>
+					Start
+				</button>
+			</div>
+		</div>
+	);
+}
+
 // ---------------------------------------------------------------------------
 // Result display
 // ---------------------------------------------------------------------------
+
+/** Prompt for a destination and move the packaged download there. False = cancelled. */
+async function saveDownloadResult(result: BulkDownloadResult): Promise<boolean> {
+	if (!result.outputPath || !result.suggestedName) return false;
+	const ok = await saveExportTempFile(result.outputPath, result.suggestedName);
+	if (ok) {
+		toast(
+			result.fileCount === 1
+				? "Panorama saved"
+				: `Saved ${fmt.format(result.fileCount)} panoramas as ZIP`,
+		);
+	}
+	return ok;
+}
+
+function DownloadDoneActions({
+	result,
+	initiallySaved,
+}: {
+	result: BulkDownloadResult;
+	initiallySaved: boolean;
+}) {
+	// storeSaveExportFile consumes the temp file, so a completed save is final.
+	const [saved, setSaved] = useState(initiallySaved);
+
+	const save = async () => {
+		try {
+			if (await saveDownloadResult(result)) setSaved(true);
+		} catch {
+			toast("Save failed");
+		}
+	};
+
+	return (
+		<>
+			{result.outputPath != null && !saved && (
+				<button className="button button--primary" type="button" onClick={() => void save()}>
+					{result.fileCount === 1 ? "Save image" : "Save ZIP"}
+				</button>
+			)}
+			{result.failed.length > 0 && (
+				<button
+					className="button"
+					type="button"
+					onClick={() => {
+						addSelections([{ type: "Manual", locations: result.failed }]);
+						toast(`Selected ${fmt.format(result.failed.length)} failed locations`);
+					}}
+				>
+					Select failed
+				</button>
+			)}
+		</>
+	);
+}
 
 function EnrichSummary({
 	result,
@@ -648,9 +818,12 @@ function BulkProgress({
 						Cancel
 					</button>
 				) : (
-					<button className="button button--primary" type="button" onClick={onClose}>
-						Close
-					</button>
+					<>
+						{status === "done" && result.doneActions}
+						<button className="button button--primary" type="button" onClick={onClose}>
+							Close
+						</button>
+					</>
 				)}
 			</div>
 		</div>
@@ -668,6 +841,7 @@ const SETUPS: Record<BulkOperation, React.ComponentType<SetupProps>> = {
 	clearFields: ClearFieldsSetup,
 	setField: SetFieldSetup,
 	headingRoad: HeadingRoadSetup,
+	downloadPanoramas: DownloadPanoramasSetup,
 };
 
 export function BulkOperationModal({ operation, onClose }: Props) {

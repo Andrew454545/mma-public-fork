@@ -201,6 +201,24 @@ fn configure_connection(conn: &Connection) -> AppResult<()> {
 /// Sets WAL mode and foreign keys as part of the connection setup.
 pub(crate) fn run_migrations() -> AppResult<()> {
     let conn = open_db()?;
+    let wiped_blobs = run_migrations_on(&conn)?;
+
+    if wiped_blobs {
+        let blobs = arrow_dir()?.join("blobs");
+        if blobs.exists() {
+            if let Err(e) = std::fs::remove_dir_all(&blobs) {
+                log::warn!("[migrations] failed to remove old blob store {blobs:?}: {e}");
+            } else {
+                log::info!("[migrations] removed retired blob store {blobs:?}");
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Run the migration chain against an arbitrary connection. Returns whether v16
+/// was newly applied (the caller owns the retired blob-store cleanup).
+pub(crate) fn run_migrations_on(conn: &Connection) -> AppResult<bool> {
     conn.execute_batch(
         "
         PRAGMA foreign_keys = ON;
@@ -261,17 +279,7 @@ pub(crate) fn run_migrations() -> AppResult<()> {
         conn.execute_batch("VACUUM")?;
     }
 
-    if wiped_blobs {
-        let blobs = arrow_dir()?.join("blobs");
-        if blobs.exists() {
-            if let Err(e) = std::fs::remove_dir_all(&blobs) {
-                log::warn!("[migrations] failed to remove old blob store {blobs:?}: {e}");
-            } else {
-                log::info!("[migrations] removed retired blob store {blobs:?}");
-            }
-        }
-    }
-    Ok(())
+    Ok(wiped_blobs)
 }
 
 const MIGRATIONS: &[(u32, &str)] = &[

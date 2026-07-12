@@ -156,3 +156,244 @@ fn deltas_round_trip_through_disk_and_replay() {
 
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+// -----------------------------------------------------------------------
+// Model-based property test: diff_states + replay_deltas against a plain
+// BTreeMap model driven by a random script of add/remove/modify commits.
+// -----------------------------------------------------------------------
+
+use proptest::prelude::*;
+
+fn finite_f64() -> impl Strategy<Value = f64> {
+    prop_oneof![
+        1 => Just(0.0),
+        1 => Just(-0.0),
+        1 => Just(f64::MIN),
+        1 => Just(f64::MAX),
+        1 => Just(1.0 / 3.0),
+        5 => -1.0e6f64..1.0e6,
+    ]
+}
+
+fn arb_lat() -> impl Strategy<Value = f64> {
+    prop_oneof![
+        1 => Just(0.0),
+        1 => Just(-0.0),
+        1 => Just(90.0),
+        1 => Just(-90.0),
+        1 => Just(48.858_222_222_195_44),
+        5 => -90.0f64..=90.0,
+    ]
+}
+
+fn arb_lng() -> impl Strategy<Value = f64> {
+    prop_oneof![
+        1 => Just(0.0),
+        1 => Just(-0.0),
+        1 => Just(180.0),
+        1 => Just(-180.0),
+        1 => Just(2.352_222_222_195_44),
+        5 => -180.0f64..=180.0,
+    ]
+}
+
+fn arb_heading() -> impl Strategy<Value = f64> {
+    prop_oneof![
+        1 => Just(0.0),
+        1 => Just(-0.0),
+        1 => Just(360.0),
+        1 => Just(123.456_789_012_3),
+        5 => 0.0f64..=360.0,
+    ]
+}
+
+fn arb_string() -> impl Strategy<Value = String> {
+    prop_oneof![
+        3 => "[a-zA-Z0-9_]{0,16}",
+        2 => ".{0,12}",
+        1 => Just(String::new()),
+        1 => Just("caf\u{00e9}_\u{4e2d}\u{6587}_\u{1f600}".to_string()),
+        1 => Just("\u{0000}\u{001f}".to_string()),
+    ]
+}
+
+fn arb_pano_id() -> impl Strategy<Value = Option<String>> {
+    prop_oneof![1 => Just(None), 3 => arb_string().prop_map(Some)]
+}
+
+fn arb_tags() -> impl Strategy<Value = Vec<u32>> {
+    prop::collection::vec(any::<u32>(), 0..64)
+}
+
+fn arb_extra_map() -> impl Strategy<Value = serde_json::Map<String, serde_json::Value>> {
+    prop::collection::vec((arb_string(), arb_string()), 1..5).prop_map(|pairs| {
+        pairs
+            .into_iter()
+            .map(|(k, v)| (k, serde_json::Value::String(v)))
+            .collect()
+    })
+}
+
+fn arb_extra() -> impl Strategy<Value = Option<crate::types::RawExtra>> {
+    prop_oneof![
+        1 => Just(None),
+        3 => arb_extra_map().prop_map(|m| crate::types::RawExtra::from_map(&m)),
+    ]
+}
+
+fn arb_modified_at() -> impl Strategy<Value = Option<u32>> {
+    prop_oneof![1 => Just(None), 3 => any::<u32>().prop_map(Some)]
+}
+
+/// A location body with a placeholder id; the caller assigns the real id.
+fn arb_location_body() -> impl Strategy<Value = Location> {
+    (
+        arb_lat(),
+        arb_lng(),
+        arb_heading(),
+        finite_f64(),
+        finite_f64(),
+        arb_pano_id(),
+        any::<u32>().prop_map(crate::types::LocationFlags::from_bits_retain),
+        arb_tags(),
+        arb_extra(),
+        any::<u32>(),
+        arb_modified_at(),
+    )
+        .prop_map(
+            |(
+                lat,
+                lng,
+                heading,
+                pitch,
+                zoom,
+                pano_id,
+                flags,
+                tags,
+                extra,
+                created_at,
+                modified_at,
+            )| {
+                Location {
+                    id: 0,
+                    lat,
+                    lng,
+                    heading,
+                    pitch,
+                    zoom,
+                    pano_id,
+                    flags,
+                    tags,
+                    extra,
+                    created_at,
+                    modified_at,
+                }
+            },
+        )
+}
+
+#[derive(Clone, Debug)]
+enum Op {
+    Add(Location),
+    Remove(usize),
+    Modify(usize, Location),
+}
+
+fn op_strategy() -> impl Strategy<Value = Op> {
+    prop_oneof![
+        3 => arb_location_body().prop_map(Op::Add),
+        1 => (0usize..64).prop_map(Op::Remove),
+        3 => (0usize..64, arb_location_body()).prop_map(|(i, l)| Op::Modify(i, l)),
+    ]
+}
+
+/// Apply one op to the model in place, assigning fresh ids for `Add` and
+/// picking an existing id (by position, modulo the live count) for
+/// `Remove`/`Modify`. A `Remove`/`Modify` against an empty model is a no-op.
+fn apply_op(model: &mut BTreeMap<u32, Location>, op: &Op, next_id: &mut u32) {
+    match op {
+        Op::Add(body) => {
+            let id = *next_id;
+            *next_id += 1;
+            let mut l = body.clone();
+            l.id = id;
+            model.insert(id, l);
+        }
+        Op::Remove(sel) => {
+            if model.is_empty() {
+                return;
+            }
+            let id = *model.keys().nth(sel % model.len()).unwrap();
+            model.remove(&id);
+        }
+        Op::Modify(sel, body) => {
+            if model.is_empty() {
+                return;
+            }
+            let id = *model.keys().nth(sel % model.len()).unwrap();
+            let mut l = body.clone();
+            l.id = id;
+            model.insert(id, l);
+        }
+    }
+}
+
+/// Independent reference implementation of `diff_states`' counts, computed by
+/// direct set comparison of the two full states rather than reusing the SUT.
+fn expected_counts(
+    parent: &BTreeMap<u32, Location>,
+    current: &BTreeMap<u32, Location>,
+) -> (u32, u32, u32) {
+    let mut added = 0u32;
+    let mut removed = 0u32;
+    let mut modified = 0u32;
+    for id in parent.keys() {
+        if !current.contains_key(id) {
+            removed += 1;
+        }
+    }
+    for (id, loc) in current {
+        match parent.get(id) {
+            None => added += 1,
+            Some(ploc) => {
+                if ploc != loc {
+                    modified += 1;
+                }
+            }
+        }
+    }
+    (added, removed, modified)
+}
+
+proptest! {
+    #[test]
+    fn prop_diff_and_replay_match_model(
+        commits in prop::collection::vec(prop::collection::vec(op_strategy(), 0..5), 0..8)
+    ) {
+        let mut model: BTreeMap<u32, Location> = BTreeMap::new();
+        let mut next_id: u32 = 1;
+        let mut deltas: Vec<(Vec<Location>, Vec<Location>)> = Vec::new();
+
+        for ops in &commits {
+            let parent = model.clone();
+            for op in ops {
+                apply_op(&mut model, op, &mut next_id);
+            }
+            let current: Vec<Location> = model.values().cloned().collect();
+            let (created, removed, added_n, removed_n, modified_n) = diff_states(&parent, &current);
+
+            let (exp_added, exp_removed, exp_modified) = expected_counts(&parent, &model);
+            prop_assert_eq!(added_n, exp_added);
+            prop_assert_eq!(removed_n, exp_removed);
+            prop_assert_eq!(modified_n, exp_modified);
+
+            deltas.push((created, removed));
+        }
+
+        let replayed = replay_deltas(&deltas);
+        prop_assert_eq!(&replayed, &model);
+
+        let ids: Vec<u32> = replayed.keys().copied().collect();
+        prop_assert!((1..ids.len()).all(|i| ids[i - 1] < ids[i]));
+    }
+}

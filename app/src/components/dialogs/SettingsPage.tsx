@@ -574,6 +574,30 @@ function MapNavigationSection() {
 					{s.mapPanSpeed}
 				</span>
 			</label>
+			<label
+				className="settings-popup__item"
+				style={{
+					display: "flex",
+					alignItems: "center",
+					gap: "0.5rem",
+					opacity: s.panToImported ? 1 : 0.5,
+				}}
+			>
+				Paste zoom padding
+				<input
+					type="range"
+					min={0.001}
+					max={0.05}
+					step={0.001}
+					value={s.pastePadding}
+					disabled={!s.panToImported}
+					onChange={(e) => setSetting("pastePadding", Number(e.target.value))}
+					style={{ flex: 1 }}
+				/>
+				<span style={{ minWidth: "2.5rem", textAlign: "right", fontSize: "0.85rem" }}>
+					{s.pastePadding.toFixed(3)}&deg;
+				</span>
+			</label>
 			<label className="settings-popup__item">
 				<input
 					type="checkbox"

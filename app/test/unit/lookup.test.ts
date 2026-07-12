@@ -7,12 +7,12 @@ import {
 	clickSearchRadius,
 	normalizeHeading,
 	nearestLinkHeading,
-	panoTileLayout,
 	calcHeading,
 	samePano,
 	isUnofficial,
 	svThumbnailUrl,
 } from "@/lib/sv/lookup";
+import { panoTileLayout } from "@/lib/sv/panoDownload";
 
 describe("parsePanoDate", () => {
 	it("passes through a valid Date", () => {

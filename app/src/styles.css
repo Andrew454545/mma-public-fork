@@ -2845,7 +2845,9 @@ summary.button {
 }
 .bulk-operation__actions {
 	display: flex;
+	flex-wrap: wrap;
 	justify-content: flex-end;
+	gap: 0.5rem;
 }
 
 .merge-duplicates__status {
@@ -3850,12 +3852,6 @@ body.mm-tag-dragging * {
 .tag-tree__row.is-dragging {
 	opacity: 0.4;
 }
-.tag-tree__row[data-drop="before"] {
-	box-shadow: 0 -2px 0 0 #4a9eff;
-}
-.tag-tree__row[data-drop="after"] {
-	box-shadow: 0 2px 0 0 #4a9eff;
-}
 .tag-tree__row.is-selected {
 	opacity: 1;
 	outline: 2px solid #fff;
@@ -3864,7 +3860,8 @@ body.mm-tag-dragging * {
 	opacity: 0.85;
 	outline: 1px dashed rgba(255, 255, 255, 0.5);
 }
-.tag-tree__row:hover {
+/* No hover feedback mid-drag: rows gliding under the cursor would flash. */
+body:not(.mm-tag-dragging) .tag-tree__row:hover {
 	opacity: 1;
 }
 .tag-tree__chevron {
@@ -3908,10 +3905,10 @@ body.mm-tag-dragging * {
 	opacity: 0;
 	box-shadow: none;
 }
-.tag-tree__row:hover .tag-tree__edit {
+body:not(.mm-tag-dragging) .tag-tree__row:hover .tag-tree__edit {
 	opacity: 0.7;
 }
-.tag-tree__edit:hover {
+body:not(.mm-tag-dragging) .tag-tree__edit:hover {
 	opacity: 1 !important;
 }
 .tag-tree__leaves {

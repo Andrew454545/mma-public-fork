@@ -24,9 +24,9 @@ import {
 	type PanoReference,
 	nearestLinkHeading,
 	followLinkedPanos,
-	downloadPano,
 	showToast,
 } from "@/lib/sv/lookup";
+import { downloadPano } from "@/lib/sv/panoDownload";
 import { isVirtualLocation } from "@/types";
 import { reviewNext, reviewPrev } from "@/lib/review/review";
 import { registerMapKeyActionHandler } from "@/lib/map/mapKeyBindings";

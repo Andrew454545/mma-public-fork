@@ -72,6 +72,9 @@ fn register_web_schemes() {
         let path = percent_encoding::percent_decode_str(&req.path)
             .decode_utf8_lossy()
             .into_owned();
+        if req.method.eq_ignore_ascii_case("POST") {
+            return relay(crate::write_upload(&path, &req.body));
+        }
         match std::fs::read(&path) {
             Ok(data) => SchemeResponse::ok("application/octet-stream", data),
             Err(e) => SchemeResponse::not_found(format!("file not found: {path} — {e}")),

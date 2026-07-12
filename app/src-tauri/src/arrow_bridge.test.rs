@@ -213,3 +213,171 @@ fn single_row_access() {
     assert!(loc.tags.is_empty());
     assert!(loc.extra.is_none());
 }
+
+// -----------------------------------------------------------------------
+// Property-based round-trip tests
+// -----------------------------------------------------------------------
+
+use proptest::prelude::*;
+
+fn finite_f64() -> impl Strategy<Value = f64> {
+    prop_oneof![
+        1 => Just(0.0),
+        1 => Just(-0.0),
+        1 => Just(f64::MIN),
+        1 => Just(f64::MAX),
+        1 => Just(1.0 / 3.0),
+        5 => -1.0e6f64..1.0e6,
+    ]
+}
+
+fn arb_lat() -> impl Strategy<Value = f64> {
+    prop_oneof![
+        1 => Just(0.0),
+        1 => Just(-0.0),
+        1 => Just(90.0),
+        1 => Just(-90.0),
+        1 => Just(48.858_222_222_195_44),
+        5 => -90.0f64..=90.0,
+    ]
+}
+
+fn arb_lng() -> impl Strategy<Value = f64> {
+    prop_oneof![
+        1 => Just(0.0),
+        1 => Just(-0.0),
+        1 => Just(180.0),
+        1 => Just(-180.0),
+        1 => Just(2.352_222_222_195_44),
+        5 => -180.0f64..=180.0,
+    ]
+}
+
+fn arb_heading() -> impl Strategy<Value = f64> {
+    prop_oneof![
+        1 => Just(0.0),
+        1 => Just(-0.0),
+        1 => Just(360.0),
+        1 => Just(123.456_789_012_3),
+        5 => 0.0f64..=360.0,
+    ]
+}
+
+fn arb_string() -> impl Strategy<Value = String> {
+    prop_oneof![
+        3 => "[a-zA-Z0-9_]{0,16}",
+        2 => ".{0,12}",
+        1 => Just(String::new()),
+        1 => Just("caf\u{00e9}_\u{4e2d}\u{6587}_\u{1f600}".to_string()),
+        1 => Just("\u{0000}\u{001f}".to_string()),
+    ]
+}
+
+fn arb_pano_id() -> impl Strategy<Value = Option<String>> {
+    prop_oneof![1 => Just(None), 3 => arb_string().prop_map(Some)]
+}
+
+fn arb_tags() -> impl Strategy<Value = Vec<u32>> {
+    prop::collection::vec(any::<u32>(), 0..64)
+}
+
+fn arb_extra_map() -> impl Strategy<Value = serde_json::Map<String, serde_json::Value>> {
+    prop::collection::vec((arb_string(), arb_string()), 1..5).prop_map(|pairs| {
+        pairs
+            .into_iter()
+            .map(|(k, v)| (k, serde_json::Value::String(v)))
+            .collect()
+    })
+}
+
+fn arb_extra() -> impl Strategy<Value = Option<crate::types::RawExtra>> {
+    prop_oneof![
+        1 => Just(None),
+        3 => arb_extra_map().prop_map(|m| crate::types::RawExtra::from_map(&m)),
+    ]
+}
+
+fn arb_modified_at() -> impl Strategy<Value = Option<u32>> {
+    prop_oneof![1 => Just(None), 3 => any::<u32>().prop_map(Some)]
+}
+
+fn arb_location_body() -> impl Strategy<Value = Location> {
+    (
+        arb_lat(),
+        arb_lng(),
+        arb_heading(),
+        finite_f64(),
+        finite_f64(),
+        arb_pano_id(),
+        any::<u32>().prop_map(LocationFlags::from_bits_retain),
+        arb_tags(),
+        arb_extra(),
+        any::<u32>(),
+        arb_modified_at(),
+    )
+        .prop_map(
+            |(
+                lat,
+                lng,
+                heading,
+                pitch,
+                zoom,
+                pano_id,
+                flags,
+                tags,
+                extra,
+                created_at,
+                modified_at,
+            )| {
+                Location {
+                    id: 0,
+                    lat,
+                    lng,
+                    heading,
+                    pitch,
+                    zoom,
+                    pano_id,
+                    flags,
+                    tags,
+                    extra,
+                    created_at,
+                    modified_at,
+                }
+            },
+        )
+}
+
+/// A `Vec<Location>` with sorted, unique ids, matching the store's invariant.
+fn sorted_unique_locations(max_len: usize) -> impl Strategy<Value = Vec<Location>> {
+    prop::collection::vec((any::<u32>(), arb_location_body()), 0..=max_len).prop_map(|mut pairs| {
+        pairs.sort_by_key(|(id, _)| *id);
+        pairs.dedup_by_key(|(id, _)| *id);
+        pairs
+            .into_iter()
+            .map(|(id, mut loc)| {
+                loc.id = id;
+                loc
+            })
+            .collect()
+    })
+}
+
+proptest! {
+    #[test]
+    fn prop_locations_round_trip(locs in sorted_unique_locations(50)) {
+        let batch = locations_to_batch(&locs);
+        let restored = batch_to_locations(&batch);
+        prop_assert_eq!(restored, locs);
+    }
+
+    #[test]
+    fn prop_delta_round_trip(
+        created in sorted_unique_locations(25),
+        removed in sorted_unique_locations(25),
+    ) {
+        let batch = delta_to_batch(&created, &removed);
+        let (created_out, removed_out) = batch_to_delta(&batch);
+        prop_assert_eq!(created_out, created);
+        prop_assert_eq!(removed_out, removed);
+    }
+}

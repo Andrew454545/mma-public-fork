@@ -1449,7 +1449,8 @@ async function setImportStaging(preview: EditorImportPreview, source: "file" | "
 	importMarkerVersion++;
 	workArea = "import";
 	bump();
-	if (getSettings().panToImported) fitMapToBounds(bboxTupleToBounds(preview.bounds), 100);
+	if (getSettings().panToImported)
+		fitMapToBounds(bboxTupleToBounds(preview.bounds), 100, getSettings().pastePadding);
 }
 
 /** Import from a known file path. Used by file picker and drag-and-drop. */

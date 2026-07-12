@@ -862,6 +862,14 @@ function TagsSection() {
 					Truncate tag names to shortest unique path
 				</label>
 			)}
+			<label className="settings-popup__item">
+				<input
+					type="checkbox"
+					checked={s.animateTagReorder}
+					onChange={(e) => setSetting("animateTagReorder", e.target.checked)}
+				/>
+				Animate tags during drag reorder
+			</label>
 			<label
 				className="settings-popup__item"
 				style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}

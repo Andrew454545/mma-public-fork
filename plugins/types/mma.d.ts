@@ -3028,6 +3028,7 @@ declare const DEFAULTS: {
 	tagSortMode: TagSortMode;
 	/** Gap between tag pills (px), shared by flat and tree views via `--tag-gap`. */
 	tagGap: number;
+	animateTagReorder: boolean;
 	borderDetail: BorderDetail;
 	subdivisionDetail: SubdivisionDetail;
 	previewAspectRatio: PreviewAspectRatio;
@@ -3286,6 +3287,7 @@ declare const mma: {
 		truncateTagPaths: boolean;
 		tagSortMode: TagSortMode;
 		tagGap: number;
+		animateTagReorder: boolean;
 		borderDetail: BorderDetail;
 		subdivisionDetail: SubdivisionDetail;
 		previewAspectRatio: PreviewAspectRatio;

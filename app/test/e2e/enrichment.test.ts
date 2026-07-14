@@ -171,11 +171,17 @@ describe("Enrichment — single location via preview", () => {
 		// Pre-seed with stale datetime
 		const dtLoc = await readLocation(enrichExistingMetaId);
 		await withApi(async (api, l) => {
-			await api.patchLocationExtra(l, {
-				imageDate: "2099-01",
-				datetime: 9999999999,
-				timezone: "Fake/Zone",
-			});
+			await api.updateLocations(
+				[
+					{
+						id: l.id,
+						patch: {
+							extra: { imageDate: "2099-01", datetime: 9999999999, timezone: "Fake/Zone" },
+						},
+					},
+				],
+				{ undoable: false },
+			);
 			return "ok";
 		}, dtLoc);
 
@@ -194,8 +200,8 @@ describe("Enrichment — single location via preview", () => {
 
 		const after = await readLocation(enrichExistingMetaId);
 		expect(after.extra.imageDate).not.toBe("2099-01");
-		expect(after.extra.datetime).toBeNull();
-		expect(after.extra.timezone).toBeNull();
+		expect(after.extra.datetime).toBeUndefined();
+		expect(after.extra.timezone).toBeUndefined();
 	});
 
 	it("location without panoId resolves pano from coords and enriches", async () => {
@@ -266,7 +272,7 @@ describe("Enrichment — respects enrichFields setting", () => {
 		// Clear existing extra
 		const clearLoc = await readLocation(fieldsSelectiveId);
 		await withApi(async (api, l) => {
-			await api.patchLocationExtra(l, {}, true);
+			await api.updateLocations([{ id: l.id, patch: { extra: null } }], { undoable: false });
 			return "ok";
 		}, clearLoc);
 
@@ -354,7 +360,7 @@ describe("Enrichment — auto-registers field defs on map meta", () => {
 		// Clear extra and re-enrich
 		const defLoc = await readLocation(defsAutoId);
 		await withApi(async (api, l) => {
-			await api.patchLocationExtra(l, {}, true);
+			await api.updateLocations([{ id: l.id, patch: { extra: null } }], { undoable: false });
 			return "ok";
 		}, defLoc);
 
@@ -369,10 +375,12 @@ describe("Enrichment — auto-registers field defs on map meta", () => {
 		expect(fields.countryCode.label).toBe("My Custom Country");
 	});
 
-	it("patchLocationExtra auto-registers known field keys", async () => {
+	it("extra patches auto-register known field keys", async () => {
 		const patchLoc = await readLocation(defsAutoId);
 		await withApi(async (api, l) => {
-			await api.patchLocationExtra(l, { datetime: 1700000000 });
+			await api.updateLocations([{ id: l.id, patch: { extra: { datetime: 1700000000 } } }], {
+				undoable: false,
+			});
 			return "ok";
 		}, patchLoc);
 
@@ -400,7 +408,9 @@ describe("Enrichment — auto-registers field defs on map meta", () => {
 	it("unknown extra fields get auto-registered as known keys", async () => {
 		const customLoc = await readLocation(defsAutoId);
 		await withApi(async (api, l) => {
-			await api.patchLocationExtra(l, { randomCustomThing: "hello" });
+			await api.updateLocations([{ id: l.id, patch: { extra: { randomCustomThing: "hello" } } }], {
+				undoable: false,
+			});
 			return "ok";
 		}, customLoc);
 
@@ -619,19 +629,25 @@ describe("Enrichment — multiple providers merge without clobbering", () => {
 		}
 	});
 
-	it("requires-triggered providers merge instead of clobbering", async () => {
+	it("provider waves merge with pre-existing extra instead of clobbering it", async () => {
 		const l0 = await readLocation(trigId);
 		await withApi(async (api, loc0) => {
-			await api.patchLocationExtra(loc0, { datetime: 1700000000 });
+			await api.updateLocations([{ id: loc0.id, patch: { extra: { datetime: 1700000000 } } }], {
+				undoable: false,
+			});
 			return "ok";
 		}, l0);
 
+		await withApi(async (api) => {
+			await api.enrichAll();
+			return "ok";
+		});
 		await browser.waitUntil(
 			async () => {
 				const l = await readLocation(trigId);
 				return l?.extra?.trigA != null && l?.extra?.trigB != null;
 			},
-			{ timeout: 5000, timeoutMsg: "both triggered provider fields never present" },
+			{ timeout: 5000, timeoutMsg: "both wave-2 provider fields never present" },
 		);
 
 		const l = await readLocation(trigId);

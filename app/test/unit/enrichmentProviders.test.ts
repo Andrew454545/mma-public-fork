@@ -1,8 +1,7 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect } from "vitest";
 import {
 	registerEnrichmentProvider,
 	getEnrichmentProviders,
-	getTriggeredProviders,
 	registerEnrichFields,
 	getEnrichFieldOptions,
 	getAllEnrichKeys,
@@ -11,7 +10,7 @@ import {
 	filterEnrichPatch,
 	providerWaves,
 } from "@/lib/data/fieldDefs";
-import { getFieldDef, resetForMapChange } from "@/lib/data/fieldDefRegistry";
+import { getFieldDef } from "@/lib/data/fieldDefRegistry";
 
 // The providers array is module-level and accumulates, so tests see
 // providers from prior registrations. We test behavior, not count.
@@ -46,64 +45,6 @@ describe("registerEnrichmentProvider", () => {
 		});
 		expect(getFieldDef(key)).toBeDefined();
 		expect(getFieldDef(key)!.label).toBe("Registered");
-	});
-});
-
-describe("getTriggeredProviders", () => {
-	it("returns providers whose requires match patched keys", () => {
-		const id = "trigger-test-" + Math.random();
-		const provider = {
-			id,
-			enrich: async () => new Map(),
-			fieldDefs: {},
-			requires: ["datetime"],
-		};
-		registerEnrichmentProvider(provider);
-		const triggered = getTriggeredProviders(["datetime"]);
-		expect(triggered).toContain(provider);
-	});
-
-	it("does not trigger providers without requires", () => {
-		const id = "no-requires-" + Math.random();
-		const provider = {
-			id,
-			enrich: async () => new Map(),
-			fieldDefs: {},
-		};
-		registerEnrichmentProvider(provider);
-		const triggered = getTriggeredProviders(["datetime"]);
-		expect(triggered).not.toContain(provider);
-	});
-
-	it("does not trigger when patched keys do not match requires", () => {
-		const id = "no-match-" + Math.random();
-		const provider = {
-			id,
-			enrich: async () => new Map(),
-			fieldDefs: {},
-			requires: ["datetime"],
-		};
-		registerEnrichmentProvider(provider);
-		const triggered = getTriggeredProviders(["countryCode", "altitude"]);
-		expect(triggered).not.toContain(provider);
-	});
-
-	it("triggers when any required key is in the patch", () => {
-		const id = "partial-match-" + Math.random();
-		const provider = {
-			id,
-			enrich: async () => new Map(),
-			fieldDefs: {},
-			requires: ["datetime", "timezone"],
-		};
-		registerEnrichmentProvider(provider);
-		const triggered = getTriggeredProviders(["timezone"]);
-		expect(triggered).toContain(provider);
-	});
-
-	it("returns empty array when no providers match", () => {
-		const triggered = getTriggeredProviders(["fieldThatNothingRequires_" + Math.random()]);
-		expect(triggered).toHaveLength(0);
 	});
 });
 

@@ -62,18 +62,14 @@ export function getSvResolvers(): SvResolver[] {
 	return registry;
 }
 
-/** Merge resolver patches for one location: `extra` deep-merges into the location's
- *  existing extra; every other key overwrites. Same rule as `fieldOps.planFieldSet`. */
-export function mergePatches(
-	loc: Location,
-	patches: Partial<Location>[],
-): Partial<Location> | null {
+/** Merge resolver patches for one location: `extra` keys merge across patches (the
+ *  store merge-patches them into the location); every other key overwrites. */
+export function mergePatches(patches: Partial<Location>[]): Partial<Location> | null {
 	const out: Record<string, unknown> = {};
 	let extra: Record<string, unknown> | undefined;
 	for (const p of patches) {
 		for (const [k, v] of Object.entries(p)) {
-			if (k === "extra")
-				extra = { ...(extra ?? (loc.extra as Record<string, unknown>) ?? {}), ...(v as object) };
+			if (k === "extra") extra = { ...extra, ...(v as object) };
 			else out[k] = v;
 		}
 	}
@@ -176,7 +172,7 @@ export async function runResolvers(
 				result[r.id].success.push(loc.id);
 				if (patch) patches.push(patch);
 			}
-			const merged = mergePatches(loc, patches);
+			const merged = mergePatches(patches);
 			if (merged) allUpdates.push({ id: loc.id, patch: merged });
 		}
 	}
@@ -215,7 +211,7 @@ export async function runResolvers(
 					result[r.id].failed.push(loc.id);
 				}
 			}
-			const merged = mergePatches(loc, patches);
+			const merged = mergePatches(patches);
 			if (merged) allUpdates.push({ id: loc.id, patch: merged });
 		}
 	}
@@ -231,7 +227,6 @@ export async function runResolvers(
 		for (const wave of providerWaves(getEnrichmentProviders())) {
 			signal?.throwIfAborted();
 			const pluginLocs = await fetchLocationsByIds(scopeIds);
-			const byId = new Map(pluginLocs.map((l) => [l.id, l]));
 			const units = wave.map((p) => p.units?.(pluginLocs, enrichFields, force) ?? 0);
 			const waveTotal = units.reduce((a, b) => a + b, 0);
 			const slow = wave.filter((p, i) => units[i] > 0 && p.label);
@@ -261,10 +256,7 @@ export async function runResolvers(
 			// Write before honoring an abort, so partial provider results persist.
 			if (mergedById.size > 0) {
 				await updateLocations(
-					[...mergedById.entries()].map(([id, patch]) => ({
-						id,
-						patch: { extra: { ...byId.get(id)?.extra, ...patch } },
-					})),
+					[...mergedById.entries()].map(([id, patch]) => ({ id, patch: { extra: patch } })),
 				);
 			}
 			signal?.throwIfAborted();

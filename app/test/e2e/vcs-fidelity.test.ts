@@ -76,7 +76,13 @@ describe("VCS data fidelity — exact restoration through checkout", () => {
 
 		// Extra fields: a string and a number, to prove JSON typing survives.
 		const loc2 = await getLoc(ids[2]);
-		await withApi(async (api, l) => api.patchLocationExtra(l, { note: "hello", score: 42 }), loc2);
+		await withApi(
+			async (api, l) =>
+				api.updateLocations([{ id: l.id, patch: { extra: { note: "hello", score: 42 } } }], {
+					undoable: false,
+				}),
+			loc2,
+		);
 
 		await flushAndWait();
 		await withApi(async (api) => api.commitMap("v1"));
@@ -109,7 +115,13 @@ describe("VCS data fidelity — exact restoration through checkout", () => {
 		);
 		await withApi(async (api, t, c) => api.addTagToLocations(t, [c]), tagId, ids[2]);
 		const loc2 = await getLoc(ids[2]);
-		await withApi(async (api, l) => api.patchLocationExtra(l, { note: "changed" }), loc2);
+		await withApi(
+			async (api, l) =>
+				api.updateLocations([{ id: l.id, patch: { extra: { note: "changed" } } }], {
+					undoable: false,
+				}),
+			loc2,
+		);
 		await withApi(async (api, d) => api.removeLocations(new Set([d])), ids[3]);
 		await addLocs([createLocation({ lat: 5, lng: 6, heading: 7, panoId: "NEW" })]);
 

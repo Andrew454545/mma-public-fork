@@ -1,4 +1,4 @@
-import type { Location } from "@/bindings.gen";
+import type { Location, LocationPatch_Deserialize as LocationPatch } from "@/bindings.gen";
 import { nowUnix } from "@/lib/util/format";
 
 /** Street View camera orientation (POV). */
@@ -95,6 +95,27 @@ export function createLocation(partial: Partial<Location> & LatLng): Location {
 		modifiedAt: null,
 		...partial,
 	};
+}
+
+/** Apply a LocationPatch JS-side, mirroring Rust's `overlay_update`: `extra` is a
+ *  JSON Merge Patch (RFC 7386) — keys shallow-merge, a null value deletes its key,
+ *  and a null patch clears extra entirely. */
+export function applyLocationPatch(loc: Location, patch: LocationPatch): Location {
+	const { extra: extraPatch, ...rest } = patch;
+	const next = { ...loc, ...rest } as Location;
+	if (extraPatch !== undefined) {
+		if (extraPatch === null) {
+			next.extra = null;
+		} else {
+			const merged: Record<string, unknown> = { ...loc.extra };
+			for (const [k, v] of Object.entries(extraPatch as Record<string, unknown>)) {
+				if (v === null) delete merged[k];
+				else merged[k] = v;
+			}
+			next.extra = Object.keys(merged).length > 0 ? merged : null;
+		}
+	}
+	return next;
 }
 
 export type SortMode = "name" | "created" | "opened" | "amount";

@@ -122,6 +122,90 @@ fn overlay_update_changes_fields() {
     assert_eq!(got.lng, 20.0); // unchanged
 }
 
+fn raw_extra(s: &str) -> Option<crate::types::RawExtra> {
+    crate::types::RawExtra::from_string(s.to_string())
+}
+
+#[test]
+fn overlay_update_extra_merges_keys() {
+    let mut l = loc(1, 10.0, 20.0);
+    l.extra = raw_extra(r#"{"a":1,"b":2}"#);
+    let mut store = setup_store_with(&[l]);
+    store.overlay_update(
+        1,
+        &LocationPatch {
+            extra: Some(raw_extra(r#"{"b":3,"c":4}"#)),
+            ..patch()
+        },
+    );
+    let got = store.get_loc_by_id(1).unwrap().extra.unwrap();
+    assert_eq!(got.get("a"), Some(serde_json::json!(1)));
+    assert_eq!(got.get("b"), Some(serde_json::json!(3)));
+    assert_eq!(got.get("c"), Some(serde_json::json!(4)));
+}
+
+#[test]
+fn overlay_update_extra_null_value_deletes_key() {
+    let mut l = loc(1, 10.0, 20.0);
+    l.extra = raw_extra(r#"{"a":1,"b":2}"#);
+    let mut store = setup_store_with(&[l]);
+    store.overlay_update(
+        1,
+        &LocationPatch {
+            extra: Some(raw_extra(r#"{"a":null}"#)),
+            ..patch()
+        },
+    );
+    let got = store.get_loc_by_id(1).unwrap().extra.unwrap();
+    assert_eq!(got.get("a"), None);
+    assert_eq!(got.get("b"), Some(serde_json::json!(2)));
+}
+
+#[test]
+fn overlay_update_extra_creates_extra_when_none() {
+    let l = loc(1, 10.0, 20.0);
+    let mut store = setup_store_with(&[l]);
+    store.overlay_update(
+        1,
+        &LocationPatch {
+            extra: Some(raw_extra(r#"{"a":1}"#)),
+            ..patch()
+        },
+    );
+    let got = store.get_loc_by_id(1).unwrap().extra.unwrap();
+    assert_eq!(got.get("a"), Some(serde_json::json!(1)));
+}
+
+#[test]
+fn overlay_update_extra_empty_after_deletes_is_none() {
+    let mut l = loc(1, 10.0, 20.0);
+    l.extra = raw_extra(r#"{"a":1}"#);
+    let mut store = setup_store_with(&[l]);
+    store.overlay_update(
+        1,
+        &LocationPatch {
+            extra: Some(raw_extra(r#"{"a":null}"#)),
+            ..patch()
+        },
+    );
+    assert!(store.get_loc_by_id(1).unwrap().extra.is_none());
+}
+
+#[test]
+fn overlay_update_extra_top_level_null_clears() {
+    let mut l = loc(1, 10.0, 20.0);
+    l.extra = raw_extra(r#"{"a":1}"#);
+    let mut store = setup_store_with(&[l]);
+    store.overlay_update(
+        1,
+        &LocationPatch {
+            extra: Some(None),
+            ..patch()
+        },
+    );
+    assert!(store.get_loc_by_id(1).unwrap().extra.is_none());
+}
+
 #[test]
 fn overlay_update_nonexistent_is_noop() {
     let mut store = setup_store_with(&[]);

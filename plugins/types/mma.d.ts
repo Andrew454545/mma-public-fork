@@ -196,6 +196,20 @@ export declare const commands: {
 	 *  Always returns `Some` -- the GeoNames dataset covers every landmass.
 	 */
 	reverseGeocode: (lat: number, lng: number) => Promise<GeoResult | null>;
+	discordPresenceSet: (activity: PresenceActivity) => Promise<{
+		status: "error";
+		error: string;
+	} | {
+		status: "ok";
+		data: null;
+	}>;
+	discordPresenceClear: () => Promise<{
+		status: "error";
+		error: string;
+	} | {
+		status: "ok";
+		data: null;
+	}>;
 	/**
 	 *  Load a map's Arrow data from disk, rebuild all indexes, and return initial state
 	 *  (tag counts, undo/redo availability). Must be called before any other store commands.
@@ -1342,10 +1356,12 @@ type Location = {
 /**
  *  Partial location update from JS. `None` fields are unchanged; `Some(None)` on
  *  nullable fields (panoId, extra, modifiedAt) explicitly sets the field to null.
+ *  `extra` is a JSON Merge Patch (RFC 7386): keys shallow-merge, null values delete.
  */
 /**
  *  Partial location update from JS. `None` fields are unchanged; `Some(None)` on
  *  nullable fields (panoId, extra, modifiedAt) explicitly sets the field to null.
+ *  `extra` is a JSON Merge Patch (RFC 7386): keys shallow-merge, null values delete.
  */
 export type LocationPatch_Deserialize = {
 	lat?: number | null;
@@ -1363,6 +1379,7 @@ export type LocationPatch_Deserialize = {
 /**
  *  Partial location update from JS. `None` fields are unchanged; `Some(None)` on
  *  nullable fields (panoId, extra, modifiedAt) explicitly sets the field to null.
+ *  `extra` is a JSON Merge Patch (RFC 7386): keys shallow-merge, null values delete.
  */
 export type LocationPatch = {
 	lat: number | null;
@@ -1583,6 +1600,16 @@ export type PolygonGeometry = {
 		number
 	])[])[])[] | null;
 	properties?: any | null;
+};
+export type PresenceActivity = {
+	details: string | null;
+	state: string | null;
+	largeImage: string | null;
+	largeText: string | null;
+	smallImage: string | null;
+	smallText: string | null;
+	/**  Unix seconds; Discord renders an "elapsed" timer counting up from here. */
+	start: number | null;
 };
 /**
  *  Incremental render update sent to JS after a mutation. Contains adds, position/heading
@@ -2125,7 +2152,8 @@ export interface EnrichmentProvider {
 	label?: string;
 	enrich(locations: Location[], enrichFields: string[] | null, ctx?: EnrichCtx): Promise<Map<number, Record<string, unknown>>>;
 	fieldDefs: Record<string, ExtraFieldDef>;
-	/** When set, this provider is auto-invoked after patchLocationExtra writes any of these fields. */
+	/** Fields this provider reads: schedules it into a later dependency wave than any
+	 *  provider producing them (core-written fields like imageDate precede wave 1). */
 	requires?: string[];
 	/** Progress units this provider would contribute in bulk (absent = instant). */
 	units?(locations: Location[], enrichFields: string[] | null, force?: boolean): number;
@@ -2935,6 +2963,11 @@ declare const MAP_LIST_FIELDS: {
 	readonly lastOpened: "Last opened";
 	readonly created: "Date created";
 };
+declare const DISCORD_PRESENCE_MODES: {
+	readonly off: "Off";
+	readonly generic: "Generic (no map name)";
+	readonly full: "Full (map name + count)";
+};
 declare const GEOCODE_PROVIDERS: {
 	readonly local: "Local (offline)";
 	readonly nominatim: "Nominatim";
@@ -2966,6 +2999,7 @@ export type ExactDateFormat = keyof typeof EXACT_DATE_FORMATS;
 export type DateTimezone = keyof typeof DATE_TIMEZONES;
 export type SeenResolution = keyof typeof SEEN_RESOLUTIONS;
 export type MapListField = keyof typeof MAP_LIST_FIELDS;
+export type DiscordPresenceMode = keyof typeof DISCORD_PRESENCE_MODES;
 export type GeocodeProvider = keyof typeof GEOCODE_PROVIDERS;
 export type TagViewMode = keyof typeof TAG_VIEW_MODES;
 export type BorderDetail = keyof typeof BORDER_DETAILS;
@@ -3009,6 +3043,8 @@ declare const DEFAULTS: {
 	mapListFields: MapListField[];
 	/** Reopen the maps that were open when the session last ended (main window closed). */
 	restoreSession: boolean;
+	/** Discord Rich Presence: off, generic (no map name), or full (map name + count). */
+	discordPresence: DiscordPresenceMode;
 	/** Per-label color overrides (hex), keyed by lowercased label name. Shared across all maps. */
 	labelColors: Record<string, string>;
 	geocodeProvider: GeocodeProvider;
@@ -3101,6 +3137,8 @@ declare const mma: {
 		downloadBorderFile: (level: string) => Promise<null>;
 		borderLookup: (lat: number, lng: number, level: string) => Promise<PolygonGeometry | null>;
 		reverseGeocode: (lat: number, lng: number) => Promise<GeoResult | null>;
+		discordPresenceSet: (activity: PresenceActivity) => Promise<null>;
+		discordPresenceClear: () => Promise<null>;
 		storeOpenMap: (mapId: string) => Promise<StoreStatus>;
 		storeCloseMap: () => Promise<null>;
 		storeSaveDirty: () => Promise<SaveResult>;
@@ -3272,6 +3310,7 @@ declare const mma: {
 		showFps: boolean;
 		mapListFields: MapListField[];
 		restoreSession: boolean;
+		discordPresence: DiscordPresenceMode;
 		labelColors: Record<string, string>;
 		geocodeProvider: GeocodeProvider;
 		nominatimApiKey: string;
@@ -3396,7 +3435,6 @@ declare const mma: {
 	}): Promise<void>;
 	renameField(from: string, to: string, winner?: MergeWinner): Promise<void>;
 	deleteField(key: string): Promise<void>;
-	patchLocationExtra(loc: Location, extraPatch: Record<string, unknown>, replace?: boolean): Promise<void>;
 	getSelectionCounts(): Record<string, number>;
 	toggleGhostSelection(key: string): Promise<void>;
 	isolateSelection(key: string): Promise<void>;

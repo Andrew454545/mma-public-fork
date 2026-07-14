@@ -5,7 +5,7 @@ import {
 	useCurrentMap,
 	getActiveLocation,
 	getCurrentMap,
-	patchLocationExtra,
+	updateLocations,
 } from "@/store/useMapStore";
 import { useSetting } from "@/store/settings";
 import { createSyncStore } from "@/lib/util/syncStore";
@@ -93,7 +93,10 @@ export function PanoViewerProvider({ children }: { children: ReactNode }) {
 		if (!(getCurrentMap()?.meta.settings.enrichMetadata ?? true)) return;
 		const loc = getActiveLocation();
 		if (!loc || loc.extra?.datetime != null) return;
-		patchLocationExtra(loc, { datetime: exactDate.ts, timezone: resolvedTz });
+		updateLocations(
+			[{ id: loc.id, patch: { extra: { datetime: exactDate.ts, timezone: resolvedTz } } }],
+			{ undoable: false },
+		);
 	}, [exactDate.ts, resolvedTz]);
 
 	const value = useMemo(

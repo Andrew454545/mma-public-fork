@@ -13,7 +13,7 @@ import * as review from "@/lib/review/review";
 import type { Scope, Location } from "@/bindings.gen";
 import { cmd as commands } from "@/lib/commands";
 import { goToMap, goToList } from "@/store/router";
-import { createLocation } from "@/types";
+import { createLocation, applyLocationPatch } from "@/types";
 import { registerPlugin, createPluginStorage, usePluginState } from "@/plugins/registry";
 import { trackDisposable } from "@/plugins/scope";
 import {
@@ -72,7 +72,7 @@ async function createLocationStore(): Promise<LocationStore> {
 		subscribe("location:update", (updates) => {
 			for (const u of updates) {
 				const existing = locs.get(u.id);
-				if (existing) locs.set(u.id, { ...existing, ...u.patch } as Location);
+				if (existing) locs.set(u.id, applyLocationPatch(existing, u.patch));
 			}
 			notify();
 		}),

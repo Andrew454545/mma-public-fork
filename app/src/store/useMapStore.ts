@@ -6,6 +6,7 @@ import {
 	LocationFlag,
 	locId,
 	bboxTupleToBounds,
+	applyLocationPatch,
 } from "@/types";
 import type {
 	Location,
@@ -37,7 +38,6 @@ import { nowUnix } from "@/lib/util/format";
 import { mmaBufUrl, compareNatural } from "@/lib/util/util";
 import { fitMapToBounds } from "@/lib/map/mapState";
 import { getSettings, setSetting } from "@/store/settings";
-import { getTriggeredProviders } from "@/lib/data/fieldDefs";
 import {
 	setUserFieldDefs,
 	mergeUserFieldDefs,
@@ -821,7 +821,7 @@ export async function updateLocations(
 	await mutate(cmd.storeUpdateLocations(updates, opts?.undoable ?? true));
 	if (cachedActiveLocation && updates.some((u) => u.id === activeLocationId)) {
 		const activePatch = updates.find((u) => u.id === activeLocationId)?.patch;
-		if (activePatch) cachedActiveLocation = { ...cachedActiveLocation, ...activePatch } as Location;
+		if (activePatch) cachedActiveLocation = applyLocationPatch(cachedActiveLocation, activePatch);
 		bump();
 	}
 }
@@ -867,37 +867,6 @@ async function migrateFieldReferences(from: string, to: string | null) {
 	}
 	setSetting("savedSelections", rewriteSavedSelectionFields(getSavedSelections(), from, to));
 	await applySelectionUpdate((sels) => rewriteSelectionFields(sels, from, to));
-}
-
-export async function patchLocationExtra(
-	loc: Location,
-	extraPatch: Record<string, unknown>,
-	replace = false,
-) {
-	if (!currentMap) return;
-	if (isVirtualLocation(loc)) return;
-	const extra = replace ? extraPatch : { ...loc.extra, ...extraPatch };
-	await mutate(cmd.storeUpdateLocations([{ id: loc.id, patch: { extra } }], false));
-
-	const patched = { ...loc, extra };
-	if (activeLocationId === loc.id) {
-		cachedActiveLocation = patched;
-		bump();
-	}
-
-	const triggered = getTriggeredProviders(Object.keys(extraPatch));
-	if (triggered.length > 0) {
-		const enrichFields = currentMap?.meta.settings.enrichFields ?? null;
-		// Merge all triggered providers against the same base before writing once,
-		// so they don't clobber each other's fields.
-		const results = await Promise.all(
-			triggered.map((provider) =>
-				provider.enrich([patched], enrichFields).then((m) => m.get(loc.id)),
-			),
-		);
-		const merged = Object.assign({}, ...results.filter(Boolean));
-		if (Object.keys(merged).length > 0) await patchLocationExtra(patched, merged);
-	}
 }
 
 // --- Selections ---

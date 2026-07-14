@@ -1,5 +1,5 @@
 import { useState, useSyncExternalStore } from "react";
-import { useActivePluginId, exitPluginMode } from "@/store/useMapStore";
+import { useActivePluginId, useWorkArea, exitPluginMode } from "@/store/useMapStore";
 import {
 	getPlugin,
 	isPluginEnabled,
@@ -12,6 +12,7 @@ import {
  *  display:none, so state living in DOM we don't own (e.g. iframes) survives. */
 export function PluginSidebarHost() {
 	const pluginId = useActivePluginId();
+	const inPluginMode = useWorkArea() === "plugin";
 	useSyncExternalStore(subscribeRegistry, getRegistrySnapshot);
 	const [kept, setKept] = useState<string[]>([]);
 
@@ -20,7 +21,7 @@ export function PluginSidebarHost() {
 		setKept([...kept, pluginId]);
 	}
 
-	const ActiveSidebar = active && !active.keepAlive ? active.sidebar : undefined;
+	const ActiveSidebar = inPluginMode && active && !active.keepAlive ? active.sidebar : undefined;
 
 	return (
 		<>
@@ -29,7 +30,7 @@ export function PluginSidebarHost() {
 				if (!plugin?.sidebar || !isPluginEnabled(id)) return null;
 				const KeptSidebar = plugin.sidebar;
 				return (
-					<div key={id} style={{ display: id === pluginId ? "contents" : "none" }}>
+					<div key={id} style={{ display: inPluginMode && id === pluginId ? "contents" : "none" }}>
 						<KeptSidebar onClose={exitPluginMode} />
 					</div>
 				);

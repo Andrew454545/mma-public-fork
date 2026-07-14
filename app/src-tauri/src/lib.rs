@@ -43,6 +43,7 @@ mod geocoder;
 mod import;
 mod map_meta;
 mod plugins;
+mod presence;
 mod review;
 mod seen;
 mod sidecar;
@@ -597,6 +598,8 @@ pub fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             borders::download_border_file,
             borders::border_lookup,
             geocoder::reverse_geocode,
+            presence::discord_presence_set,
+            presence::discord_presence_clear,
             // --- Map lifecycle ---
             location_store::store_open_map,
             location_store::store_close_map,
@@ -919,6 +922,7 @@ pub fn run() {
         .run(|_app, event| {
             if let tauri::RunEvent::Exit = event {
                 sidecar::kill_all_sidecars();
+                presence::shutdown();
             }
         });
 }

@@ -37,28 +37,28 @@ function makeLoc(id: number, extra?: Record<string, unknown>): Location {
 }
 
 describe("planFieldMove", () => {
-	it("renames a key (target absent)", () => {
+	it("renames a key (target absent): null-deletes source, sets target", () => {
 		const out = planFieldMove([makeLoc(1, { a: 5 })], "a", "b", "from");
-		expect(out).toEqual([{ id: 1, patch: { extra: { b: 5 } } }]);
+		expect(out).toEqual([{ id: 1, patch: { extra: { a: null, b: 5 } } }]);
 	});
 
 	it("merge: winner 'from' takes the moved value", () => {
 		const out = planFieldMove([makeLoc(1, { a: 5, b: 9 })], "a", "b", "from");
-		expect(out).toEqual([{ id: 1, patch: { extra: { b: 5 } } }]);
+		expect(out).toEqual([{ id: 1, patch: { extra: { a: null, b: 5 } } }]);
 	});
 
-	it("merge: winner 'to' keeps the existing target value", () => {
+	it("merge: winner 'to' keeps the existing target value (only deletes source)", () => {
 		const out = planFieldMove([makeLoc(1, { a: 5, b: 9 })], "a", "b", "to");
-		expect(out).toEqual([{ id: 1, patch: { extra: { b: 9 } } }]);
+		expect(out).toEqual([{ id: 1, patch: { extra: { a: null } } }]);
 	});
 
 	it("skips locations without the source key", () => {
 		expect(planFieldMove([makeLoc(1, { x: 1 })], "a", "b", "from")).toEqual([]);
 	});
 
-	it("preserves unrelated keys", () => {
+	it("does not touch unrelated keys (merge patch carries only moved keys)", () => {
 		const out = planFieldMove([makeLoc(1, { a: 5, keep: 1 })], "a", "b", "from");
-		expect(out[0].patch.extra).toEqual({ b: 5, keep: 1 });
+		expect(out[0].patch.extra).toEqual({ a: null, b: 5 });
 	});
 
 	it("is a no-op when from === to or to is empty", () => {
@@ -68,9 +68,9 @@ describe("planFieldMove", () => {
 });
 
 describe("planFieldDelete", () => {
-	it("removes the key from locations that have it", () => {
+	it("null-deletes the key on locations that have it", () => {
 		const out = planFieldDelete([makeLoc(1, { a: 5, b: 9 }), makeLoc(2, { b: 1 })], "a");
-		expect(out).toEqual([{ id: 1, patch: { extra: { b: 9 } } }]);
+		expect(out).toEqual([{ id: 1, patch: { extra: { a: null } } }]);
 	});
 });
 
@@ -83,9 +83,9 @@ describe("planFieldSet", () => {
 		]);
 	});
 
-	it("merges into existing extra, preserving other keys", () => {
+	it("carries only patched keys (the store merges into existing extra)", () => {
 		const out = planFieldSet([makeLoc(1, { keep: 1 })], { extra: { k: "new" } });
-		expect(out).toEqual([{ id: 1, patch: { extra: { keep: 1, k: "new" } } }]);
+		expect(out).toEqual([{ id: 1, patch: { extra: { k: "new" } } }]);
 	});
 
 	it("skips locations whose extra value already matches", () => {
@@ -238,12 +238,10 @@ describe("field expressions", () => {
 		expect(updates).toEqual([{ id: 1, patch: { heading: 20 } }]);
 	});
 
-	it("planFieldExpr writes extra fields with merge semantics", () => {
+	it("planFieldExpr ships only the assigned extra key (store merges)", () => {
 		const loc = makeLoc(1, { sunAzimuth: 90, keep: "x" });
 		const { updates } = planFieldExpr([loc], "sunHalf", parseFieldExpr("sunAzimuth / 2"));
-		expect(updates).toEqual([
-			{ id: 1, patch: { extra: { sunAzimuth: 90, keep: "x", sunHalf: 45 } } },
-		]);
+		expect(updates).toEqual([{ id: 1, patch: { extra: { sunHalf: 45 } } }]);
 	});
 });
 

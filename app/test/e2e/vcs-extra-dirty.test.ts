@@ -1,13 +1,12 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 /**
- * Invariant under scrutiny: does an extra-field-only change (the path enrichment and
- * manual extra edits take, via patchLocationExtra -> storeUpdateLocations(record_undo=false))
- * make the map committable?
+ * Invariant under scrutiny: an extra-field-only change (the path enrichment and
+ * manual extra edits take, via updateLocations(undoable: false)) makes the map
+ * committable.
  *
- * store_commit_diff walks the UNDO stack; non-undoable extra writes never land there,
- * so hasCommitDiff() reads 0 -- which disables the "Commit map" command. Yet the change
- * marks the overlay dirty, so a forced commit DOES capture it. These tests document that
- * actual behavior so a regression (data silently dropped, or the badge changing) is caught.
+ * store_commit_diff is derived from the overlay -- the same changeset store_commit
+ * records -- so non-undoable extra writes count as modified and enable the
+ * "Commit map" command, and the commit captures them.
  */
 import {
 	waitForReady,
@@ -38,22 +37,30 @@ describe("VCS — extra-only change commit semantics", () => {
 		await deleteMap(mapId);
 	});
 
-	it("an extra-only edit does NOT register on the commit-diff badge", async () => {
+	it("an extra-only edit registers as modified on the commit-diff badge", async () => {
 		const loc = await getLoc(id);
-		await withApi(async (api, l) => api.patchLocationExtra(l, { score: 7 }), loc);
-		// Undo-stack-derived diff is blind to non-undoable extra writes.
-		expect(await withApi(async (api) => api.cmd.storeCommitDiff())).toEqual([0, 0, 0]);
-		expect(await withApi(async (api) => api.hasCommitDiff())).toBe(false);
+		await withApi(
+			async (api, l) =>
+				api.updateLocations([{ id: l.id, patch: { extra: { score: 7 } } }], { undoable: false }),
+			loc,
+		);
+		// Overlay-derived diff sees non-undoable extra writes.
+		expect(await withApi(async (api) => api.cmd.storeCommitDiff())).toEqual([0, 0, 1]);
+		expect(await withApi(async (api) => api.hasCommitDiff())).toBe(true);
 	});
 
-	it("but a forced commit still captures the extra change (overlay is dirty)", async () => {
+	it("and a commit captures the extra change", async () => {
 		const newCommit = await withApi(async (api) => api.commitMap("extra commit"));
 		expect(newCommit).not.toContain("ERROR");
 
 		// Mutate extra again post-commit, then checkout the "extra commit" to prove
 		// it materialized the score=7 value (not lost, not the later value).
 		const loc = await getLoc(id);
-		await withApi(async (api, l) => api.patchLocationExtra(l, { score: 999 }), loc);
+		await withApi(
+			async (api, l) =>
+				api.updateLocations([{ id: l.id, patch: { extra: { score: 999 } } }], { undoable: false }),
+			loc,
+		);
 		await flushAndWait();
 
 		await withApi(async (api, cid) => api.checkoutCommit(cid), newCommit);

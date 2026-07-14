@@ -4492,6 +4492,10 @@ body {
 .page-map-editor > .map-overview {
 	grid-area: work-area;
 }
+/* keepAlive sidebars sit under a display:contents wrapper, so no child combinator */
+.page-map-editor .plugin-sidebar {
+	grid-area: work-area;
+}
 .page-map-editor > .map-meta {
 	grid-area: map-meta;
 }

@@ -44,6 +44,15 @@ export function JsonEditorPanel() {
 			if (parsed.tags && Array.isArray(parsed.tags)) {
 				parsed.tags = await resolveTagNames(parsed.tags as unknown as string[]);
 			}
+			// patch.extra is a merge patch: keys the user deleted from the JSON
+			// must become explicit nulls or they'd survive the write.
+			if (parsed.extra != null) {
+				const removed = Object.keys(active.extra ?? {}).filter((k) => !(k in parsed.extra!));
+				parsed.extra = {
+					...Object.fromEntries(removed.map((k) => [k, null])),
+					...parsed.extra,
+				};
+			}
 			setError(null);
 			MMA.updateLocations([{ id: active.id, patch: parsed }]);
 			setSaved(true);

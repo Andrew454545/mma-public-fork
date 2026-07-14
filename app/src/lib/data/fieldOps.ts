@@ -1,7 +1,7 @@
 /**
  * Pure planning logic for bulk metadata-field operations (rename / merge / delete / set).
- * These compute the `extra` replacement blobs and selection-reference rewrites; the store
- * orchestrates IPC, definitions, and persistence. Kept side-effect-free for testability.
+ * These compute `extra` merge patches (RFC 7386: null deletes a key) and selection-reference
+ * rewrites; the store orchestrates IPC, definitions, and persistence. Side-effect-free.
  */
 
 import type {
@@ -43,32 +43,26 @@ export function planFieldMove(
 	for (const loc of locations) {
 		const extra = loc.extra;
 		if (!extra || !(from in extra)) continue;
-		const next = { ...extra };
-		const fromVal = next[from];
-		const hasTo = to in next;
-		delete next[from];
-		if (!hasTo || winner === "from") next[to] = fromVal;
-		// winner === "to" with existing target: keep `next[to]` untouched
-		updates.push({ id: loc.id, patch: { extra: next } });
+		const takeFrom = !(to in extra) || winner === "from";
+		// winner === "to" with existing target: keep the target's value, just drop `from`
+		updates.push({
+			id: loc.id,
+			patch: { extra: takeFrom ? { [from]: null, [to]: extra[from] } : { [from]: null } },
+		});
 	}
 	return updates;
 }
 
 /** Remove field `key` from every location that has it. */
 export function planFieldDelete(locations: Location[], key: string): Update<LocationPatch>[] {
-	const updates: Update<LocationPatch>[] = [];
-	for (const loc of locations) {
-		if (!loc.extra || !(key in loc.extra)) continue;
-		const next = { ...loc.extra };
-		delete next[key];
-		updates.push({ id: loc.id, patch: { extra: next } });
-	}
-	return updates;
+	return locations
+		.filter((loc) => loc.extra && key in loc.extra)
+		.map((loc) => ({ id: loc.id, patch: { extra: { [key]: null } } }));
 }
 
 /**
- * Apply `patch` to every location, skipping those it wouldn't change. `extra` is
- * merged into each location's existing extra; all other keys overwrite directly.
+ * Apply `patch` to every location, skipping those it wouldn't change. `extra` keys
+ * merge into each location's existing extra (store-side); all other keys overwrite.
  * The caller asserts intent by how it shapes `patch` (e.g. `{ heading }` vs
  * `{ extra: { foo } }`); this function holds no notion of which fields are which.
  */
@@ -76,15 +70,9 @@ export function planFieldSet(
 	locations: Location[],
 	patch: Partial<Location>,
 ): Update<LocationPatch>[] {
-	const updates: Update<LocationPatch>[] = [];
-	for (const loc of locations) {
-		if (!changesLocation(loc, patch)) continue;
-		const next = patch.extra
-			? { ...patch, extra: { ...(loc.extra ?? {}), ...patch.extra } }
-			: patch;
-		updates.push({ id: loc.id, patch: next });
-	}
-	return updates;
+	return locations
+		.filter((loc) => changesLocation(loc, patch))
+		.map((loc) => ({ id: loc.id, patch: patch as LocationPatch }));
 }
 
 /** True if applying `patch` would alter `loc`. Compares requested `extra` keys

@@ -6,8 +6,7 @@ import { describe, it, expect, vi } from "vitest";
 vi.mock("@/store/useMapStore", () => ({
 	getCurrentMap: () => null,
 	fetchLocationsByIds: async () => [],
-	batchUpdateLocations: async () => {},
-	patchLocationExtra: async () => {},
+	updateLocations: async () => {},
 }));
 vi.mock("@/lib/sv/svMeta", () => ({ fetchSvMetadata: async () => [] }));
 const resolveExactTimestampMock = vi.hoisted(() => vi.fn(async (): Promise<number | null> => null));

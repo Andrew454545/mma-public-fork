@@ -64,7 +64,7 @@ describe("Extra field definitions", () => {
 		expect(loc.extra.country).toBe("Switzerland");
 	});
 
-	it("patchLocationExtra merges fields", async () => {
+	it("extra patches merge into existing fields", async () => {
 		const ids = await addLocs([
 			createLocation({
 				lat: 30,
@@ -75,7 +75,9 @@ describe("Extra field definitions", () => {
 
 		const loc = await getLoc(ids[0]);
 		await withApi(async (api, l) => {
-			await api.patchLocationExtra(l, { country: "France" });
+			await api.updateLocations([{ id: l.id, patch: { extra: { country: "France" } } }], {
+				undoable: false,
+			});
 		}, loc);
 
 		const reloaded = await getLoc(ids[0]);
@@ -83,7 +85,7 @@ describe("Extra field definitions", () => {
 		expect(reloaded.extra.country).toBe("France");
 	});
 
-	it("patchLocationExtra with replace=true overwrites", async () => {
+	it("null values in the merge patch delete keys", async () => {
 		const ids = await addLocs([
 			createLocation({
 				lat: 50,
@@ -94,11 +96,15 @@ describe("Extra field definitions", () => {
 
 		const loc = await getLoc(ids[0]);
 		await withApi(async (api, l) => {
-			await api.patchLocationExtra(l, { newField: "value" }, true);
+			await api.updateLocations(
+				[{ id: l.id, patch: { extra: { newField: "value", altitude: null } } }],
+				{ undoable: false },
+			);
 		}, loc);
 
 		const reloaded = await getLoc(ids[0]);
 		expect(reloaded.extra.newField).toBe("value");
+		expect(reloaded.extra.country).toBe("Italy");
 		expect(reloaded.extra.altitude).toBeUndefined();
 	});
 

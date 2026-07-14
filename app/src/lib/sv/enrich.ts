@@ -1,13 +1,14 @@
 import { fetchSvMetadata } from "@/lib/sv/svMeta";
 import { resolveExactTimestamp } from "@/lib/sv/exactDate";
 import { resolveTimezone } from "@/lib/util/timezone";
-import { getCurrentMap, patchLocationExtra } from "@/store/useMapStore";
+import { getCurrentMap, updateLocations, fetchLocationsByIds } from "@/store/useMapStore";
 import {
 	filterEnrichPatch,
 	isFieldEnabled,
 	getEnrichmentProviders,
 	getDefaultEnrichKeys,
 	registerEnrichmentProvider,
+	providerWaves,
 	type EnrichmentProvider,
 } from "@/lib/data/fieldDefs";
 import { registerSvResolver, runResolvers, type SvResolver } from "@/lib/sv/svRunner";
@@ -63,18 +64,24 @@ export async function enrich(
 	const map = getCurrentMap();
 	if (!map || !(map.meta.settings.enrichMetadata ?? true)) return false;
 	const enrichFields = map.meta.settings.enrichFields ?? getDefaultEnrichKeys();
-	// Single merged pass: gather the core patch and every provider's patch against the
-	// same base, then write once. Per-provider writes would each rebuild extra from a
-	// stale base and clobber the previous provider's keys.
-	const corePatch = buildPatch(data, loc, enrichFields) ?? {};
-	const providerPatches = await Promise.all(
-		getEnrichmentProviders().map((provider) =>
-			provider.enrich([loc], enrichFields).then((m) => m.get(loc.id)),
-		),
-	);
-	const merged = Object.assign({}, corePatch, ...providerPatches.filter(Boolean));
-	if (Object.keys(merged).length > 0) await patchLocationExtra(loc, merged);
+	const write = (extra: Record<string, unknown>) =>
+		updateLocations([{ id: loc.id, patch: { extra } }], { undoable: false });
 
+	const corePatch = buildPatch(data, loc, enrichFields);
+	if (corePatch && Object.keys(corePatch).length > 0) await write(corePatch);
+
+	// Providers run in dependency waves against fresh store data, same as the bulk
+	// path: core fields (imageDate) are in place before wave 1, and a provider that
+	// `requires` another provider's field sees it written before its wave runs.
+	for (const wave of providerWaves(getEnrichmentProviders())) {
+		const [fresh] = await fetchLocationsByIds([loc.id]);
+		if (!fresh) break;
+		const results = await Promise.all(
+			wave.map((provider) => provider.enrich([fresh], enrichFields).then((m) => m.get(loc.id))),
+		);
+		const merged = Object.assign({}, ...results.filter(Boolean));
+		if (Object.keys(merged).length > 0) await write(merged);
+	}
 	return true;
 }
 
@@ -101,9 +108,8 @@ export const enrichMetaResolver: SvResolver = {
 };
 
 /** Exact capture timestamp: binary-searches Google's SingleImageSearch per location.
- *  A slow enrichment provider -- `requires: ["imageDate"]` chains it after the core
- *  metadata pass (bulk dependency waves) and re-resolves on imageDate writes
- *  (single-location trigger). */
+ *  A slow enrichment provider -- runs in a dependency wave after the core metadata
+ *  pass has written `imageDate`. */
 export const exactDateProvider: EnrichmentProvider = {
 	id: "exactDate",
 	label: "Exact dates",

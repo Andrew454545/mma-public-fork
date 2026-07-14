@@ -316,11 +316,12 @@ function ClearFieldsSetup({ locs, scopedLocs, scopeCtl, onReady }: SetupProps) {
 							const updates: Update<LocationPatch>[] = [];
 							for (const loc of locations) {
 								if (!loc.extra) continue;
-								const hasAny = keys.some((k) => loc.extra![k] != null);
-								if (!hasAny) continue;
-								const cleaned = { ...loc.extra };
-								for (const k of keys) delete cleaned[k];
-								updates.push({ id: loc.id, patch: { extra: cleaned } });
+								const present = keys.filter((k) => loc.extra![k] != null);
+								if (present.length === 0) continue;
+								updates.push({
+									id: loc.id,
+									patch: { extra: Object.fromEntries(present.map((k) => [k, null])) },
+								});
 							}
 							if (updates.length > 0) await updateLocations(updates);
 							return {

@@ -36,6 +36,7 @@ import { hexToRgb } from "@/lib/util/color";
 import { trace } from "@/lib/util/debug";
 import { nowUnix } from "@/lib/util/format";
 import { mmaBufUrl, compareNatural } from "@/lib/util/util";
+import { compareMonthOrder } from "@/lib/util/date";
 import { fitMapToBounds } from "@/lib/map/mapState";
 import { getSettings, setSetting } from "@/store/settings";
 import {
@@ -545,7 +546,11 @@ export async function partition(
 	scope: Scope,
 ): Promise<PartitionBucket[]> {
 	const groups = await cmd.storePartition(field, key, scope);
-	if (key.kind !== "numericBin") groups.sort((a, b) => compareNatural(a.key, b.key));
+	if (key.kind !== "numericBin") {
+		const cmp =
+			key.kind === "datePart" && key.part === "monthOfYear" ? compareMonthOrder : compareNatural;
+		groups.sort((a, b) => cmp(a.key, b.key));
+	}
 	return groups;
 }
 

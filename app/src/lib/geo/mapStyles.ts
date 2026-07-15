@@ -479,20 +479,46 @@ export function getStyleBackgroundColor(style: string): string {
 	return STYLE_BG_COLORS[style as BuiltinStyleKey] ?? STYLE_BG_COLORS.default;
 }
 
-// --- Vector basemap styles (OpenFreeMap-hosted MapLibre styles) ---
+// --- Vector basemap styles (keyless, drop-in MapLibre styles) ---
+// Sourced from OpenFreeMap, CARTO, and VersaTiles. All serve style JSON + tiles
+// without an API key; each provider has its own URL shape, so keys map to full URLs.
 
-export const VECTOR_STYLE_KEYS = ["liberty", "bright", "positron"] as const;
+export const VECTOR_STYLE_KEYS = [
+	"liberty",
+	"bright",
+	"positron",
+	"fiord",
+	"dark-matter",
+	"voyager",
+	"eclipse",
+	"colorful",
+] as const;
 export type VectorStyleKey = (typeof VECTOR_STYLE_KEYS)[number];
 
 export const VECTOR_STYLE_LABELS: Record<VectorStyleKey, string> = {
 	liberty: "Liberty",
 	bright: "Bright",
 	positron: "Positron",
+	fiord: "Fiord (dark)",
+	"dark-matter": "Dark Matter",
+	voyager: "Voyager",
+	eclipse: "Eclipse (dark)",
+	colorful: "Colorful",
+};
+
+const VECTOR_STYLE_URLS: Record<VectorStyleKey, string> = {
+	liberty: "https://tiles.openfreemap.org/styles/liberty",
+	bright: "https://tiles.openfreemap.org/styles/bright",
+	positron: "https://tiles.openfreemap.org/styles/positron",
+	fiord: "https://tiles.openfreemap.org/styles/fiord",
+	"dark-matter": "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json",
+	voyager: "https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json",
+	eclipse: "https://tiles.versatiles.org/assets/styles/eclipse/style.json",
+	colorful: "https://tiles.versatiles.org/assets/styles/colorful/style.json",
 };
 
 export const DEFAULT_VECTOR_STYLE: VectorStyleKey = "liberty";
 
 export function vectorStyleUrl(name: string): string {
-	const key = (VECTOR_STYLE_KEYS as readonly string[]).includes(name) ? name : DEFAULT_VECTOR_STYLE;
-	return `https://tiles.openfreemap.org/styles/${key}`;
+	return VECTOR_STYLE_URLS[name as VectorStyleKey] ?? VECTOR_STYLE_URLS[DEFAULT_VECTOR_STYLE];
 }

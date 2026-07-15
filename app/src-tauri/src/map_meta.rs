@@ -60,6 +60,7 @@ pub struct MapSettings {
     pub default_pano_id: bool,
     pub export_zoom: bool,
     pub export_unpanned: bool,
+    pub export_extras: bool,
     pub search_radius: Option<u32>,
     pub enrich_metadata: bool,
     pub enrich_fields: Option<Vec<String>>,
@@ -84,6 +85,7 @@ impl Default for MapSettings {
             default_pano_id: false,
             export_zoom: false,
             export_unpanned: true,
+            export_extras: true,
             search_radius: None,
             enrich_metadata: false,
             enrich_fields: None,
@@ -1253,6 +1255,7 @@ mod tests {
         assert_eq!(parsed.default_pano_id, default.default_pano_id);
         assert_eq!(parsed.export_zoom, default.export_zoom);
         assert_eq!(parsed.export_unpanned, default.export_unpanned);
+        assert_eq!(parsed.export_extras, default.export_extras);
         assert_eq!(parsed.enrich_metadata, default.enrich_metadata);
         assert!(parsed.prefer_direction.is_none());
         assert!(parsed.camera_types.is_none());

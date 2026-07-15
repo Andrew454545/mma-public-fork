@@ -1,6 +1,7 @@
 import { useState, useEffect, useId } from "react";
 import { Dialog, DialogContent } from "@/components/primitives/Dialog";
 import { useCurrentMap, useSelectedLocationIds, getVisibleTags } from "@/store/useMapStore";
+import { useMapSetting } from "@/store/useMapSetting";
 import { cmd } from "@/lib/commands";
 import { mmaBufUrl, saveExportTempFile } from "@/lib/util/util";
 import { getAllFieldDefs } from "@/lib/data/fieldDefRegistry";
@@ -29,9 +30,9 @@ export function ExportDialog({ onClose }: Props) {
 
 	const [locationCount, setLocationCount] = useState(0);
 	const [scope, setScope] = useState(ExportScope.All);
-	const [saveZoom, setSaveZoom] = useState(map?.meta.settings.exportZoom ?? false);
-	const [saveExtras, setSaveExtras] = useState(true);
-	const [bypassUnpanned, setBypassUnpanned] = useState(map?.meta.settings.exportUnpanned ?? false);
+	const [saveZoom, setSaveZoom] = useMapSetting("exportZoom");
+	const [saveExtras, setSaveExtras] = useMapSetting("exportExtras");
+	const [bypassUnpanned, setBypassUnpanned] = useMapSetting("exportUnpanned");
 	const [fileName, setFileName] = useState(map?.meta.name ?? "");
 	const selCount = selectedIds.size;
 	useEffect(() => {

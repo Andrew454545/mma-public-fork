@@ -1496,6 +1496,7 @@ export type MapSettings = {
 	defaultPanoId?: boolean;
 	exportZoom?: boolean;
 	exportUnpanned?: boolean;
+	exportExtras?: boolean;
 	searchRadius?: number | null;
 	enrichMetadata?: boolean;
 	enrichFields?: string[] | null;

@@ -232,6 +232,27 @@ describe("GenerationEngine live tuning", () => {
 		expect(engine.isRunning()).toBe(false);
 	});
 
+	it("applies a mid-job target change, ending the region at the new cap", async () => {
+		let calls = 0;
+
+		const engine = new GenerationEngine(
+			fakeGoogleWith((_req, cb) => {
+				calls++;
+				if (calls === 3) engine.updateRegionTargets(new Map([["A", 0]]));
+				if (calls > 10000) engine.stop();
+				cb(null, "ZERO_RESULTS");
+			}),
+			{ ...DEFAULT_SETTINGS, numGenerators: 1 },
+			[A()],
+			noopCallbacks,
+		);
+
+		await engine.start();
+
+		expect(calls).toBeLessThan(10000); // worker saw the lowered target and stopped
+		expect(engine.isRunning()).toBe(false);
+	});
+
 	it("reconcileRegions adds a region mid-job that then gets generated", async () => {
 		const probes = { A: 0, B: 0 };
 		let phase: "run" | "added" = "run";

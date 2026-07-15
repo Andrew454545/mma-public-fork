@@ -31,6 +31,7 @@ export const config: WebdriverIO.Config = {
 	runner: "local",
 	specs: ["./test/e2e/**/*.test.ts"],
 	exclude: [
+		"./test/e2e/scratch.test.ts",
 		"./test/e2e/benchmarks.test.ts",
 		"./test/e2e/speed-matrix.test.ts",
 		"./test/e2e/bulk-import-rust.test.ts",
@@ -41,9 +42,13 @@ export const config: WebdriverIO.Config = {
 	capabilities: [
 		{
 			"tauri:options": {
-				application: process.platform === "win32"
-					? path.resolve("./src-tauri/target/debug/map-making-app.exe")
-					: (fs.existsSync("/usr/local/bin/map-making-app") ? "/usr/local/bin/map-making-app" : path.resolve("./src-tauri/target/debug/map-making-app")),
+				application:
+					process.env.MMA_E2E_BINARY ??
+					(process.platform === "win32"
+						? path.resolve("./src-tauri/target/debug/map-making-app.exe")
+						: fs.existsSync("/usr/local/bin/map-making-app")
+							? "/usr/local/bin/map-making-app"
+							: path.resolve("./src-tauri/target/debug/map-making-app")),
 				args: ["--test-db"],
 			},
 		},

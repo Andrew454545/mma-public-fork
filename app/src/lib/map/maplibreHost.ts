@@ -38,7 +38,11 @@ const ZOOM_OFFSET = 1;
 const SV_SOURCE = "mma-sv";
 const SV_SCHEME = "mma-sv://";
 
-const PREFETCH_MARGIN = 256;
+const PREFETCH_MARGIN = 128;
+
+// Raster (SV) tiles queue behind MapLibre's global image-request cap (default 16);
+// vector tiles don't, so the basemap outruns SV coverage without this.
+maplibregl.setMaxParallelImageRequests(64);
 
 type MlEventName = "mousemove" | "mousedown" | "mouseup" | "mouseout" | "zoom" | "move" | "load";
 

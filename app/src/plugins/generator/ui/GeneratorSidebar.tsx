@@ -211,6 +211,11 @@ export function GeneratorSidebar({ onClose }: { onClose: () => void }) {
 		});
 	}, []);
 
+	const handleMetaChange = useCallback((next: Map<string, GeneratorRegionMeta>) => {
+		setMeta(next);
+		engineRef.current?.updateRegionTargets(new Map([...next].map(([k, m]) => [k, m.target])));
+	}, []);
+
 	const handleStart = useCallback(async () => {
 		const sels = getSelections().filter((s) => s.props.type === "Polygon");
 		if (sels.length === 0) return;
@@ -320,7 +325,7 @@ export function GeneratorSidebar({ onClose }: { onClose: () => void }) {
 					defaultTarget={settings.defaultTarget}
 					onDefaultTargetChange={(v) => updateSettings({ defaultTarget: v })}
 					meta={meta}
-					onMetaChange={setMeta}
+					onMetaChange={handleMetaChange}
 				/>
 			</Section>
 

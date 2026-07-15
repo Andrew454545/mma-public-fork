@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import fc from "fast-check";
-import { parseTypedDate, MONTHS } from "@/lib/util/date";
+import { parseTypedDate, MONTHS, compareMonthOrder } from "@/lib/util/date";
 import { partsToEpoch, dateParts } from "@/lib/data/fieldOps";
 
 describe("MONTHS", () => {
@@ -10,6 +10,17 @@ describe("MONTHS", () => {
 		MONTHS.full.forEach((full, i) => {
 			expect(full.startsWith(MONTHS.short[i])).toBe(true);
 		});
+	});
+});
+
+describe("compareMonthOrder", () => {
+	it("orders month names by calendar position, not alphabetically", () => {
+		expect(["April", "January", "December", "August"].sort(compareMonthOrder)).toEqual([
+			"January",
+			"April",
+			"August",
+			"December",
+		]);
 	});
 });
 

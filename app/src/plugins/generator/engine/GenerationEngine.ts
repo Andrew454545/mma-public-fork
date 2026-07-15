@@ -133,9 +133,19 @@ export class GenerationEngine {
 		const count = this.settings.oneCountryAtATime ? 1 : this.settings.numGenerators;
 		for (const region of desired) {
 			this.cancelledRegions.delete(region.id); // revive if previously removed
+			const existing = this.regions.find((r) => r.id === region.id);
+			if (existing) existing.target = region.target;
 			if (this.liveRegionIds.has(region.id)) continue; // already working (or parked)
-			if (!this.regions.some((r) => r.id === region.id)) this.regions.push(region);
-			this.regionTasks.push(this.runRegionWorkers(region, count));
+			if (!existing) this.regions.push(region);
+			this.regionTasks.push(this.runRegionWorkers(existing ?? region, count));
+		}
+	}
+
+	// Live-apply per-region target changes mid-job; workers re-read target every probe.
+	updateRegionTargets(targets: ReadonlyMap<string, number>): void {
+		for (const region of this.regions) {
+			const t = targets.get(region.id);
+			if (t != null) region.target = t;
 		}
 	}
 

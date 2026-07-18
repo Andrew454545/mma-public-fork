@@ -2,6 +2,9 @@ import { describe, it, expect } from "vitest";
 import {
 	rangeToggleTagIds,
 	reorderSiblingsFlatOrder,
+	collectDragBlock,
+	canDropInto,
+	moveIntoFolder,
 	buildTagTree,
 	cascadeRename,
 	syncAliasSegments,
@@ -9,8 +12,9 @@ import {
 	sumCounts,
 	shortestUniqueSuffixes,
 	type TagTreeNode,
+	type FolderColorOpts,
 } from "@/components/editor/tags/tagTreeRange";
-import type { Tag } from "@/bindings.gen";
+import type { Tag, VirtualTag } from "@/bindings.gen";
 
 interface N {
 	fullPath: string;
@@ -94,11 +98,11 @@ describe("reorderSiblingsFlatOrder", () => {
 	const tree: N[] = [leaf("a", 1), leaf("b", 2), leaf("c", 3)];
 
 	it("moves a root sibling after another", () => {
-		expect(reorderSiblingsFlatOrder(tree, "a", "c", "after", "")).toEqual([2, 3, 1]);
+		expect(reorderSiblingsFlatOrder(tree, ["a"], "c", "after", "")).toEqual([2, 3, 1]);
 	});
 
 	it("moves a root sibling before another", () => {
-		expect(reorderSiblingsFlatOrder(tree, "c", "a", "before", "")).toEqual([3, 1, 2]);
+		expect(reorderSiblingsFlatOrder(tree, ["c"], "a", "before", "")).toEqual([3, 1, 2]);
 	});
 
 	it("reorders within a parent and preserves other subtrees + relative order", () => {
@@ -111,16 +115,18 @@ describe("reorderSiblingsFlatOrder", () => {
 			leaf("q", 20),
 		];
 		// move p/z before p/x -> z,x,y under p; q untouched
-		expect(reorderSiblingsFlatOrder(nested, "p/z", "p/x", "before", "p")).toEqual([12, 10, 11, 20]);
+		expect(reorderSiblingsFlatOrder(nested, ["p/z"], "p/x", "before", "p")).toEqual([
+			12, 10, 11, 20,
+		]);
 	});
 
 	it("returns null when the target isn't a sibling under the given parent", () => {
 		const nested: N[] = [{ fullPath: "p", tag: null, children: [leaf("p/x", 10)] }, leaf("q", 20)];
-		expect(reorderSiblingsFlatOrder(nested, "p/x", "q", "after", "p")).toBeNull();
+		expect(reorderSiblingsFlatOrder(nested, ["p/x"], "q", "after", "p")).toBeNull();
 	});
 
 	it("returns null when source equals target", () => {
-		expect(reorderSiblingsFlatOrder(tree, "a", "a", "after", "")).toBeNull();
+		expect(reorderSiblingsFlatOrder(tree, ["a"], "a", "after", "")).toBeNull();
 	});
 
 	it("does not emit an alias leaf's id (the real leaf owns it)", () => {
@@ -130,13 +136,98 @@ describe("reorderSiblingsFlatOrder", () => {
 			leaf("c", 3),
 		];
 		// Reordering real siblings must not duplicate/emit the alias's id 1.
-		expect(reorderSiblingsFlatOrder(withAlias, "a", "c", "after", "")).toEqual([3, 1]);
+		expect(reorderSiblingsFlatOrder(withAlias, ["a"], "c", "after", "")).toEqual([3, 1]);
 	});
 
 	it("treats a root leaf whose name contains '/' as a root sibling (no-split flat view)", () => {
 		// Flat view: "Europe/France" is one leaf at root, not a child of "Europe".
 		const flat: N[] = [leaf("Europe/France", 1), leaf("Red", 2), leaf("Blue", 3)];
-		expect(reorderSiblingsFlatOrder(flat, "Europe/France", "Blue", "after", "")).toEqual([2, 3, 1]);
+		expect(reorderSiblingsFlatOrder(flat, ["Europe/France"], "Blue", "after", "")).toEqual([
+			2, 3, 1,
+		]);
+	});
+
+	it("moves a non-contiguous block after a target, preserving relative order", () => {
+		const five: N[] = [leaf("a", 1), leaf("b", 2), leaf("c", 3), leaf("d", 4), leaf("e", 5)];
+		expect(reorderSiblingsFlatOrder(five, ["b", "d"], "e", "after", "")).toEqual([1, 3, 5, 2, 4]);
+	});
+
+	it("moves a block before the first sibling", () => {
+		const five: N[] = [leaf("a", 1), leaf("b", 2), leaf("c", 3), leaf("d", 4), leaf("e", 5)];
+		expect(reorderSiblingsFlatOrder(five, ["c", "e"], "a", "before", "")).toEqual([3, 5, 1, 2, 4]);
+	});
+
+	it("returns null when the target is part of the block", () => {
+		expect(reorderSiblingsFlatOrder(tree, ["a", "c"], "c", "after", "")).toBeNull();
+	});
+
+	it("ignores block paths outside the sibling group", () => {
+		const nested: N[] = [
+			{ fullPath: "p", tag: null, children: [leaf("p/x", 10), leaf("p/y", 11)] },
+			leaf("q", 20),
+			leaf("r", 30),
+		];
+		// p/x isn't a root sibling; only q moves.
+		expect(reorderSiblingsFlatOrder(nested, ["q", "p/x"], "r", "after", "")).toEqual([
+			10, 11, 30, 20,
+		]);
+	});
+});
+
+describe("collectDragBlock", () => {
+	const mkTag = (id: number, name: string, order = id): Tag => ({
+		id,
+		name,
+		color: "#888888",
+		order,
+	});
+	function findNode(nodes: TagTreeNode[], path: string): TagTreeNode | null {
+		for (const n of nodes) {
+			if (n.fullPath === path) return n;
+			const hit = findNode(n.children, path);
+			if (hit) return hit;
+		}
+		return null;
+	}
+
+	it("carries the grabbed pill plus selected sibling pills, in sibling order", () => {
+		const tree = buildTagTree(
+			[mkTag(1, "a"), mkTag(2, "b"), mkTag(3, "c"), mkTag(4, "d")],
+			"default",
+			{},
+		);
+		expect(collectDragBlock(tree, findNode(tree, "d")!, new Set([1, 3]))).toEqual(["a", "c", "d"]);
+	});
+
+	it("keeps the block single when nothing else is selected", () => {
+		const tree = buildTagTree([mkTag(1, "a"), mkTag(2, "b")], "default", {});
+		expect(collectDragBlock(tree, findNode(tree, "a")!, new Set())).toEqual(["a"]);
+	});
+
+	it("excludes selected folder rows from a pill block (kind mismatch)", () => {
+		const tags = [mkTag(1, "a"), mkTag(2, "F/u"), mkTag(3, "F/v"), mkTag(4, "b")];
+		const tree = buildTagTree(tags, "default", {});
+		// F is fully selected but is a folder row; the pill block takes only a.
+		expect(collectDragBlock(tree, findNode(tree, "b")!, new Set([1, 2, 3]))).toEqual(["a", "b"]);
+	});
+
+	it("joins fully-selected sibling folder rows to a row block", () => {
+		const tags = [mkTag(1, "F/u"), mkTag(2, "G/v"), mkTag(3, "H/w")];
+		const tree = buildTagTree(tags, "default", {});
+		expect(collectDragBlock(tree, findNode(tree, "G")!, new Set([1]))).toEqual(["F", "G"]);
+	});
+
+	it("joins a branch whose own tag is selected, even with unselected children", () => {
+		const tags = [mkTag(1, "F"), mkTag(2, "F/u"), mkTag(3, "G/x")];
+		const tree = buildTagTree(tags, "default", {});
+		expect(collectDragBlock(tree, findNode(tree, "G")!, new Set([1]))).toEqual(["F", "G"]);
+	});
+
+	it("excludes alias leaves and non-siblings", () => {
+		const tags = [mkTag(1, "a"), mkTag(2, "b"), mkTag(3, "F/u")];
+		// Alias "c" points at tag 2 (selected) but never joins; F/u is not a root sibling.
+		const tree = buildTagTree(tags, "default", {}, {}, { c: 2 });
+		expect(collectDragBlock(tree, findNode(tree, "a")!, new Set([2, 3]))).toEqual(["a", "b"]);
 	});
 });
 
@@ -271,6 +362,79 @@ describe("buildTagTree", () => {
 	});
 });
 
+describe("folder colors", () => {
+	const mkTag = (id: number, name: string, color: string, order = id): Tag => ({
+		id,
+		name,
+		color,
+		order,
+	});
+	const build = (
+		tags: Tag[],
+		folderColor: FolderColorOpts,
+		virtualTags: Record<string, VirtualTag> = {},
+	) => buildTagTree(tags, "default", {}, virtualTags, {}, true, folderColor);
+
+	it("direct mode paints colorless folders with the configured color", () => {
+		const tree = build([mkTag(1, "F/x", "#ff0000")], { mode: "direct", color: "#123456" });
+		expect(tree[0].inheritedColor).toBe("#123456");
+		expect(tree[0].children[0].inheritedColor).toBe("#ff0000");
+	});
+
+	it("firstChild mode takes the first displayed child's color", () => {
+		// Display order at each level: leaf pills float above branch rows, so the
+		// pill's color wins even though the branch's subtree holds the lower order.
+		const tags = [
+			mkTag(1, "F/Sub/deep", "#0000ff", 1),
+			mkTag(2, "F/pill", "#00ff00", 2),
+			mkTag(3, "F/pill2", "#ff0000", 3),
+		];
+		const tree = build(tags, { mode: "firstChild", color: "#888888" });
+		expect(tree[0].inheritedColor).toBe("#00ff00");
+	});
+
+	it("firstChild mode follows display order under each sort mode", () => {
+		const tags = [mkTag(1, "F/b", "#0000ff", 1), mkTag(2, "F/a", "#ff0000", 2)];
+		const byOrder = buildTagTree(tags, "default", {}, {}, {}, true, {
+			mode: "firstChild",
+			color: "#888888",
+		});
+		expect(byOrder[0].inheritedColor).toBe("#0000ff"); // b first by order
+		const byName = buildTagTree(tags, "name", {}, {}, {}, true, {
+			mode: "firstChild",
+			color: "#888888",
+		});
+		expect(byName[0].inheritedColor).toBe("#ff0000"); // a first by name
+	});
+
+	it("firstChild mode recurses through colorless subfolders", () => {
+		const tree = build([mkTag(1, "F/Sub/x", "#ff0000")], { mode: "firstChild", color: "#888888" });
+		expect(tree[0].inheritedColor).toBe("#ff0000");
+		expect(tree[0].children[0].inheritedColor).toBe("#ff0000");
+	});
+
+	it("firstChild mode: an own virtual color still wins over the first child", () => {
+		const tree = build(
+			[mkTag(1, "F/x", "#ff0000")],
+			{ mode: "firstChild", color: "#888888" },
+			{
+				F: { color: "#00ff00" },
+			},
+		);
+		expect(tree[0].inheritedColor).toBe("#00ff00");
+	});
+
+	it("firstChild mode: declared empty folders fall back to the configured color", () => {
+		const tree = build([], { mode: "firstChild", color: "#123456" }, { Empty: {} });
+		expect(tree[0].inheritedColor).toBe("#123456");
+	});
+
+	it("defaults preserve the original gray fallback", () => {
+		const tree = buildTagTree([mkTag(1, "F/x", "#ff0000")], "default", {});
+		expect(tree[0].inheritedColor).toBe("#888888");
+	});
+});
+
 describe("cascadeRename", () => {
 	const mkTag = (id: number, name: string): Tag => ({ id, name, color: "#888888", order: id });
 
@@ -364,5 +528,165 @@ describe("syncAliasSegments", () => {
 	it("returns null when no alias points at a renamed tag", () => {
 		const aliases = { "Fav/c": 1 };
 		expect(syncAliasSegments(aliases, [{ id: 2, oldName: "x", newName: "y" }])).toBeNull();
+	});
+});
+
+describe("canDropInto / moveIntoFolder", () => {
+	const mkTag = (id: number, name: string, order = id): Tag => ({
+		id,
+		name,
+		color: "#888888",
+		order,
+	});
+	// Root pills Red(1), Blue(2); folder Cars { a(3), b(4), Old { c(5) } }.
+	const baseTags = [
+		mkTag(1, "Red"),
+		mkTag(2, "Blue"),
+		mkTag(3, "Cars/a"),
+		mkTag(4, "Cars/b"),
+		mkTag(5, "Cars/Old/c"),
+	];
+	const tree = (tags = baseTags, aliases = {}) => buildTagTree(tags, "default", {}, {}, aliases);
+
+	it("allows a pill into a folder, rejects its own parent and block members", () => {
+		expect(canDropInto(tree(), ["Red"], "Cars")).toBe(true);
+		expect(canDropInto(tree(), ["Cars/a"], "Cars")).toBe(false); // no-op: already there
+		expect(canDropInto(tree(), ["Cars"], "Cars")).toBe(false); // itself
+		expect(canDropInto(tree(), ["Cars"], "Cars/Old")).toBe(false); // own descendant
+	});
+
+	it("rejects a segment collision with the target's children", () => {
+		const tags = [...baseTags, mkTag(6, "Cars/Red")];
+		expect(canDropInto(tree(tags), ["Red"], "Cars")).toBe(false);
+	});
+
+	it("rejects pills as targets", () => {
+		expect(canDropInto(tree(), ["Red"], "Blue")).toBe(false);
+	});
+
+	it("moves a pill into a folder: rename + order appended at the end of the folder", () => {
+		const move = moveIntoFolder(tree(), ["Red"], "Cars", baseTags, {}, {});
+		expect(move).not.toBeNull();
+		expect(move!.tagRenames).toEqual([{ id: 1, name: "Cars/Red" }]);
+		expect(move!.orderedIds).toEqual([2, 3, 4, 5, 1]);
+		expect(move!.pathRemaps).toEqual([]);
+	});
+
+	it("moves a block of pills keeping relative order", () => {
+		const move = moveIntoFolder(tree(), ["Red", "Blue"], "Cars", baseTags, {}, {});
+		expect(move!.tagRenames).toEqual([
+			{ id: 1, name: "Cars/Red" },
+			{ id: 2, name: "Cars/Blue" },
+		]);
+		expect(move!.orderedIds).toEqual([3, 4, 5, 1, 2]);
+	});
+
+	it("moves a folder: cascades descendants, remaps the path, rewrites settings keys", () => {
+		const tags = [...baseTags, mkTag(6, "Misc/x")];
+		const aliases = { "Misc/redAlias": 1 };
+		const move = moveIntoFolder(
+			tree(tags, aliases),
+			["Misc"],
+			"Cars",
+			tags,
+			{ Misc: { color: "#aaa" } },
+			aliases,
+		);
+		expect(move!.tagRenames).toEqual([{ id: 6, name: "Cars/Misc/x" }]);
+		expect(move!.pathRemaps).toEqual([["Misc", "Cars/Misc"]]);
+		expect(move!.virtualTags).toEqual({ "Cars/Misc": { color: "#aaa" } });
+		expect(move!.aliases).toEqual({ "Cars/Misc/redAlias": 1 });
+		// Alias leaf never contributes its id: Red's id appears exactly once.
+		expect(move!.orderedIds.filter((id) => id === 1)).toEqual([1]);
+		expect(move!.orderedIds).toEqual([1, 2, 3, 4, 5, 6]);
+	});
+
+	it("returns null on an invalid drop", () => {
+		expect(moveIntoFolder(tree(), ["Cars"], "Cars/Old", baseTags, {}, {})).toBeNull();
+	});
+});
+
+describe("declared empty folders (virtualTags)", () => {
+	const mkTag = (id: number, name: string, order = id): Tag => ({
+		id,
+		name,
+		color: "#888888",
+		order,
+	});
+	const segs = (nodes: TagTreeNode[]) => nodes.map((n) => n.segment);
+	function findNode(nodes: TagTreeNode[], path: string): TagTreeNode | null {
+		for (const n of nodes) {
+			if (n.fullPath === path) return n;
+			const hit = findNode(n.children, path);
+			if (hit) return hit;
+		}
+		return null;
+	}
+
+	it("seeds a tagless folder node from a virtualTags key no tag passes through", () => {
+		const tree = buildTagTree([mkTag(1, "a")], "default", {}, { F: {} });
+		const f = findNode(tree, "F")!;
+		expect(f.tag).toBeNull();
+		expect(f.children).toEqual([]);
+		expect(isLeafTag(f)).toBe(false); // renders as a folder row, not a pill
+	});
+
+	it("seeds the whole chain for a nested key", () => {
+		const tree = buildTagTree([], "default", {}, { "F/Sub": {} });
+		expect(segs(tree)).toEqual(["F"]);
+		expect(segs(tree[0].children)).toEqual(["Sub"]);
+		expect(tree[0].tag).toBeNull();
+	});
+
+	it("does not duplicate nodes when the key path already exists via tags", () => {
+		const tree = buildTagTree([mkTag(1, "F/x")], "default", {}, { F: {} });
+		expect(tree).toHaveLength(1);
+		expect(segs(tree[0].children)).toEqual(["x"]);
+	});
+
+	it("sorts empty folders after tag-derived branches in default mode", () => {
+		const tree = buildTagTree([mkTag(1, "G/x")], "default", {}, { A: {} });
+		expect(segs(tree)).toEqual(["G", "A"]); // A is alphabetically first but empty
+		expect(findNode(tree, "A")!.sortOrder).toBe(Number.MAX_SAFE_INTEGER);
+	});
+
+	it("keeps empty folders out of the leaf pill float (they group with branches)", () => {
+		const tree = buildTagTree([mkTag(1, "a"), mkTag(2, "G/x")], "default", {}, { E: {} });
+		expect(segs(tree)).toEqual(["a", "G", "E"]); // pill first, then branches, empty last
+	});
+
+	it("does not seed folders in flat view", () => {
+		const tree = buildTagTree([mkTag(1, "a")], "default", {}, { F: {} }, {}, false);
+		expect(segs(tree)).toEqual(["a"]);
+	});
+
+	it("ctrl+drag block never sweeps empty sibling folders ([].every footgun)", () => {
+		const tags = [mkTag(1, "F/u"), mkTag(2, "G/v")];
+		const tree = buildTagTree(tags, "default", {}, { E: {} });
+		const g = findNode(tree, "G")!;
+		expect(collectDragBlock(tree, g, new Set([1]))).toEqual(["F", "G"]);
+	});
+
+	it("canDropInto allows an empty folder as target but not a leaf tag", () => {
+		const tree = buildTagTree([mkTag(1, "x"), mkTag(2, "y")], "default", {}, { E: {} });
+		expect(canDropInto(tree, ["x"], "E")).toBe(true);
+		expect(canDropInto(tree, ["x"], "y")).toBe(false);
+	});
+
+	it("moveIntoFolder into an empty folder renames the tag under it", () => {
+		const tags = [mkTag(1, "x")];
+		const tree = buildTagTree(tags, "default", {}, { E: {} });
+		const move = moveIntoFolder(tree, ["x"], "E", tags, { E: {} }, {});
+		expect(move!.tagRenames).toEqual([{ id: 1, name: "E/x" }]);
+		expect(move!.virtualTags).toEqual({ E: {} });
+	});
+
+	it("moveIntoFolder moves an empty folder as a pure virtualTags rewrite", () => {
+		const tags = [mkTag(1, "F/u")];
+		const tree = buildTagTree(tags, "default", {}, { E: {} });
+		const move = moveIntoFolder(tree, ["E"], "F", tags, { E: {} }, {});
+		expect(move!.tagRenames).toEqual([]);
+		expect(move!.virtualTags).toEqual({ "F/E": {} });
+		expect(move!.orderedIds).toEqual([1]);
 	});
 });

@@ -1,8 +1,8 @@
 import type { Selection, SelectionProps, PolygonGeometry, FilterOp } from "@/bindings.gen";
-import { buildSelection, UNARY_TYPES } from "./selections";
-import { isVariant } from "@/types/util";
+import { buildSelection } from "./selections";
 import { getSettings, setSetting } from "./settings";
 import { addSelections, getTag, getVisibleTags } from "./useMapStore";
+import { cmd } from "@/lib/commands";
 
 export interface SavedSelectionItem {
 	props: SavedSelectionProps;
@@ -97,6 +97,22 @@ export function savedToSelectionProps(saved: SavedSelectionProps): SelectionProp
 	}
 }
 
+// Resolution
+
+/** Resolve a saved selection to the union of its items' matching location ids. */
+export async function resolveSavedSelectionIds(id: string): Promise<Set<number>> {
+	const ids = new Set<number>();
+	const saved = getSavedSelections().find((s) => s.id === id);
+	if (saved) {
+		const propsList = saved.items
+			.map((item) => savedToSelectionProps(item.props))
+			.filter((p): p is SelectionProps => p !== null);
+		const resolved = await Promise.all(propsList.map((p) => cmd.storeResolveSelection(p)));
+		for (const arr of resolved) for (const locId of arr) ids.add(locId);
+	}
+	return ids;
+}
+
 // Display
 
 export function describeRule(props: SavedSelectionProps): string {
@@ -171,41 +187,4 @@ export function applySavedSelection(saved: SavedSelection): number {
 	}
 	if (batch.length > 0) addSelections(batch);
 	return batch.length;
-}
-
-/**
- * Rewrite Filter `field` references in persisted saved selections: `from` → `to`, or
- * drop the Filter (and any selection/composite that empties) when `to` is null.
- */
-export function rewriteSavedSelectionFields(
-	saved: SavedSelection[],
-	from: string,
-	to: string | null,
-): SavedSelection[] {
-	const rewriteProps = (p: SavedSelectionProps): SavedSelectionProps | null => {
-		if (p.type === "Filter") {
-			if (p.field !== from) return p;
-			return to === null ? null : { ...p, field: to };
-		}
-		if (p.type === "Intersection" || p.type === "Union" || p.type === "Invert") {
-			const children = p.selections
-				.map(rewriteProps)
-				.filter((c): c is SavedSelectionProps => c !== null);
-			if (children.length === 0) return null;
-			if (children.length === 1 && !isVariant(p, UNARY_TYPES)) return children[0];
-			return { ...p, selections: children };
-		}
-		return p;
-	};
-	return saved
-		.map((s) => ({
-			...s,
-			items: s.items
-				.map((it) => {
-					const props = rewriteProps(it.props);
-					return props ? { ...it, props } : null;
-				})
-				.filter((it): it is SavedSelectionItem => it !== null),
-		}))
-		.filter((s) => s.items.length > 0);
 }

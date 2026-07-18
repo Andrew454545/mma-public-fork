@@ -1,5 +1,9 @@
 import { useState, useEffect, useId } from "react";
 import { Dialog, DialogContent } from "@/components/primitives/Dialog";
+import { Button } from "@/components/primitives/Button";
+import { Checkbox } from "@/components/primitives/Checkbox";
+import { Radio } from "@/components/primitives/Radio";
+import { TextInput } from "@/components/primitives/TextInput";
 import { useCurrentMap, useSelectedLocationIds, getVisibleTags } from "@/store/useMapStore";
 import { useMapSetting } from "@/store/useMapSetting";
 import { cmd } from "@/lib/commands";
@@ -43,8 +47,7 @@ export function ExportDialog({ onClose }: Props) {
 
 	const baseName = fileName || map.meta.name || "export";
 	const scopeIds = scope === ExportScope.Selection ? [...selectedIds] : undefined;
-	// Visible tags only — raw meta.tags holds soft-deleted ghosts kept for undo,
-	// which must not resurrect through an export/import round-trip.
+
 	const tagsJson = () => JSON.stringify(Object.fromEntries(getVisibleTags().map((t) => [t.id, t])));
 
 	const jsonPath = () =>
@@ -102,9 +105,8 @@ export function ExportDialog({ onClose }: Props) {
 				<div className="export-modal__settings">
 					<div className="export-modal__filename">
 						<label htmlFor={`${uid}name`}>File name:</label>
-						<input
+						<TextInput
 							id={`${uid}name`}
-							className="input"
 							type="text"
 							name="name"
 							value={fileName}
@@ -114,8 +116,7 @@ export function ExportDialog({ onClose }: Props) {
 					</div>
 					<div className="export-modal__fieldset">
 						<label>
-							<input
-								type="radio"
+							<Radio
 								name="selection"
 								value={ExportScope.All}
 								checked={scope === ExportScope.All}
@@ -124,8 +125,7 @@ export function ExportDialog({ onClose }: Props) {
 							Export everything ({fmt.format(locationCount)} locations)
 						</label>
 						<label>
-							<input
-								type="radio"
+							<Radio
 								name="selection"
 								value={ExportScope.Selection}
 								checked={scope === ExportScope.Selection}
@@ -139,8 +139,7 @@ export function ExportDialog({ onClose }: Props) {
 					</div>
 					<div className="export-modal__fieldset">
 						<label>
-							<input
-								type="checkbox"
+							<Checkbox
 								name="zoom"
 								checked={saveZoom}
 								onChange={(e) => setSaveZoom(e.target.checked)}
@@ -148,8 +147,7 @@ export function ExportDialog({ onClose }: Props) {
 							Save zoom levels
 						</label>
 						<label>
-							<input
-								type="checkbox"
+							<Checkbox
 								name="extras"
 								checked={saveExtras}
 								onChange={(e) => setSaveExtras(e.target.checked)}
@@ -162,8 +160,7 @@ export function ExportDialog({ onClose }: Props) {
 							</small>
 						</label>
 						<label>
-							<input
-								type="checkbox"
+							<Checkbox
 								name="unpanned"
 								checked={bypassUnpanned}
 								onChange={(e) => setBypassUnpanned(e.target.checked)}
@@ -181,50 +178,37 @@ export function ExportDialog({ onClose }: Props) {
 					<div className="export-modal__format export-modal__format--json">
 						<h3 className="export-modal__subhead">As JSON (recommended)</h3>
 						<div className="export-modal__export-buttons">
-							<button
-								className="button"
-								onClick={copyJson}
-								disabled={!navigator.clipboard}
-								data-qa="json-copy"
-							>
+							<Button onClick={copyJson} disabled={!navigator.clipboard} data-qa="json-copy">
 								Copy
-							</button>
-							<button className="button" onClick={downloadJson} data-qa="json-dl">
+							</Button>
+							<Button onClick={downloadJson} data-qa="json-dl">
 								Download
-							</button>
+							</Button>
 						</div>
 					</div>
-					<details>
-						<summary>Other formats</summary>
-						<div className="export-modal__format export-modal__format--csv">
-							<h3 className="export-modal__subhead">As CSV</h3>
-							<p>
-								CSV exports do <em>not</em> retain camera orientation and pano&nbsp;IDs.
-							</p>
-							<div className="export-modal__export-buttons">
-								<button
-									className="button"
-									onClick={copyCsv}
-									disabled={!navigator.clipboard}
-									data-qa="csv-copy"
-								>
-									Copy
-								</button>
-								<button className="button" onClick={downloadCsv} data-qa="csv-dl">
-									Download
-								</button>
-							</div>
+					<div className="export-modal__format export-modal__format--csv">
+						<h3 className="export-modal__subhead">As CSV</h3>
+						<p>
+							CSV exports do <em>not</em> retain camera orientation and pano&nbsp;IDs.
+						</p>
+						<div className="export-modal__export-buttons">
+							<Button onClick={copyCsv} disabled={!navigator.clipboard} data-qa="csv-copy">
+								Copy
+							</Button>
+							<Button onClick={downloadCsv} data-qa="csv-dl">
+								Download
+							</Button>
 						</div>
-						<div className="export-format export-modal__format--geojson">
-							<h3 className="export-modal__subhead">As GeoJSON</h3>
-							<p>For use in non-GeoGuessr mapping tools.</p>
-							<div className="export-modal__export-buttons">
-								<button className="button" onClick={downloadGeoJson} data-qa="geojson-download">
-									Download
-								</button>
-							</div>
+					</div>
+					<div className="export-format export-modal__format--geojson">
+						<h3 className="export-modal__subhead">As GeoJSON</h3>
+						<p>For use in non-GeoGuessr mapping tools.</p>
+						<div className="export-modal__export-buttons">
+							<Button onClick={downloadGeoJson} data-qa="geojson-download">
+								Download
+							</Button>
 						</div>
-					</details>
+					</div>
 				</div>
 			</DialogContent>
 		</Dialog>

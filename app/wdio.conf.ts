@@ -37,6 +37,7 @@ export const config: WebdriverIO.Config = {
 		"./test/e2e/bulk-import-rust.test.ts",
 		"./test/e2e/perf-import.test.ts",
 		"./test/e2e/perf-sel.test.ts",
+		"./test/e2e/perf-render.test.ts",
 	],
 	maxInstances: 1,
 	capabilities: [
@@ -64,7 +65,7 @@ export const config: WebdriverIO.Config = {
 	reporters: ["spec"],
 	mochaOpts: {
 		ui: "bdd",
-		timeout: 120000,
+		timeout: 300000,
 	},
 	// Monkey-patch Street View (window.fetch + google.maps) from the test side when
 	// --mock is on, so the network-bound specs run deterministically with no network.

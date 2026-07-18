@@ -3,7 +3,11 @@ import { Dialog, DialogContent, DialogTrigger } from "@/components/primitives/Di
 import { Tooltip } from "@/components/primitives/Tooltip";
 import { Icon } from "@/components/primitives/Icon";
 import { Switch } from "@/components/primitives/Switch";
+import { Radio } from "@/components/primitives/Radio";
 import { NSelect } from "@/components/primitives/NSelect";
+import { Button } from "@/components/primitives/Button";
+import { TextInput } from "@/components/primitives/TextInput";
+import { Checkbox } from "@/components/primitives/Checkbox";
 import { openManual } from "@/store/router";
 import { getEnrichFieldOptions, getDefaultEnrichKeys } from "@/lib/data/fieldDefs";
 import { getFieldDef, fieldLabel } from "@/lib/data/fieldDefRegistry";
@@ -321,8 +325,7 @@ function FieldsTable({
 								<CoverageIcon ratio={coverage.get(row.key) ?? 0} />
 							</td>
 							<td className="manage-fields-table__enrich">
-								<input
-									type="checkbox"
+								<Checkbox
 									checked={row.enrichable && isEnrichOn(row.key)}
 									disabled={!row.enrichable}
 									title={row.enrichable ? undefined : "Not an enrichment field"}
@@ -331,8 +334,7 @@ function FieldsTable({
 							</td>
 							<td className="manage-fields-table__key">
 								{editingKey === row.key ? (
-									<input
-										className="input"
+									<TextInput
 										value={row.draftKey}
 										disabled={busy}
 										autoFocus
@@ -366,8 +368,7 @@ function FieldsTable({
 								)}
 							</td>
 							<td>
-								<input
-									className="input"
+								<TextInput
 									value={row.label}
 									disabled={!row.present}
 									onChange={(e) => updateRow(row.key, { label: e.target.value })}
@@ -463,16 +464,14 @@ function FieldsTable({
 								<fieldset className="manage-fields-action__winner">
 									<legend>On conflict, keep:</legend>
 									<label>
-										<input
-											type="radio"
+										<Radio
 											checked={renamePrompt.winner === "from"}
 											onChange={() => setRenamePrompt({ ...renamePrompt, winner: "from" })}
 										/>{" "}
 										<code>{renamePrompt.key}</code>&apos;s values
 									</label>
 									<label>
-										<input
-											type="radio"
+										<Radio
 											checked={renamePrompt.winner === "to"}
 											onChange={() => setRenamePrompt({ ...renamePrompt, winner: "to" })}
 										/>{" "}
@@ -481,17 +480,12 @@ function FieldsTable({
 								</fieldset>
 							)}
 							<div className="period-prompt__actions">
-								<button
-									className="button button--primary"
-									type="button"
-									disabled={busy}
-									onClick={confirmRename}
-								>
+								<Button variant="primary" disabled={busy} onClick={confirmRename}>
 									{renamePrompt.merge ? "Merge" : "Rename"}
-								</button>
-								<button className="button" type="button" disabled={busy} onClick={cancelRename}>
+								</Button>
+								<Button disabled={busy} onClick={cancelRename}>
 									Cancel
-								</button>
+								</Button>
 							</div>
 						</>
 					)}
@@ -505,22 +499,12 @@ function FieldsTable({
 						undone.
 					</p>
 					<div className="period-prompt__actions">
-						<button
-							className="button button--danger"
-							type="button"
-							disabled={busy}
-							onClick={confirmDelete}
-						>
+						<Button variant="destructive" disabled={busy} onClick={confirmDelete}>
 							Delete field
-						</button>
-						<button
-							className="button"
-							type="button"
-							disabled={busy}
-							onClick={() => setDeleteKey(null)}
-						>
+						</Button>
+						<Button disabled={busy} onClick={() => setDeleteKey(null)}>
 							Cancel
-						</button>
+						</Button>
 					</div>
 				</DialogContent>
 			</Dialog>
@@ -537,8 +521,7 @@ function FieldsTable({
 							confirmPeriod();
 						}}
 					>
-						<input
-							className="input"
+						<TextInput
 							type="number"
 							min="0"
 							step="any"
@@ -547,12 +530,10 @@ function FieldsTable({
 							onChange={(e) => setPeriodPrompt((p) => (p ? { ...p, value: e.target.value } : p))}
 						/>
 						<div className="period-prompt__actions">
-							<button className="button button--primary" type="submit">
+							<Button variant="primary" type="submit">
 								Set
-							</button>
-							<button className="button" type="button" onClick={() => setPeriodPrompt(null)}>
-								Cancel
-							</button>
+							</Button>
+							<Button onClick={() => setPeriodPrompt(null)}>Cancel</Button>
 						</div>
 					</form>
 				</DialogContent>

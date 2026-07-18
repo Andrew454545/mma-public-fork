@@ -2926,8 +2926,10 @@ fn reconcile_tags_match_by_name_case_insensitive() {
     let mut target_tags: HashMap<u32, Tag> =
         [(3, tag(3, "rural", "#222222"))].into_iter().collect();
     let mut next = 4;
-    let remap = reconcile_tags_by_name(&[tag(7, "Rural", "#111111")], &mut target_tags, &mut next);
+    let (remap, changed) =
+        reconcile_tags_by_name(&[tag(7, "Rural", "#111111")], &mut target_tags, &mut next);
     assert_eq!(remap.get(&7), Some(&3));
+    assert!(!changed, "pure match mutates nothing");
     assert_eq!(next, 4);
     assert_eq!(target_tags.len(), 1);
     // The existing target tag keeps its own color.
@@ -2938,7 +2940,7 @@ fn reconcile_tags_match_by_name_case_insensitive() {
 fn reconcile_tags_create_missing_with_source_color() {
     let mut target_tags: HashMap<u32, Tag> = Default::default();
     let mut next = 10;
-    let remap = reconcile_tags_by_name(
+    let (remap, changed) = reconcile_tags_by_name(
         &[Tag {
             count: 42,
             ..tag(7, "Trekker", "#abcdef")
@@ -2946,6 +2948,7 @@ fn reconcile_tags_create_missing_with_source_color() {
         &mut target_tags,
         &mut next,
     );
+    assert!(changed);
     assert_eq!(remap.get(&7), Some(&10));
     assert_eq!(next, 11);
     let new_tag = target_tags.get(&10).unwrap();
@@ -2958,7 +2961,7 @@ fn reconcile_tags_create_missing_with_source_color() {
 fn reconcile_tags_dedupes_same_name_within_batch() {
     let mut target_tags: HashMap<u32, Tag> = Default::default();
     let mut next = 1;
-    let remap = reconcile_tags_by_name(
+    let (remap, _) = reconcile_tags_by_name(
         &[tag(7, "urban", "#111111"), tag(8, "Urban", "#222222")],
         &mut target_tags,
         &mut next,
@@ -3574,5 +3577,175 @@ proptest::proptest! {
         }
         proptest::prop_assert_eq!(store_snapshot(&store), final_snapshot, "interleaved undo/redo(k) did not land on final state");
         proptest::prop_assert_eq!(store.alive_count, model.len());
+    }
+}
+
+// -----------------------------------------------------------------------
+// CPU marker picking (pick module)
+// -----------------------------------------------------------------------
+
+mod pick_tests {
+    use super::pick;
+
+    #[test]
+    fn marker_distance_px_pin_tip_anchor_is_a_hit() {
+        let d = pick::marker_distance_px(pick::Shape::Pin, 0.0, 0.0, 16.0, 0.0);
+        assert!(d <= 1.0, "expected tip-anchor hit, got {d}");
+    }
+
+    #[test]
+    fn marker_distance_px_pin_20px_below_is_a_miss() {
+        let d = pick::marker_distance_px(pick::Shape::Pin, 0.0, 20.0, 16.0, 0.0);
+        assert!(
+            d > 2.0,
+            "expected a miss well past the slop radius, got {d}"
+        );
+    }
+
+    #[test]
+    fn marker_distance_px_pin_head_center_is_roughly_minus_point65_radius() {
+        // dy_down = (uy - 0.9) * r with uy = -0.3 lands on the pin's own
+        // head-center point (unit y = -0.3 in sd_pin's external convention).
+        let r = 16.0;
+        let d = pick::marker_distance_px(pick::Shape::Pin, 0.0, -1.2 * r, r, 0.0);
+        assert!(
+            (d - (-0.65 * r)).abs() < 0.5,
+            "got {d}, expected near {}",
+            -0.65 * r
+        );
+    }
+
+    // ---------------------------------------------------------------
+    // SDF parity: independent reimplementation of the JS mirror
+    // (markerMesh.ts) / GLSL source (sdf-marker-fragment.glsl.ts), to
+    // guard against transcription drift in location_store.rs's copy.
+    // ---------------------------------------------------------------
+
+    fn ref_sd_triangle_isosceles(px: f64, py: f64, qx: f64, qy: f64) -> f64 {
+        let px = px.abs();
+        let t = ((px * qx + py * qy) / (qx * qx + qy * qy)).clamp(0.0, 1.0);
+        let (ax, ay) = (px - qx * t, py - qy * t);
+        let t2 = (px / qx).clamp(0.0, 1.0);
+        let (bx, by) = (px - qx * t2, py - qy);
+        let s = -qy.signum();
+        let dx = (ax * ax + ay * ay).min(bx * bx + by * by);
+        let dy = (s * (px * qy - py * qx)).min(s * (py - qy));
+        -dx.sqrt() * dy.signum()
+    }
+
+    fn ref_sd_box(px: f64, py: f64, bx: f64, by: f64) -> f64 {
+        let dx = px.abs() - bx;
+        let dy = py.abs() - by;
+        let (ox, oy) = (dx.max(0.0), dy.max(0.0));
+        (ox * ox + oy * oy).sqrt() + dx.max(dy).min(0.0)
+    }
+
+    fn ref_sd_arrow(x: f64, y: f64) -> f64 {
+        let head = ref_sd_triangle_isosceles(x, y + 0.5, 0.6, 0.6);
+        let shaft = ref_sd_box(x, y - 0.3, 0.2, 0.3);
+        head.min(shaft)
+    }
+
+    fn ref_sd_pin(x: f64, y: f64) -> f64 {
+        let y = -y;
+        let x = x.abs();
+        const CY: f64 = 0.3;
+        const CR: f64 = 0.65;
+        const TIP: f64 = -0.9;
+        const SIN_A: f64 = 0.5416666666666667;
+        const COS_A: f64 = 0.8405933750763339;
+        const EDGE_LEN: f64 = 1.0087120500916007;
+        let (tpx, tpy) = (x, y - TIP);
+        let along = tpx * SIN_A + tpy * COS_A;
+        if along < 0.0 {
+            return (tpx * tpx + tpy * tpy).sqrt();
+        }
+        if along > EDGE_LEN {
+            return (x * x + (y - CY) * (y - CY)).sqrt() - CR;
+        }
+        tpx * COS_A - tpy * SIN_A
+    }
+
+    #[test]
+    fn sd_arrow_parity_at_0_1_0_4() {
+        // marker_distance_px(Arrow, dx, dy_down, r=1, angle=0) reduces to
+        // sd_arrow(dx, dy_down) exactly (identity mapping for non-pin shapes at r=1).
+        let got = pick::marker_distance_px(pick::Shape::Arrow, 0.1, 0.4, 1.0, 0.0);
+        let want = ref_sd_arrow(0.1, 0.4);
+        assert!((got - want).abs() < 1e-9, "got {got}, want {want}");
+    }
+
+    #[test]
+    fn sd_pin_parity_at_0_3_minus_0_2() {
+        // pin shifts sy by -0.9*r before evaluating; dy_down = uy - 0.9 cancels that
+        // shift so unit y = uy exactly at r=1, angle=0.
+        let got = pick::marker_distance_px(pick::Shape::Pin, 0.3, -0.2 - 0.9, 1.0, 0.0);
+        let want = ref_sd_pin(0.3, -0.2);
+        assert!((got - want).abs() < 1e-9, "got {got}, want {want}");
+    }
+
+    #[test]
+    fn world_px_known_anchors() {
+        let (x, y) = pick::world_px(0.0, 0.0, 0.0);
+        assert!((x - 128.0).abs() < 1e-9);
+        assert!((y - 128.0).abs() < 1e-9);
+
+        let (x180, _) = pick::world_px(0.0, 180.0, 0.0);
+        assert!((x180 - 256.0).abs() < 1e-9);
+
+        let (x0z1, y0z1) = pick::world_px(0.0, 0.0, 1.0);
+        assert!((x0z1 - 256.0).abs() < 1e-9);
+        assert!((y0z1 - 256.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn arrow_rotation_invariance() {
+        // Rotating the cursor offset by the same angle the shape is evaluated at
+        // reproduces the angle-0 distance (the unrotated unit-space point is unchanged).
+        let r = 12.0;
+        let (dx0, dy0) = (3.0, -2.0);
+        let base = pick::marker_distance_px(pick::Shape::Arrow, dx0, dy0, r, 0.0);
+        for angle_deg in [30.0_f64, 137.0_f64] {
+            let a = angle_deg.to_radians();
+            // (dx, dy) = R(-angle) * (dx0, dy0): the inverse rotation cancels the
+            // shape's own R(angle) so the same unit-space point is evaluated.
+            let dx = a.cos() * dx0 + a.sin() * dy0;
+            let dy = -a.sin() * dx0 + a.cos() * dy0;
+            let rotated = pick::marker_distance_px(pick::Shape::Arrow, dx, dy, r, angle_deg);
+            assert!(
+                (rotated - base).abs() < 1e-9,
+                "angle {angle_deg}: got {rotated}, want {base}"
+            );
+        }
+    }
+}
+
+// -----------------------------------------------------------------------
+// Aggregation LOD (lod_finest_reps) — mirrors test/unit/cellLod.test.ts
+// -----------------------------------------------------------------------
+
+mod lod_tests {
+    use super::lod_finest_reps;
+
+    #[test]
+    fn far_apart_markers_each_get_a_rep() {
+        let pos: Vec<f32> = vec![-170.0, 10.0, -60.0, -10.0, 60.0, 20.0, 170.0, -20.0];
+        let reps = lod_finest_reps(&pos);
+        assert_eq!(reps.len(), 4);
+    }
+
+    #[test]
+    fn same_bin_markers_collapse_to_the_highest_index() {
+        let pos: Vec<f32> = vec![10.0, 10.0, 10.0000001, 10.0000001, 9.9999999, 9.9999999];
+        let reps = lod_finest_reps(&pos);
+        assert_eq!(reps, vec![2]);
+    }
+
+    #[test]
+    fn distinct_fine_bins_stay_distinct() {
+        // 10.0 vs 10.5 lng: separate bins at the finest band (12px grid at z12).
+        let pos: Vec<f32> = vec![10.0, 10.0, 10.5, 10.0];
+        let reps = lod_finest_reps(&pos);
+        assert_eq!(reps.len(), 2);
     }
 }

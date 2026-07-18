@@ -211,6 +211,30 @@ export declare const commands: {
 		data: null;
 	}>;
 	/**
+	 *  Start (or re-key) the remote API server. Idempotent: a running server just
+	 *  picks up the new key. Returns the base URL.
+	 */
+	remoteApiStart: (key: string) => Promise<{
+		status: "ok";
+		data: string;
+	} | {
+		status: "error";
+		error: string;
+	}>;
+	remoteApiStop: () => Promise<{
+		status: "error";
+		error: string;
+	} | {
+		status: "ok";
+		data: null;
+	}>;
+	/**
+	 *  Webview -> HTTP reply path: resolves the parked request for `id`.
+	 *  `payload` is JSON text, not a typed value -- specta cannot export the
+	 *  recursive `serde_json::Value` type (stack overflow at bindings export).
+	 */
+	remoteApiRespond: (id: number, ok: boolean, payload: string) => Promise<void>;
+	/**
 	 *  Load a map's Arrow data from disk, rebuild all indexes, and return initial state
 	 *  (tag counts, undo/redo availability). Must be called before any other store commands.
 	 */
@@ -512,6 +536,20 @@ export declare const commands: {
 	} | {
 		status: "ok";
 		data: boolean[];
+	}>;
+	/**
+	 *  CPU hit-test replacing deck.gl GPU picking for the marker layers. Returns
+	 *  covering markers topmost-first, resolving overlaps by draw order (selection
+	 *  overlay/active above base; within base, cell order then index within cell),
+	 *  which reproduces the painter's-order stacking the renderer draws.
+	 *  `zoom` is Google-scale; `marker_style`/`size_scale` must match the surface.
+	 */
+	storePick: (lat: number, lng: number, zoom: number, markerStyle: string, sizeScale: number) => Promise<{
+		status: "error";
+		error: string;
+	} | {
+		status: "ok";
+		data: PickHit[];
 	}>;
 	/**
 	 *  Collect all distinct values for an `extra` field across all alive locations. O(N).
@@ -1551,6 +1589,14 @@ export type PartitionBucket = {
 		number
 	] | null;
 };
+/**
+ *  One marker under the cursor. `selected` = drawn in the selection overlay
+ *  (or as the active marker), i.e. above every base cell marker.
+ */
+export type PickHit = {
+	id: number;
+	selected: boolean;
+};
 /**  Metadata for a user-installed plugin, read from `plugins/{id}/manifest.json`. */
 /**  Metadata for a user-installed plugin, read from `plugins/{id}/manifest.json`. */
 export type PluginManifest_Deserialize = {
@@ -2057,11 +2103,20 @@ export interface CommitDiffPreview {
 	removed: Float32Array;
 	modified: Float32Array;
 }
-export interface ScopeController {
-	scope: Scope;
-	setScope: (s: Scope) => void;
+/** The user-facing "which locations" concept: Rust's mechanical Scope widened with
+ *  saved selections, which resolve to ids in JS (Rust never sees saved definitions). */
+export type SourceScope = Scope | {
+	kind: "saved";
+	id: string;
+};
+export interface ScopeController<S extends SourceScope = Scope> {
+	scope: S;
+	setScope(s: S): void;
 	allCount: number;
 	selectionCount: number;
+	/** Opt-in: ScopeSelector offers saved selections. Only for consumers that
+	 *  narrow via resolveScopeIds rather than passing the scope to Rust. */
+	saved?: boolean;
 }
 /** A per-consumer scope store that lives outside React, so an imperative renderer can read it
  *  synchronously and subscribe to changes while a React sidebar drives it via `use()`. Mirrors
@@ -2124,8 +2179,8 @@ declare function SegmentedControl<T extends string | number>({ options, value, o
 	onChange: (value: T) => void;
 	className?: string;
 }): import("react/jsx-runtime").JSX.Element;
-declare function ScopeSelector({ ctl, className }: {
-	ctl: ScopeController;
+declare function ScopeSelector({ ctl, className, }: {
+	ctl: ScopeController<SourceScope>;
 	className?: string;
 }): import("react/jsx-runtime").JSX.Element;
 declare function toast(message: string, duration?: number): void;
@@ -2610,6 +2665,9 @@ export type SavedSelectionProps = {
 	type: "Invert";
 	selections: SavedSelectionProps[];
 };
+declare function savedToSelectionProps(saved: SavedSelectionProps): SelectionProps | null;
+declare function describeRule(props: SavedSelectionProps): string;
+declare function getSavedSelections(): SavedSelection[];
 declare function loadGeoJSON(): Promise<void>;
 declare const COMMANDS: {
 	save: {
@@ -2978,6 +3036,10 @@ declare const TAG_VIEW_MODES: {
 	readonly flat: "Flat";
 	readonly tree: "Tree";
 };
+declare const TAG_FOLDER_COLOR_MODES: {
+	readonly direct: "Fixed color";
+	readonly firstChild: "Inherit first child";
+};
 declare const BORDER_DETAILS: {
 	readonly light: "Standard (bundled)";
 	readonly medium: "High (~10MB)";
@@ -3003,6 +3065,7 @@ export type MapListField = keyof typeof MAP_LIST_FIELDS;
 export type DiscordPresenceMode = keyof typeof DISCORD_PRESENCE_MODES;
 export type GeocodeProvider = keyof typeof GEOCODE_PROVIDERS;
 export type TagViewMode = keyof typeof TAG_VIEW_MODES;
+export type TagFolderColorMode = keyof typeof TAG_FOLDER_COLOR_MODES;
 export type BorderDetail = keyof typeof BORDER_DETAILS;
 export type SubdivisionDetail = keyof typeof SUBDIVISION_DETAILS;
 export type PreviewAspectRatio = keyof typeof PREVIEW_ASPECT_RATIOS;
@@ -3062,6 +3125,11 @@ declare const DEFAULTS: {
 	tagViewMode: TagViewMode;
 	/** Tree view only: render each tag as the shortest path suffix that's still unique. */
 	truncateTagPaths: boolean;
+	/** Tree view: how a colorless folder row gets its color. `direct` uses tagFolderColor;
+	 *  `firstChild` inherits the first own-colored descendant in display order,
+	 *  with tagFolderColor as the fallback for colorless subtrees. */
+	tagFolderColorMode: TagFolderColorMode;
+	tagFolderColor: RGB;
 	tagSortMode: TagSortMode;
 	/** Gap between tag pills (px), shared by flat and tree views via `--tag-gap`. */
 	tagGap: number;
@@ -3071,6 +3139,9 @@ declare const DEFAULTS: {
 	previewAspectRatio: PreviewAspectRatio;
 	tagSuggestionLimit: number;
 	savedSelections: SavedSelection[];
+	/** Local REST transport for window.MMA (Settings > Advanced). */
+	remoteApi: boolean;
+	remoteApiKey: string;
 	pinnedCommands: PinnedEntry[];
 	hasSeenWelcome: boolean;
 };
@@ -3140,6 +3211,9 @@ declare const mma: {
 		reverseGeocode: (lat: number, lng: number) => Promise<GeoResult | null>;
 		discordPresenceSet: (activity: PresenceActivity) => Promise<null>;
 		discordPresenceClear: () => Promise<null>;
+		remoteApiStart: (key: string) => Promise<string>;
+		remoteApiStop: () => Promise<null>;
+		remoteApiRespond: (id: number, ok: boolean, payload: string) => Promise<void>;
 		storeOpenMap: (mapId: string) => Promise<StoreStatus>;
 		storeCloseMap: () => Promise<null>;
 		storeSaveDirty: () => Promise<SaveResult>;
@@ -3179,6 +3253,7 @@ declare const mma: {
 		] | null>;
 		storeFindNearby: (lat: number, lng: number, radiusM: number) => Promise<Location[]>;
 		storeNearAny: (lats: number[], lngs: number[], radiusM: number) => Promise<boolean[]>;
+		storePick: (lat: number, lng: number, zoom: number, markerStyle: string, sizeScale: number) => Promise<PickHit[]>;
 		storeExtraFieldValues: (field: string) => Promise<string[]>;
 		storeCreateTags: (names: string[]) => Promise<MutationResult>;
 		storeUpdateTags: (updates: Update<TagPatch>[]) => Promise<MutationResult>;
@@ -3325,6 +3400,8 @@ declare const mma: {
 		panoDotScaled: boolean;
 		tagViewMode: TagViewMode;
 		truncateTagPaths: boolean;
+		tagFolderColorMode: TagFolderColorMode;
+		tagFolderColor: RGB;
 		tagSortMode: TagSortMode;
 		tagGap: number;
 		animateTagReorder: boolean;
@@ -3333,9 +3410,14 @@ declare const mma: {
 		previewAspectRatio: PreviewAspectRatio;
 		tagSuggestionLimit: number;
 		savedSelections: SavedSelection[];
+		remoteApi: boolean;
+		remoteApiKey: string;
 		pinnedCommands: PinnedEntry[];
 		hasSeenWelcome: boolean;
 	};
+	getSavedSelections: typeof getSavedSelections;
+	savedToSelectionProps: typeof savedToSelectionProps;
+	describeRule: typeof describeRule;
 	on<E extends EditorEvent>(event: E, handler: EventHandler<E>): () => void;
 	getSeenEntries: typeof getSeenEntries;
 	getSeenCount: typeof getSeenCount;
@@ -3412,6 +3494,10 @@ declare const mma: {
 	applyScope<T extends {
 		id: number;
 	}>(scope: Scope, pool: T[]): T[];
+	resolveScopeIds(scope: SourceScope): Promise<{
+		has(id: number): boolean;
+		size: number;
+	} | null>;
 	partition(field: string, key: KeySpec, scope: Scope): Promise<PartitionBucket[]>;
 	useScope(initial?: Scope): ScopeController;
 	createScope(initial?: Scope): ScopeHandle;

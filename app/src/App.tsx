@@ -22,6 +22,10 @@ import { ManualSearch } from "@/components/manual/ManualSearch";
 import { useHotkey } from "@/lib/hooks/useHotkey";
 import { useBinding } from "@/lib/util/hotkeys";
 import { useSetting, useSettings, setSetting, CSS_VAR_SETTINGS } from "@/store/settings";
+import { useLocalStorage } from "@/lib/hooks/useLocalStorage";
+import { type MapEmbedPrefs, DEFAULT_PREFS } from "@/store/mapEmbedPrefs";
+import "@/lib/render/renderStats"; // installs the window.__mmaPerf harness bridge
+import { applyAccentColor, resolveSvColorHex } from "@/lib/util/color";
 import { Icon, mdiDiscord } from "@/components/primitives/Icon";
 import { mdiCog, mdiPuzzle, mdiClose, mdiBookOpenPageVariantOutline } from "@mdi/js";
 import { ToastContainer } from "@/components/primitives/Toast";
@@ -29,6 +33,9 @@ import { TooltipProvider } from "@/components/primitives/Tooltip";
 import { useUpdateState, dismissUpdate, installUpdate, relaunchApp } from "@/lib/util/updateCheck";
 import { APP_NAME } from "@/lib/util/format";
 import { useDiscordPresence } from "@/lib/discord/presence";
+import { initRemoteHost } from "@/lib/remote/host";
+import { cmd } from "@/lib/commands";
+import { log } from "@/lib/util/log";
 import "@/plugins";
 
 // Dynamic import (deck.gl/luma.gl out of the initial bundle) WITHOUT React.lazy/Suspense —
@@ -43,7 +50,7 @@ const isEditorWindow = getCurrentWindow().label.startsWith("map-");
 // tauri-plugin-window-state StateFlags::all() — size|position|maximized|visible|decorations|fullscreen
 const WINDOW_STATE_ALL = 0b111111;
 
-const BLANK_STYLE: CSSProperties = { position: "fixed", inset: 0, background: "#252521" };
+const BLANK_STYLE: CSSProperties = { position: "fixed", inset: 0, background: "var(--surface-0)" };
 const Blank = () => <div style={BLANK_STYLE} />;
 
 // The URL is the role authority — `targetMapId` picks editor vs list on BOTH Tauri and web.
@@ -59,11 +66,23 @@ export default function App() {
 	useCustomCss();
 	useCssVarSettings();
 	useDiscordPresence();
+	useRemoteApi();
 
 	return (
 		<TooltipProvider>
-			{closing ? <Blank /> : targetMapId ? <EditorRoot /> : !manualOpen && <MapList />}
+			{closing ? (
+				<Blank />
+			) : targetMapId ? (
+				<EditorRoot />
+			) : (
+				!manualOpen && (
+					<div className="page-scroll">
+						<MapList />
+					</div>
+				)
+			)}
 			{!closing && <AppChrome />}
+			<AccentSync />
 			<ToastContainer />
 		</TooltipProvider>
 	);
@@ -85,7 +104,9 @@ function EditorRoot() {
  *  app-level dialogs. Hidden by App while a window is self-destructing. */
 function AppChrome() {
 	const map = useCurrentMap();
+	const isMapList = !useTargetMapId();
 	const manualChapter = useManualChapter();
+
 	const update = useUpdateState();
 	const [showStats, setShowStats] = useState(false);
 	const [showSettings, setShowSettings] = useState(false);
@@ -102,10 +123,8 @@ function AppChrome() {
 
 	return (
 		<>
-			{!map && !showSettings && !showPlugins && (
-				<div
-					style={{ position: "fixed", bottom: 12, left: 12, zIndex: 5, display: "flex", gap: 4 }}
-				>
+			{isMapList && !showSettings && !showPlugins && (
+				<div className="bottom-bar bottom-bar--left">
 					<a
 						className="settings-gear"
 						href="https://discord.gg/4wPNJTuzD8"
@@ -121,14 +140,11 @@ function AppChrome() {
 				</div>
 			)}
 			<WelcomeDialog
-				open={!map && !hasSeenWelcome}
+				open={isMapList && !hasSeenWelcome}
 				onDismiss={() => setSetting("hasSeenWelcome", true)}
 			/>
 			{!showSettings && !showPlugins && (
-				<div
-					className="bottom-bar"
-					style={{ position: "fixed", bottom: 12, right: 12, zIndex: 5, display: "flex", gap: 4 }}
-				>
+				<div className="bottom-bar">
 					{update.version && !update.dismissed && (
 						<div className="update-pill">
 							{update.phase === "available" && (
@@ -161,7 +177,7 @@ function AppChrome() {
 							)}
 						</div>
 					)}
-					{!map && <BulkActions />}
+					{isMapList && <BulkActions />}
 					<button className="settings-gear" onClick={() => setShowPlugins(true)} title="Plugins">
 						<Icon path={mdiPuzzle} />
 					</button>
@@ -201,6 +217,18 @@ function useSelfDestruct(closing: boolean) {
 	}, [closing]);
 }
 
+/** Start/stop the local MMA REST transport with its setting, and host incoming
+ *  calls in this window. Start is idempotent across windows (re-keys if running). */
+function useRemoteApi() {
+	const enabled = useSetting("remoteApi");
+	const key = useSetting("remoteApiKey");
+	useEffect(() => initRemoteHost(), []);
+	useEffect(() => {
+		const call = enabled && key ? cmd.remoteApiStart(key) : cmd.remoteApiStop();
+		call.catch((e) => log.warn(`[remote-api] ${e}`));
+	}, [enabled, key]);
+}
+
 /** Mirror the CSS-var-backed app settings (see `CSS_VAR_SETTINGS`) onto `:root`. */
 function useCssVarSettings() {
 	const settings = useSettings();
@@ -209,6 +237,17 @@ function useCssVarSettings() {
 			document.documentElement.style.setProperty(cssVar, value(settings));
 		}
 	}, [settings]);
+}
+
+/** Renders nothing. The accent follows the SV coverage line color; this isolates
+ *  the mapEmbedPrefs subscription so pref churn (opacity slider drags write prefs
+ *  per tick) re-renders only this component, never the App tree. */
+function AccentSync() {
+	const [prefs] = useLocalStorage<MapEmbedPrefs>("mapEmbedPrefs", DEFAULT_PREFS);
+	useEffect(() => {
+		applyAccentColor(resolveSvColorHex(prefs.svColor));
+	}, [prefs.svColor]);
+	return null;
 }
 
 function useCustomCss() {

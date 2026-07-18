@@ -3,36 +3,39 @@ import {
 	useState,
 	useMemo,
 	useCallback,
-	useEffectEvent,
 	useLayoutEffect,
 	useRef,
-	forwardRef,
 	useImperativeHandle,
 } from "react";
 import { createPortal } from "react-dom";
 import * as ContextMenu from "@radix-ui/react-context-menu";
 import { Icon } from "@/components/primitives/Icon";
 import { mdiChevronDown, mdiChevronRight, mdiPencil, mdiFolder } from "@mdi/js";
-import { textColorFor } from "@/lib/util/color";
+import { textColorFor, rgbToHex } from "@/lib/util/color";
 import { fmt } from "@/lib/util/format";
-import { toggleTagSelections, reorderTags } from "@/store/useMapStore";
+import { toggleTagSelections } from "@/store/useMapStore";
+import { useStableHandler } from "@/lib/hooks/useStableHandler";
 import { useSetting } from "@/store/settings";
 import { TagContextMenuContent } from "./TagManager";
 import {
 	rangeToggleTagIds,
 	reorderSiblingsFlatOrder,
+	collectDragBlock,
+	canDropInto,
+	moveIntoFolder,
 	buildTagTree,
 	sumCounts,
 	isLeafTag,
 	type TagTreeNode,
+	type TagMoveResult,
 } from "./tagTreeRange";
 import type { TagSortMode } from "@/types";
 import type { Tag, VirtualTag } from "@/bindings.gen";
 
-type DropTarget = { path: string; position: "before" | "after" };
+type DropTarget = { path: string; position: "before" | "after" | "into" };
 
 /** Identity-stable gesture handlers -- volatile drag state travels as separate
- *  dragPath/dropTarget props so memoized rows aren't invalidated by this object. */
+ *  dragPaths/dropTarget props so memoized rows aren't invalidated by this object. */
 interface TreeDragHandlers {
 	onMouseDown: (e: React.MouseEvent, node: TagTreeNode) => void;
 	onMouseMove: (
@@ -78,30 +81,50 @@ interface TagTreeViewProps {
 	onRenameTag: (tag: { id: number; name: string }) => void;
 	onAddAlias: (tag: { id: number; name: string }) => void;
 	onRemoveAlias: (aliasPath: string) => void;
+	/** Commit a drag reorder (full DFS tag-id order). Must render the new order
+	 *  optimistically -- the drop handler clears its drag state synchronously. */
+	onReorder: (orderedIds: number[]) => void;
+	/** Commit a drag-into-folder move (renames + settings rewrites + order rebase).
+	 *  Same optimistic contract as onReorder. */
+	onMoveInto: (move: TagMoveResult) => void;
+	/** Open the new-folder dialog under `parentPath` ("" = root). */
+	onNewFolder: (parentPath: string) => void;
+	/** Delete a declared folder subtree (only offered when it holds no tags). */
+	onDeleteFolder: (path: string) => void;
 	filterText: string;
 }
 
-export const TagTreeView = forwardRef<TagTreeHandle, TagTreeViewProps>(function TagTreeView(
-	{
-		tags,
-		split,
-		selectedTagIds,
-		tagCounts,
-		sortMode,
-		virtualTags,
-		aliases,
-		onEditTag,
-		onEditVirtual,
-		onRenameTag,
-		onAddAlias,
-		onRemoveAlias,
-		filterText,
-	}: TagTreeViewProps,
+// Plain function component on purpose: in React 19.2 `useEffectEvent` closures never
+// update inside memo()/forwardRef()-wrapped components (frozen at mount values).
+export function TagTreeView({
+	tags,
+	split,
+	selectedTagIds,
+	tagCounts,
+	sortMode,
+	virtualTags,
+	aliases,
+	onEditTag,
+	onEditVirtual,
+	onRenameTag,
+	onAddAlias,
+	onRemoveAlias,
+	onReorder,
+	onMoveInto,
+	onNewFolder,
+	onDeleteFolder,
+	filterText,
 	ref,
-) {
+}: TagTreeViewProps & { ref?: React.Ref<TagTreeHandle> }) {
+	const folderColorMode = useSetting("tagFolderColorMode");
+	const folderColorRgb = useSetting("tagFolderColor");
 	const tree = useMemo(
-		() => buildTagTree(tags, sortMode, tagCounts, virtualTags, aliases, split),
-		[tags, sortMode, tagCounts, virtualTags, aliases, split],
+		() =>
+			buildTagTree(tags, sortMode, tagCounts, virtualTags, aliases, split, {
+				mode: folderColorMode,
+				color: rgbToHex(folderColorRgb),
+			}),
+		[tags, sortMode, tagCounts, virtualTags, aliases, split, folderColorMode, folderColorRgb],
 	);
 	const [expandedPaths, setExpandedPaths] = useState(loadExpanded);
 
@@ -181,11 +204,13 @@ export const TagTreeView = forwardRef<TagTreeHandle, TagTreeViewProps>(function 
 	const anchorPathRef = useRef<string | null>(null);
 
 	// --- In-level drag reorder (only in "default" sort, not while filtering) ---
-	const [dragPath, setDragPath] = useState<string | null>(null);
+	// Plain drag moves the grabbed node; ctrl+drag also carries its selected siblings.
+	const [dragPaths, setDragPaths] = useState<ReadonlySet<string> | null>(null);
 	const [dropTarget, setDropTarget] = useState<DropTarget | null>(null);
 	const dragEnabled = sortMode === "default" && !filterText;
 	const draggedRef = useRef(false);
 	const dragNodeRef = useRef<TagTreeNode | null>(null);
+	const dragBlockRef = useRef<Set<string> | null>(null);
 	const previewRef = useRef<HTMLUListElement>(null);
 	const dragPosRef = useRef({ x: 0, y: 0 });
 	// Mirror dropTarget into a ref + always-current tree so the window mouseup can commit
@@ -195,16 +220,19 @@ export const TagTreeView = forwardRef<TagTreeHandle, TagTreeViewProps>(function 
 	const treeRef = useRef(tree);
 	treeRef.current = tree;
 	// Set while dragging a leaf pill — drives the floating "picked up" preview.
-	const [dragLeaf, setDragLeaf] = useState<{ color: string; label: string; count: number } | null>(
-		null,
-	);
+	const [dragLeaf, setDragLeaf] = useState<{
+		color: string;
+		label: string;
+		count: number;
+		extra: number;
+	} | null>(null);
 
 	const applyDropTarget = (v: DropTarget | null) => {
 		dropTargetRef.current = v;
 		setDropTarget(v);
 	};
 
-	const handleDragMouseDown = useEffectEvent((e: React.MouseEvent, node: TagTreeNode) => {
+	const handleDragMouseDown = useStableHandler((e: React.MouseEvent, node: TagTreeNode) => {
 		draggedRef.current = false; // fresh interaction; a drag that ends off-row won't fire a click to clear it
 		if (!dragEnabled || e.button !== 0 || node.isAlias) return; // alias leaves aren't reorderable
 		if ((e.target as HTMLElement).closest("button")) return;
@@ -216,6 +244,21 @@ export const TagTreeView = forwardRef<TagTreeHandle, TagTreeViewProps>(function 
 		const grabX = e.clientX - rect.left;
 		const grabY = e.clientY - rect.top;
 		let started = false;
+		let block = new Set([node.fullPath]);
+		let multi: boolean | null = null;
+		// Ctrl is read live during the drag, so pressing/releasing it mid-gesture
+		// grows/shrinks the carried block.
+		const syncBlock = (me: MouseEvent) => {
+			const m = me.ctrlKey || me.metaKey;
+			if (m === multi) return;
+			multi = m;
+			block = new Set(
+				m ? collectDragBlock(treeRef.current, node, selectedTagIds) : [node.fullPath],
+			);
+			dragBlockRef.current = block;
+			setDragPaths(block);
+			setDragLeaf((prev) => (prev ? { ...prev, extra: block.size - 1 } : prev));
+		};
 		const onMove = (me: MouseEvent) => {
 			if (!started && (Math.abs(me.clientX - startX) > 4 || Math.abs(me.clientY - startY) > 4)) {
 				started = true;
@@ -224,16 +267,17 @@ export const TagTreeView = forwardRef<TagTreeHandle, TagTreeViewProps>(function 
 				document.body.style.userSelect = "none";
 				document.body.classList.add("mm-tag-dragging");
 				dragPosRef.current = { x: me.clientX - grabX, y: me.clientY - grabY };
-				setDragPath(node.fullPath);
 				if (isLeafTag(node)) {
 					setDragLeaf({
 						color: node.tag!.color,
 						label: node.segment,
 						count: tagCounts[node.tag!.id] ?? 0,
+						extra: 0,
 					});
 				}
 			}
 			if (started) {
+				syncBlock(me);
 				dragPosRef.current = { x: me.clientX - grabX, y: me.clientY - grabY };
 				const el = previewRef.current;
 				if (el) {
@@ -250,93 +294,131 @@ export const TagTreeView = forwardRef<TagTreeHandle, TagTreeViewProps>(function 
 			const dropT = dropTargetRef.current;
 			const clear = () => {
 				dragNodeRef.current = null;
+				dragBlockRef.current = null;
 				dropTargetRef.current = null;
-				setDragPath(null);
+				setDragPaths(null);
 				setDropTarget(null);
 				setDragLeaf(null);
 			};
-			const order =
-				started && dropT
-					? reorderSiblingsFlatOrder(
-							treeRef.current,
-							node.fullPath,
-							dropT.path,
-							dropT.position,
-							node.parentPath,
-						)
-					: null;
-			// Hold the preview/hidden state until the async reorder lands, so the pill doesn't
-			// flash back to its old slot before the new order arrives.
-			if (order) reorderTags(order).finally(clear);
-			else clear();
+			// onReorder/onMoveInto render optimistically, so clearing in the same
+			// batch settles the drop instantly with no flash back to the old slot.
+			if (started && dropT) {
+				if (dropT.position === "into") {
+					const move = moveIntoFolder(
+						treeRef.current,
+						[...block],
+						dropT.path,
+						tags,
+						virtualTags,
+						aliases,
+					);
+					if (move) onMoveInto(move);
+				} else {
+					const order = reorderSiblingsFlatOrder(
+						treeRef.current,
+						[...block],
+						dropT.path,
+						dropT.position,
+						node.parentPath,
+					);
+					if (order) onReorder(order);
+				}
+			}
+			clear();
 		};
 		window.addEventListener("mousemove", onMove);
 		window.addEventListener("mouseup", onUp);
 	});
 
-	const handleDragMouseMove = useEffectEvent(
+	const handleDragMouseMove = useStableHandler(
 		(e: React.MouseEvent, node: TagTreeNode, el: HTMLElement, horizontal = false) => {
 			const src = dragNodeRef.current;
-			if (!src || src.fullPath === node.fullPath || node.isAlias) return; // don't drop onto an alias
-			if (src.parentPath !== node.parentPath) return; // in-level only
-			// Pills reorder among pills, rows among rows — never across the leaf/branch split.
-			if ((src.children.length === 0) !== (node.children.length === 0)) return;
-			const rect = el.getBoundingClientRect();
-			const position = horizontal
-				? e.clientX - rect.left < rect.width / 2
-					? "before"
-					: "after"
-				: e.clientY - rect.top < rect.height / 2
-					? "before"
-					: "after";
+			if (!src || node.isAlias) return; // don't drop onto an alias
+			const block = dragBlockRef.current;
+			if (block?.has(node.fullPath)) return; // block members travel with the drag
+			// In-level, same-kind (pills among pills, rows among rows): live reorder.
+			// Empty folders sit outside the persisted tag order, so they neither reorder
+			// nor serve as before/after targets — for them only "into" applies.
+			if (
+				src.parentPath === node.parentPath &&
+				isLeafTag(src) === isLeafTag(node) &&
+				src.descendantTagIds.length > 0 &&
+				node.descendantTagIds.length > 0
+			) {
+				const rect = el.getBoundingClientRect();
+				const position = horizontal
+					? e.clientX - rect.left < rect.width / 2
+						? "before"
+						: "after"
+					: e.clientY - rect.top < rect.height / 2
+						? "before"
+						: "after";
+				if (
+					dropTargetRef.current?.path !== node.fullPath ||
+					dropTargetRef.current.position !== position
+				) {
+					applyDropTarget({ path: node.fullPath, position });
+				}
+				return;
+			}
+			// Anything else over a folder row is an "into" move target (drag into folder).
+			if (isLeafTag(node) || !block) return;
+			if (!canDropInto(treeRef.current, [...block], node.fullPath)) {
+				// An invalid folder (the origin parent, own subtree, collision) disarms a
+				// pending into-move, so drifting back home and releasing is a clean no-op.
+				if (dropTargetRef.current?.position === "into") applyDropTarget(null);
+				return;
+			}
 			if (
 				dropTargetRef.current?.path !== node.fullPath ||
-				dropTargetRef.current.position !== position
+				dropTargetRef.current.position !== "into"
 			) {
-				applyDropTarget({ path: node.fullPath, position });
+				applyDropTarget({ path: node.fullPath, position: "into" });
 			}
 		},
 	);
 
 	const drag: TreeDragHandlers = useMemo(
 		() => ({ onMouseDown: handleDragMouseDown, onMouseMove: handleDragMouseMove }),
-		[],
+		[handleDragMouseDown, handleDragMouseMove],
 	);
 
-	const handleRowClick = useEffectEvent((node: TagTreeNode, shiftKey: boolean, altKey: boolean) => {
-		if (draggedRef.current) {
-			draggedRef.current = false;
-			return; // suppress the click that ends a drag
-		}
-		const targetIdx = rowIndex.get(node.fullPath);
-		const anchorIdx =
-			anchorPathRef.current != null ? rowIndex.get(anchorPathRef.current) : undefined;
+	const handleRowClick = useStableHandler(
+		(node: TagTreeNode, shiftKey: boolean, altKey: boolean) => {
+			if (draggedRef.current) {
+				draggedRef.current = false;
+				return; // suppress the click that ends a drag
+			}
+			const targetIdx = rowIndex.get(node.fullPath);
+			const anchorIdx =
+				anchorPathRef.current != null ? rowIndex.get(anchorPathRef.current) : undefined;
 
-		if (shiftKey && anchorIdx != null && targetIdx != null && anchorIdx !== targetIdx) {
-			const ids = rangeToggleTagIds(visibleRows, anchorIdx, targetIdx);
-			if (ids.length > 0) toggleTagSelections(ids);
-		} else if (altKey && node.tag) {
-			// Solo: toggle only this node's own tag, ignoring descendants.
-			toggleTagSelections([node.tag.id]);
-		} else {
-			// Single-node select/deselect of all its descendant tags.
-			const allChildrenSelected =
-				node.children.length > 0 && node.descendantTagIds.every((id) => selectedTagIds.has(id));
-			const isSelected = node.tag ? selectedTagIds.has(node.tag.id) : false;
-			const effectiveSelected = isSelected || allChildrenSelected;
-			const ids = node.descendantTagIds.filter((id) =>
-				effectiveSelected ? selectedTagIds.has(id) : !selectedTagIds.has(id),
-			);
-			if (ids.length > 0) toggleTagSelections(ids);
-		}
-		anchorPathRef.current = node.fullPath;
-	});
+			if (shiftKey && anchorIdx != null && targetIdx != null && anchorIdx !== targetIdx) {
+				const ids = rangeToggleTagIds(visibleRows, anchorIdx, targetIdx);
+				if (ids.length > 0) toggleTagSelections(ids);
+			} else if (altKey && node.tag) {
+				// Solo: toggle only this node's own tag, ignoring descendants.
+				toggleTagSelections([node.tag.id]);
+			} else {
+				// Single-node select/deselect of all its descendant tags.
+				const allChildrenSelected =
+					node.children.length > 0 && node.descendantTagIds.every((id) => selectedTagIds.has(id));
+				const isSelected = node.tag ? selectedTagIds.has(node.tag.id) : false;
+				const effectiveSelected = isSelected || allChildrenSelected;
+				const ids = node.descendantTagIds.filter((id) =>
+					effectiveSelected ? selectedTagIds.has(id) : !selectedTagIds.has(id),
+				);
+				if (ids.length > 0) toggleTagSelections(ids);
+			}
+			anchorPathRef.current = node.fullPath;
+		},
+	);
 
 	const rootPills = filteredTree.filter(isLeafTag);
 	const rootRows = filteredTree.filter((n) => !isLeafTag(n));
-	const displayRootRows = spliceDisplayOrder(rootRows, dragPath, dropTarget);
+	const displayRootRows = spliceDisplayOrder(rootRows, dragPaths, dropTarget);
 	const rootRowsRef = useRef<HTMLUListElement>(null);
-	useSwapAnimation(rootRowsRef, displayRootRows, dragPath);
+	useSwapAnimation(rootRowsRef, displayRootRows, dragPaths);
 
 	return (
 		<>
@@ -351,7 +433,7 @@ export const TagTreeView = forwardRef<TagTreeHandle, TagTreeViewProps>(function 
 				onRemoveAlias={onRemoveAlias}
 				onRowClick={handleRowClick}
 				drag={drag}
-				dragPath={dragPath}
+				dragPaths={dragPaths}
 				dropTarget={dropTarget}
 			/>
 			{rootRows.length > 0 && (
@@ -368,12 +450,14 @@ export const TagTreeView = forwardRef<TagTreeHandle, TagTreeViewProps>(function 
 							onRenameTag={onRenameTag}
 							onAddAlias={onAddAlias}
 							onRemoveAlias={onRemoveAlias}
+							onNewFolder={onNewFolder}
+							onDeleteFolder={onDeleteFolder}
 							forceExpanded={forceExpanded}
 							expandedPaths={expandedPaths}
 							onToggleExpanded={toggleExpanded}
 							onRowClick={handleRowClick}
 							drag={drag}
-							dragPath={dragPath}
+							dragPaths={dragPaths}
 							dropTarget={dropTarget}
 						/>
 					))}
@@ -395,17 +479,23 @@ export const TagTreeView = forwardRef<TagTreeHandle, TagTreeViewProps>(function 
 							</button>
 							<label className="tag__text">
 								{dragLeaf.label}
-								<small style={{ marginLeft: ".375rem", fontWeight: 600, verticalAlign: "middle" }}>
+								<small
+									className="mono"
+									style={{ marginLeft: ".375rem", fontWeight: 600, verticalAlign: "middle" }}
+								>
 									{fmt.format(dragLeaf.count)}
 								</small>
 							</label>
+							{dragLeaf.extra > 0 && (
+								<span className="tag-drag-preview__count">+{dragLeaf.extra}</span>
+							)}
 						</li>
 					</ul>,
 					document.body,
 				)}
 		</>
 	);
-});
+}
 
 const TagTreeNodeRow = memo(function TagTreeNodeRow({
 	node,
@@ -417,12 +507,14 @@ const TagTreeNodeRow = memo(function TagTreeNodeRow({
 	onRenameTag,
 	onAddAlias,
 	onRemoveAlias,
+	onNewFolder,
+	onDeleteFolder,
 	forceExpanded,
 	expandedPaths,
 	onToggleExpanded,
 	onRowClick,
 	drag,
-	dragPath,
+	dragPaths,
 	dropTarget,
 }: {
 	node: TagTreeNode;
@@ -434,21 +526,23 @@ const TagTreeNodeRow = memo(function TagTreeNodeRow({
 	onRenameTag: (tag: { id: number; name: string }) => void;
 	onAddAlias: (tag: { id: number; name: string }) => void;
 	onRemoveAlias: (aliasPath: string) => void;
+	onNewFolder: (parentPath: string) => void;
+	onDeleteFolder: (path: string) => void;
 	forceExpanded: boolean;
 	expandedPaths: Set<string>;
 	onToggleExpanded: (path: string) => void;
 	onRowClick: (node: TagTreeNode, shiftKey: boolean, altKey: boolean) => void;
 	drag: TreeDragHandlers;
-	dragPath: string | null;
+	dragPaths: ReadonlySet<string> | null;
 	dropTarget: DropTarget | null;
 }) {
 	const hasChildren = node.children.length > 0;
 	const isOpen = forceExpanded || expandedPaths.has(node.fullPath);
 	const childPills = hasChildren ? node.children.filter(isLeafTag) : [];
 	const childRows = hasChildren ? node.children.filter((n) => !isLeafTag(n)) : [];
-	const displayChildRows = spliceDisplayOrder(childRows, dragPath, dropTarget);
+	const displayChildRows = spliceDisplayOrder(childRows, dragPaths, dropTarget);
 	const childRowsRef = useRef<HTMLUListElement>(null);
-	useSwapAnimation(childRowsRef, displayChildRows, dragPath);
+	useSwapAnimation(childRowsRef, displayChildRows, dragPaths);
 
 	const isSelected = node.tag ? selectedTagIds.has(node.tag.id) : false;
 	const allChildrenSelected =
@@ -474,7 +568,7 @@ const TagTreeNodeRow = memo(function TagTreeNodeRow({
 			<ContextMenu.Root modal={false}>
 				<ContextMenu.Trigger asChild>
 					<div
-						className={`tag-tree__row${effectiveSelected ? " is-selected" : ""}${someChildrenSelected ? " is-partial" : ""}${dragPath === node.fullPath ? " is-dragging" : ""}`}
+						className={`tag-tree__row${effectiveSelected ? " is-selected" : ""}${someChildrenSelected ? " is-partial" : ""}${dragPaths?.has(node.fullPath) ? " is-dragging" : ""}${dropTarget?.position === "into" && dropTarget.path === node.fullPath ? " is-drop-into" : ""}`}
 						style={{
 							backgroundColor: bg,
 							color: fg,
@@ -501,7 +595,7 @@ const TagTreeNodeRow = memo(function TagTreeNodeRow({
 						{!node.tag && (
 							<Icon path={mdiFolder} size={13} style={{ color: fg, opacity: 0.5, flexShrink: 0 }} />
 						)}
-						<small className="tag-tree__count">{fmt.format(count)}</small>
+						<small className="tag-tree__count mono">{fmt.format(count)}</small>
 						<button
 							className="button tag-tree__edit"
 							onClick={(e) => {
@@ -516,14 +610,34 @@ const TagTreeNodeRow = memo(function TagTreeNodeRow({
 						</button>
 					</div>
 				</ContextMenu.Trigger>
-				{node.tag && (
+				{node.tag ? (
 					<ContextMenu.Portal>
 						<TagContextMenuContent
 							tagId={node.tag!.id}
 							totalCount={sumCounts(node, tagCounts)}
 							onRename={() => onRenameTag({ id: node.tag!.id, name: node.tag!.name })}
 							onAddAlias={() => onAddAlias({ id: node.tag!.id, name: node.tag!.name })}
+							onNewSubfolder={() => onNewFolder(node.fullPath)}
 						/>
+					</ContextMenu.Portal>
+				) : (
+					<ContextMenu.Portal>
+						<ContextMenu.Content className="context-menu">
+							<ContextMenu.Item
+								className="context-menu__item"
+								onSelect={() => onNewFolder(node.fullPath)}
+							>
+								New subfolder...
+							</ContextMenu.Item>
+							{node.descendantTagIds.length === 0 && (
+								<ContextMenu.Item
+									className="context-menu__item"
+									onSelect={() => onDeleteFolder(node.fullPath)}
+								>
+									Delete folder
+								</ContextMenu.Item>
+							)}
+						</ContextMenu.Content>
 					</ContextMenu.Portal>
 				)}
 			</ContextMenu.Root>
@@ -540,7 +654,7 @@ const TagTreeNodeRow = memo(function TagTreeNodeRow({
 						onRemoveAlias={onRemoveAlias}
 						onRowClick={onRowClick}
 						drag={drag}
-						dragPath={dragPath}
+						dragPaths={dragPaths}
 						dropTarget={dropTarget}
 					/>
 					{childRows.length > 0 && (
@@ -557,12 +671,14 @@ const TagTreeNodeRow = memo(function TagTreeNodeRow({
 									onRenameTag={onRenameTag}
 									onAddAlias={onAddAlias}
 									onRemoveAlias={onRemoveAlias}
+									onNewFolder={onNewFolder}
+									onDeleteFolder={onDeleteFolder}
 									forceExpanded={forceExpanded}
 									expandedPaths={expandedPaths}
 									onToggleExpanded={onToggleExpanded}
 									onRowClick={onRowClick}
 									drag={drag}
-									dragPath={dragPath}
+									dragPaths={dragPaths}
 									dropTarget={dropTarget}
 								/>
 							))}
@@ -574,23 +690,24 @@ const TagTreeNodeRow = memo(function TagTreeNodeRow({
 	);
 });
 
-/** Live drag order: the dragged node is spliced to its prospective slot so the list
- *  visibly reorders while dragging (pills open a gap via the hidden `is-dragging` pill;
+/** Live drag order: the dragged block is spliced to its prospective slot so the list
+ *  visibly reorders while dragging (pills open a gap via the hidden `is-dragging` pills;
  *  folder rows move whole subtrees). Returns `nodes` unchanged when the drag/drop isn't
  *  within this sibling group. */
 function spliceDisplayOrder(
 	nodes: TagTreeNode[],
-	dragPath: string | null,
+	dragPaths: ReadonlySet<string> | null,
 	dropTarget: DropTarget | null,
 ): TagTreeNode[] {
-	if (!dragPath || !dropTarget) return nodes;
-	const dragIdx = nodes.findIndex((n) => n.fullPath === dragPath);
-	if (dragIdx === -1) return nodes;
-	const without = nodes.filter((_, i) => i !== dragIdx);
+	if (!dragPaths || !dropTarget || dropTarget.position === "into") return nodes;
+	const block: TagTreeNode[] = [];
+	const without: TagTreeNode[] = [];
+	for (const n of nodes) (dragPaths.has(n.fullPath) ? block : without).push(n);
+	if (block.length === 0) return nodes;
 	let insertAt = without.findIndex((n) => n.fullPath === dropTarget.path);
 	if (insertAt === -1) return nodes;
 	if (dropTarget.position === "after") insertAt++;
-	without.splice(insertAt, 0, nodes[dragIdx]);
+	without.splice(insertAt, 0, ...block);
 	return without;
 }
 
@@ -601,7 +718,7 @@ function spliceDisplayOrder(
 function useSwapAnimation(
 	ulRef: React.RefObject<HTMLUListElement | null>,
 	display: TagTreeNode[],
-	dragPath: string | null,
+	dragPaths: ReadonlySet<string> | null,
 ) {
 	const animate = useSetting("animateTagReorder");
 	const prevRects = useRef(new Map<string, DOMRect>());
@@ -615,7 +732,7 @@ function useSwapAnimation(
 				el.getAnimations().forEach((a) => a.cancel());
 				rects.set(node.fullPath, el.getBoundingClientRect());
 			});
-			if (dragPath) {
+			if (dragPaths) {
 				display.forEach((node, i) => {
 					const prev = prevRects.current.get(node.fullPath);
 					const next = rects.get(node.fullPath);
@@ -648,7 +765,7 @@ const TagLeafGroup = memo(function TagLeafGroup({
 	onRemoveAlias,
 	onRowClick,
 	drag,
-	dragPath,
+	dragPaths,
 	dropTarget,
 }: {
 	nodes: TagTreeNode[];
@@ -661,12 +778,12 @@ const TagLeafGroup = memo(function TagLeafGroup({
 	onRemoveAlias: (aliasPath: string) => void;
 	onRowClick: (node: TagTreeNode, shiftKey: boolean, altKey: boolean) => void;
 	drag: TreeDragHandlers;
-	dragPath: string | null;
+	dragPaths: ReadonlySet<string> | null;
 	dropTarget: DropTarget | null;
 }) {
-	const display = spliceDisplayOrder(nodes, dragPath, dropTarget);
+	const display = spliceDisplayOrder(nodes, dragPaths, dropTarget);
 	const ulRef = useRef<HTMLUListElement>(null);
-	useSwapAnimation(ulRef, display, dragPath);
+	useSwapAnimation(ulRef, display, dragPaths);
 	if (nodes.length === 0) return null;
 	return (
 		<ul
@@ -680,7 +797,7 @@ const TagLeafGroup = memo(function TagLeafGroup({
 					node={node}
 					count={tagCounts[node.tag!.id] ?? 0}
 					isSelected={selectedTagIds.has(node.tag!.id)}
-					isDragging={dragPath === node.fullPath}
+					isDragging={dragPaths?.has(node.fullPath) ?? false}
 					onEditTag={onEditTag}
 					onRenameTag={onRenameTag}
 					onAddAlias={onAddAlias}
@@ -747,7 +864,10 @@ const TagTreeLeaf = memo(function TagTreeLeaf({
 					</button>
 					<label className="tag__text">
 						{node.segment}
-						<small style={{ marginLeft: ".375rem", fontWeight: 600, verticalAlign: "middle" }}>
+						<small
+							className="mono"
+							style={{ marginLeft: ".375rem", fontWeight: 600, verticalAlign: "middle" }}
+						>
 							{fmt.format(count)}
 						</small>
 					</label>

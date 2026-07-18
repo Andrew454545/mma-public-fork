@@ -3,6 +3,7 @@
 import { GoogleMapsOverlay } from "@deck.gl/google-maps";
 import type { GoogleMapsOverlayProps } from "@deck.gl/google-maps";
 import type { PickingInfo } from "@deck.gl/core";
+import { registerDeckStats, type DeckMetrics } from "@/lib/render/renderStats";
 import { google } from "@/lib/sv/opensv";
 import { resolveStackForPrefs } from "@/lib/geo/mapStack";
 import { getStyleBackgroundColor } from "@/lib/geo/mapStyles";
@@ -33,6 +34,7 @@ const EVENT_NAMES: Record<keyof MapHostEvents, string> = {
 	mouseout: "mouseout",
 	zoom: "zoom_changed",
 	camera: "bounds_changed",
+	idle: "idle",
 	tilesloaded: "tilesloaded",
 };
 
@@ -43,12 +45,25 @@ class GoogleDeckOverlay implements DeckOverlayHandle {
 	private pending: Partial<DeckOverlayProps> = {};
 	private raf = 0;
 	private finalized = false;
+	private unregisterStats: () => void;
 	props: Partial<DeckOverlayProps> = {};
 
 	constructor(
 		map: google.maps.Map,
 		private onFinalize: (self: GoogleDeckOverlay) => void,
 	) {
+		this.unregisterStats = registerDeckStats({
+			getLayerCount: () => this.props.layers?.length ?? 0,
+			getMetrics: () =>
+				(this.overlay as unknown as { _deck?: { metrics?: DeckMetrics } } | null)?._deck?.metrics ??
+				null,
+			getGl: () =>
+				(
+					this.overlay as unknown as {
+						_deck?: { device?: { gl?: WebGL2RenderingContext } };
+					} | null
+				)?._deck?.device?.gl ?? null,
+		});
 		// GoogleMapsOverlay needs a rAF delay before creation (deck.gl + Google Maps interop).
 		this.raf = requestAnimationFrame(() => {
 			this.raf = 0;
@@ -86,6 +101,7 @@ class GoogleDeckOverlay implements DeckOverlayHandle {
 
 	finalize() {
 		this.finalized = true;
+		this.unregisterStats();
 		if (this.raf) cancelAnimationFrame(this.raf);
 		this.overlay?.setMap(null);
 		this.overlay?.finalize();

@@ -60,6 +60,18 @@ export const commands = {
 	discordPresenceSet: (activity: PresenceActivity) => typedError<null, string>(__TAURI_INVOKE("discord_presence_set", { activity })),
 	discordPresenceClear: () => typedError<null, string>(__TAURI_INVOKE("discord_presence_clear")),
 	/**
+	 *  Start (or re-key) the remote API server. Idempotent: a running server just
+	 *  picks up the new key. Returns the base URL.
+	 */
+	remoteApiStart: (key: string) => typedError<string, string>(__TAURI_INVOKE("remote_api_start", { key })),
+	remoteApiStop: () => typedError<null, string>(__TAURI_INVOKE("remote_api_stop")),
+	/**
+	 *  Webview -> HTTP reply path: resolves the parked request for `id`.
+	 *  `payload` is JSON text, not a typed value -- specta cannot export the
+	 *  recursive `serde_json::Value` type (stack overflow at bindings export).
+	 */
+	remoteApiRespond: (id: number, ok: boolean, payload: string) => __TAURI_INVOKE<void>("remote_api_respond", { id, ok, payload }),
+	/**
 	 *  Load a map's Arrow data from disk, rebuild all indexes, and return initial state
 	 *  (tag counts, undo/redo availability). Must be called before any other store commands.
 	 */
@@ -188,6 +200,14 @@ export const commands = {
 	 *  already-covered spots) pay one IPC round-trip, not one per point.
 	 */
 	storeNearAny: (lats: number[], lngs: number[], radiusM: number) => typedError<boolean[], string>(__TAURI_INVOKE("store_near_any", { lats: lats.map(i=>i), lngs: lngs.map(i=>i), radiusM })),
+	/**
+	 *  CPU hit-test replacing deck.gl GPU picking for the marker layers. Returns
+	 *  covering markers topmost-first, resolving overlaps by draw order (selection
+	 *  overlay/active above base; within base, cell order then index within cell),
+	 *  which reproduces the painter's-order stacking the renderer draws.
+	 *  `zoom` is Google-scale; `marker_style`/`size_scale` must match the surface.
+	 */
+	storePick: (lat: number, lng: number, zoom: number, markerStyle: string, sizeScale: number) => typedError<PickHit[], string>(__TAURI_INVOKE("store_pick", { lat, lng, zoom, markerStyle, sizeScale })),
 	/**
 	 *  Collect all distinct values for an `extra` field across all alive locations. O(N).
 	 *  Used by the filter UI to populate dropdown options.
@@ -880,6 +900,15 @@ export type PartitionBucket = {
 	key: string,
 	ids: number[],
 	bin: [number, number] | null,
+};
+
+/**
+ *  One marker under the cursor. `selected` = drawn in the selection overlay
+ *  (or as the active marker), i.e. above every base cell marker.
+ */
+export type PickHit = {
+	id: number,
+	selected: boolean,
 };
 
 /**  Metadata for a user-installed plugin, read from `plugins/{id}/manifest.json`. */

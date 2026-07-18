@@ -38,7 +38,7 @@ import { nowUnix } from "@/lib/util/format";
 import { mmaBufUrl, compareNatural } from "@/lib/util/util";
 import { compareMonthOrder } from "@/lib/util/date";
 import { fitMapToBounds } from "@/lib/map/mapState";
-import { getSettings, setSetting } from "@/store/settings";
+import { getSettings } from "@/store/settings";
 import {
 	setUserFieldDefs,
 	mergeUserFieldDefs,
@@ -51,7 +51,7 @@ import {
 	type MergeWinner,
 } from "@/lib/data/fieldOps";
 import type { LocationPatch_Deserialize as LocationPatch, Update, TagPatch } from "@/bindings.gen";
-import { getSavedSelections, rewriteSavedSelectionFields } from "./savedSelections";
+import { resolveSavedSelectionIds } from "./savedSelections";
 import type { RenderDelta } from "@/bindings.gen";
 import {
 	SelectedIds,
@@ -245,8 +245,8 @@ export function refreshAfterMutation() {
 
 export const useCurrentMap = makeStoreHook(() => currentMap);
 
-/** Tags that exist from the user's point of view. Raw `meta.tags` also holds soft-deleted ghosts (count=0, visible=false, kept for undo revival) — almost nothing outside the undo/revival machinery should enumerate those. */
 const NO_TAGS: Tag[] = [];
+/** Tags that exist from the user's point of view. Raw `meta.tags` also holds soft-deleted ghosts (count=0, visible=false, kept for undo revival) — almost nothing outside the undo/revival machinery should enumerate those. */
 export const getVisibleTags: () => Tag[] = memoOnRefs(
 	() => [currentMap?.meta.tags] as const,
 	(tags) => (tags ? Object.values(tags).filter((t) => t.visible !== false) : NO_TAGS),
@@ -524,11 +524,20 @@ export async function syncSelections(): Promise<{ ids: number[] }> {
 	return { ids };
 }
 
-export interface ScopeController {
-	scope: Scope;
-	setScope: (s: Scope) => void;
+/** The user-facing "which locations" concept: Rust's mechanical Scope widened with
+ *  saved selections, which resolve to ids in JS (Rust never sees saved definitions). */
+export type SourceScope = Scope | { kind: "saved"; id: string };
+
+export interface ScopeController<S extends SourceScope = Scope> {
+	scope: S;
+	// Method syntax on purpose: bivariance lets a plain ScopeController flow into
+	// ScopeSelector's wider ScopeController<SourceScope> prop.
+	setScope(s: S): void;
 	allCount: number;
 	selectionCount: number;
+	/** Opt-in: ScopeSelector offers saved selections. Only for consumers that
+	 *  narrow via resolveScopeIds rather than passing the scope to Rust. */
+	saved?: boolean;
 }
 
 /** Narrow a materialized pool of id-bearing records to the scope's subset (JS-side). */
@@ -536,6 +545,20 @@ export function applyScope<T extends { id: number }>(scope: Scope, pool: T[]): T
 	if (scope.kind === "all") return pool;
 	const ids = getSelectedLocationIds();
 	return pool.filter((item) => ids.has(item.id));
+}
+
+/** The id-set a scope narrows to, or null for "all". Saved scopes resolve in Rust. */
+export async function resolveScopeIds(
+	scope: SourceScope,
+): Promise<{ has(id: number): boolean; size: number } | null> {
+	switch (scope.kind) {
+		case "all":
+			return null;
+		case "selected":
+			return getSelectedLocationIds();
+		case "saved":
+			return resolveSavedSelectionIds(scope.id);
+	}
 }
 
 /** Group the scoped location set by a derived key — entirely in Rust, no locations fetched.
@@ -861,7 +884,10 @@ export async function deleteField(key: string) {
 	await migrateFieldReferences(key, null);
 }
 
-/** Migrate field definition + active/saved selection references after a data move. */
+/** Migrate field definition + active selection references after a data move.
+ *  Saved selections are deliberately NOT rewritten: they are global name-based
+ *  rules resolved against whichever map is open, so a map-local rename/delete
+ *  must not mutate them (the rule simply stops resolving here). */
 async function migrateFieldReferences(from: string, to: string | null) {
 	if (!currentMap) return;
 	const defs = { ...(currentMap.meta.extra?.fields ?? {}) };
@@ -870,7 +896,6 @@ async function migrateFieldReferences(from: string, to: string | null) {
 		delete defs[from];
 		await setMapExtraFields(defs);
 	}
-	setSetting("savedSelections", rewriteSavedSelectionFields(getSavedSelections(), from, to));
 	await applySelectionUpdate((sels) => rewriteSelectionFields(sels, from, to));
 }
 
@@ -1357,10 +1382,11 @@ export async function updateTags(updates: Update<TagPatch>[]) {
 	if (!currentMapId || !currentMap || updates.length === 0) return;
 	await mutate(cmd.storeUpdateTags(updates));
 	emitEvent("tag:update", updates);
+	// ONLY resync on color change, everything else is resolved by Rust
 	if (
 		selections.some((s) => {
 			const p = s.props;
-			return p.type === "Tag" && updates.some((q) => q.id === p.tagId);
+			return p.type === "Tag" && updates.some((q) => q.id === p.tagId && q.patch.color != null);
 		})
 	) {
 		applySelectionUpdate((sels) => sels);

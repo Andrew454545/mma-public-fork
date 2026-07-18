@@ -4,18 +4,27 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 // The store binds tag lookups internally; back them with a settable fake tag set.
 const h = vi.hoisted(() => ({
 	tags: {} as Record<number, { id: number; name: string; color: string; visible: boolean }>,
+	saved: [] as unknown[],
+	resolve: undefined as unknown as ReturnType<typeof vi.fn>,
 }));
 vi.mock("@/store/useMapStore", () => ({
 	addSelections: vi.fn(),
 	getTag: (id: number) => h.tags[id],
 	getVisibleTags: () => Object.values(h.tags).filter((t) => t.visible !== false),
 }));
+vi.mock("@/store/settings", () => ({
+	getSettings: () => ({ savedSelections: h.saved }),
+	setSetting: vi.fn(),
+}));
+vi.mock("@/lib/commands", () => ({
+	cmd: { storeResolveSelection: (props: unknown) => h.resolve(props) },
+}));
 
 import {
 	selectionToSaved,
 	savedToSelectionProps,
 	describeRule,
-	rewriteSavedSelectionFields,
+	resolveSavedSelectionIds,
 	type SavedSelection,
 	type SavedSelectionProps,
 } from "@/store/savedSelections";
@@ -23,6 +32,8 @@ import type { Selection } from "@/bindings.gen";
 
 beforeEach(() => {
 	h.tags = {};
+	h.saved = [];
+	h.resolve = vi.fn();
 });
 
 function makeSel(props: Selection["props"]): Selection {
@@ -30,48 +41,62 @@ function makeSel(props: Selection["props"]): Selection {
 }
 
 // ============================================================================
-// rewriteSavedSelectionFields
+// INVARIANT: saved selections are global name-based rules, resolved fresh
+// against the open map. Map-local renames/deletes never rewrite them — an
+// unresolvable rule is skipped at resolution, never mutated or dropped.
 // ============================================================================
 
-describe("rewriteSavedSelectionFields", () => {
-	const wrap = (props: SavedSelectionProps): SavedSelection => ({
-		id: "s1",
-		name: "n",
-		items: [{ props, color: [0, 0, 0] }],
-		createdAt: 0,
+describe("saved selections survive map-local renames untouched", () => {
+	const deepFreeze = <T>(obj: T): T => {
+		if (obj && typeof obj === "object") {
+			Object.values(obj).forEach(deepFreeze);
+			Object.freeze(obj);
+		}
+		return obj;
+	};
+
+	it("a TagName rule tracks the current map's tags, not a snapshot", () => {
+		const rule = deepFreeze<SavedSelectionProps>({ type: "TagName", tagName: "Japan" });
+
+		h.tags = { 1: { id: 1, name: "Japan", color: "#f00", visible: true } };
+		expect(savedToSelectionProps(rule)).toEqual({ type: "Tag", tagId: 1 });
+
+		// Rename in the "current map": the rule is not rewritten, it just stops resolving.
+		h.tags = { 1: { id: 1, name: "Asia/Japan", color: "#f00", visible: true } };
+		expect(savedToSelectionProps(rule)).toBeNull();
+		expect(rule).toEqual({ type: "TagName", tagName: "Japan" });
+
+		// A map where the name exists (or the rename is undone) resolves again.
+		h.tags = { 9: { id: 9, name: "japan", color: "#0f0", visible: true } };
+		expect(savedToSelectionProps(rule)).toEqual({ type: "Tag", tagId: 9 });
 	});
 
-	it("renames a Filter field", () => {
-		const out = rewriteSavedSelectionFields(
-			[wrap({ type: "Filter", field: "a", op: "eq", value: 1 })],
-			"a",
-			"b",
-		);
-		expect((out[0].items[0].props as any).field).toBe("b");
+	it("a Filter rule outlives its field's deletion in the current map", () => {
+		// JS holds no field registry per rule: the Filter passes through verbatim and
+		// Rust treats a missing field as non-matching. Deletion must not drop the rule.
+		const rule = deepFreeze<SavedSelectionProps>({
+			type: "Filter",
+			field: "deleted-everywhere",
+			op: "eq",
+			value: 1,
+		});
+		expect(savedToSelectionProps(rule)).toEqual(rule);
 	});
 
-	it("drops a saved selection whose only Filter is deleted", () => {
-		const out = rewriteSavedSelectionFields(
-			[wrap({ type: "Filter", field: "a", op: "eq", value: 1 })],
-			"a",
-			null,
-		);
-		expect(out).toEqual([]);
-	});
-
-	it("rewrites filters nested in a composite and collapses singletons", () => {
-		const out = rewriteSavedSelectionFields(
-			[
-				wrap({
-					type: "Union",
-					selections: [{ type: "Filter", field: "a", op: "eq", value: 1 }, { type: "Untagged" }],
-				}),
+	it("resolution never mutates the saved definition", async () => {
+		const saved: SavedSelection = deepFreeze({
+			id: "s1",
+			name: "n",
+			items: [
+				{ props: { type: "TagName", tagName: "Gone" }, color: [0, 0, 0] },
+				{ props: { type: "Untagged" }, color: [0, 0, 0] },
 			],
-			"a",
-			null,
-		);
-		// Union loses its Filter child, collapsing to the lone Untagged
-		expect(out[0].items[0].props.type).toBe("Untagged");
+		} as SavedSelection);
+		h.saved = [saved];
+		h.resolve.mockResolvedValueOnce([1]);
+		const ids = await resolveSavedSelectionIds("s1");
+		expect([...ids]).toEqual([1]);
+		expect(saved.items).toHaveLength(2);
 	});
 });
 
@@ -315,5 +340,40 @@ describe("describeRule", () => {
 			selections: [{ type: "Everything" }],
 		});
 		expect(result).toBe("NOT (All)");
+	});
+});
+
+// ============================================================================
+// resolveSavedSelectionIds
+// ============================================================================
+
+describe("resolveSavedSelectionIds", () => {
+	const entry = (items: SavedSelectionProps[]): SavedSelection => ({
+		id: "s1",
+		name: "n",
+		items: items.map((props) => ({ props, color: [0, 0, 0] as [number, number, number] })),
+		createdAt: 0,
+	});
+
+	it("unions the ids of all items", async () => {
+		h.saved = [entry([{ type: "Untagged" }, { type: "Unpanned" }])];
+		h.resolve.mockResolvedValueOnce([1, 2]).mockResolvedValueOnce([2, 3]);
+		const ids = await resolveSavedSelectionIds("s1");
+		expect([...ids].sort()).toEqual([1, 2, 3]);
+		expect(h.resolve).toHaveBeenCalledTimes(2);
+	});
+
+	it("skips items that no longer resolve", async () => {
+		h.saved = [entry([{ type: "TagName", tagName: "gone" }, { type: "Untagged" }])];
+		h.resolve.mockResolvedValueOnce([7]);
+		const ids = await resolveSavedSelectionIds("s1");
+		expect([...ids]).toEqual([7]);
+		expect(h.resolve).toHaveBeenCalledTimes(1);
+	});
+
+	it("returns an empty set for an unknown id", async () => {
+		const ids = await resolveSavedSelectionIds("nope");
+		expect(ids.size).toBe(0);
+		expect(h.resolve).not.toHaveBeenCalled();
 	});
 });

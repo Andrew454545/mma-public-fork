@@ -29,6 +29,9 @@ import { useHotkey } from "@/lib/hooks/useHotkey";
 import { useBinding } from "@/lib/util/hotkeys";
 import { useLocalStorage } from "@/lib/hooks/useLocalStorage";
 import { Dialog, DialogContent } from "@/components/primitives/Dialog";
+import { Button } from "@/components/primitives/Button";
+import { TextInput } from "@/components/primitives/TextInput";
+import { Slider } from "@/components/primitives/Slider";
 import { PolygonTools } from "@/components/editor/PolygonTools";
 
 import { SearchControl } from "@/components/editor/map/SearchControl";
@@ -319,6 +322,12 @@ export function MapEmbed({
 	useHotkey(useBinding("toggleSelectOnly"), () => {
 		setPrefs((p) => ({ ...p, selectOnly: !p.selectOnly }));
 	});
+	useHotkey(useBinding("toggleSvOpacity"), () => {
+		setPrefs((p) => ({ ...p, svOpacity: p.svOpacity > 0 ? 0 : 1 }));
+	});
+	useHotkey(useBinding("toggleMarkerOpacity"), () => {
+		setPrefs((p) => ({ ...p, markerOpacity: p.markerOpacity > 0 ? 0 : 1 }));
+	});
 	useHotkey(useBinding("mapZoomBounds"), () => {
 		cmd.storeBounds(false).then((bounds) => {
 			if (!hostRef.current || !bounds) return;
@@ -418,9 +427,8 @@ export function MapEmbed({
 								/>
 							</button>
 						</Tooltip>
-						<input
+						<Slider
 							className="sv-opacity-control__slider"
-							type="range"
 							min={0}
 							max={1}
 							step={0.05}
@@ -485,7 +493,7 @@ export function MapEmbed({
 										<div className="map-style-thumb__actions">
 											<button
 												className="icon-button"
-												style={{ color: "var(--sand-11)" }}
+												style={{ color: "var(--text-2)" }}
 												onClick={() => {
 													navigator.clipboard.writeText(JSON.stringify(s.style, null, 2));
 												}}
@@ -495,7 +503,7 @@ export function MapEmbed({
 											</button>
 											<button
 												className="icon-button"
-												style={{ color: "var(--sand-11)" }}
+												style={{ color: "var(--text-2)" }}
 												onClick={() => {
 													const next = customStyles.filter((c) => c.name !== s.name);
 													setCustomStyles(next);
@@ -531,9 +539,8 @@ export function MapEmbed({
 							}}
 						>
 							<p>
-								<input
+								<TextInput
 									name="name"
-									className="input"
 									placeholder="Style name"
 									required
 									style={{ width: "100%" }}
@@ -542,7 +549,7 @@ export function MapEmbed({
 							<p>
 								<textarea
 									name="style"
-									className="input"
+									className="text-input"
 									placeholder='[{"featureType":"water","stylers":[{"color":"#ff0000"}]}]'
 									rows={5}
 									style={{
@@ -554,9 +561,9 @@ export function MapEmbed({
 								/>
 							</p>
 							<p>
-								<button type="submit" className="button button--primary">
+								<Button variant="primary" type="submit">
 									Upload
-								</button>
+								</Button>
 							</p>
 						</form>
 					</DialogContent>

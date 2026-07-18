@@ -35,6 +35,8 @@ import {
 import { beginReview } from "@/lib/review/review";
 import { Dialog, DialogContent } from "@/components/primitives/Dialog";
 import { Icon } from "@/components/primitives/Icon";
+import { Button } from "@/components/primitives/Button";
+import { TextInput } from "@/components/primitives/TextInput";
 import {
 	mdiClose,
 	mdiChevronLeft,
@@ -324,7 +326,7 @@ export function SelectionRow({
 				{isDropTarget && dropZone === "on" && (
 					<span className="selection-row__drop-hint">{drag?.altKey ? "OR" : "AND"}</span>
 				)}
-				<span className="selection-row__size">{fmt.format(count)}</span>
+				<span className="selection-row__size mono">{fmt.format(count)}</span>
 				<span className="selection-row__actions">
 					{stepFilter && (
 						<>
@@ -436,9 +438,7 @@ export function SelectionRow({
 										)}
 										{isPoly && (
 											<>
-												<DropdownMenu.Separator
-													style={{ height: 1, background: "#0000001a", margin: "4px 0" }}
-												/>
+												<DropdownMenu.Separator className="context-menu__separator" />
 												<DropdownMenu.Item
 													className="context-menu__item"
 													onSelect={handleDownloadGeoJSON}
@@ -452,9 +452,7 @@ export function SelectionRow({
 										)}
 										{onRemove && (
 											<>
-												<DropdownMenu.Separator
-													style={{ height: 1, background: "#0000001a", margin: "4px 0" }}
-												/>
+												<DropdownMenu.Separator className="context-menu__separator" />
 												<DropdownMenu.Item className="context-menu__item" onSelect={onRemove}>
 													Deselect
 												</DropdownMenu.Item>
@@ -517,8 +515,7 @@ export function SelectionRow({
 						}}
 						style={{ display: "flex", flexDirection: "column", gap: "0.75rem", marginTop: 4 }}
 					>
-						<input
-							className="input"
+						<TextInput
 							value={tagName}
 							onChange={(e) => setTagName(e.target.value)}
 							onFocus={(e) => e.currentTarget.select()}
@@ -526,19 +523,17 @@ export function SelectionRow({
 							autoFocus
 						/>
 						<div style={{ display: "flex", justifyContent: "flex-end", gap: "0.5rem" }}>
-							<button
-								className="button"
-								type="button"
+							<Button
 								onClick={() => {
 									setSavingTag(false);
 									setTagName("");
 								}}
 							>
 								Cancel
-							</button>
-							<button className="button button--primary" type="submit" disabled={!tagName.trim()}>
+							</Button>
+							<Button variant="primary" type="submit" disabled={!tagName.trim()}>
 								Create tag
-							</button>
+							</Button>
 						</div>
 					</form>
 				</DialogContent>

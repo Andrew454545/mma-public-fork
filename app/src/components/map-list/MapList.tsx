@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useRef, useCallback, useEffect } from "react";
 import { NSelect } from "@/components/primitives/NSelect";
+import { Checkbox } from "@/components/primitives/Checkbox";
 import {
 	useMapList,
 	createMap,
@@ -344,7 +345,7 @@ function RenameForm({
 					type="text"
 					name="name"
 					defaultValue={name}
-					className="input"
+					className="text-input"
 					minLength={1}
 					maxLength={100}
 					autoFocus
@@ -393,7 +394,7 @@ function MapEditForm({ id, name, labels }: { id: string; name: string; labels: s
 					type="text"
 					name="name"
 					defaultValue={name}
-					className="input"
+					className="text-input"
 					minLength={1}
 					maxLength={100}
 					autoFocus
@@ -749,7 +750,7 @@ function ImportPreviewModal({
 							)}
 							onClick={() => toggle(i)}
 						>
-							<input type="checkbox" checked={entry.selected} readOnly />
+							<Checkbox checked={entry.selected} readOnly />
 							<span className="import-preview__name">{entry.name}</span>
 							<span className="import-preview__meta">
 								{fmt.format(entry.locationCount)} loc
@@ -1192,7 +1193,7 @@ export function MapList() {
 								}
 								createMap(name).then((m) => openMapWindow(m.id, m.name));
 							}}
-							className="input"
+							className="text-input"
 							type="text"
 							placeholder="Search maps..."
 							title={'Filter by name, or by label with label:name / label:"two words"'}
@@ -1361,7 +1362,7 @@ export function MapList() {
 										Cancel
 									</button>
 									<button
-										className="button button--danger"
+										className="button button--destructive"
 										onClick={() => {
 											deleteMap(activeAction.id);
 											setActiveAction(null);
@@ -1391,7 +1392,7 @@ export function MapList() {
 										Cancel
 									</button>
 									<button
-										className="button button--danger"
+										className="button button--destructive"
 										onClick={async () => {
 											const name = activeAction.name;
 											setActiveAction(null);

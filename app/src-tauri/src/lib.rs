@@ -44,6 +44,7 @@ mod import;
 mod map_meta;
 mod plugins;
 mod presence;
+mod remote_api;
 mod review;
 mod seen;
 mod sidecar;
@@ -57,6 +58,11 @@ pub mod serve;
 /// event emission via [`emit_event`], so commands don't carry an `AppHandle`
 /// parameter just to emit.
 static APP_HANDLE: std::sync::OnceLock<tauri::AppHandle> = std::sync::OnceLock::new();
+
+/// The app handle, available once `setup()` has run.
+pub(crate) fn app_handle() -> Option<&'static tauri::AppHandle> {
+    APP_HANDLE.get()
+}
 
 /// Emit an app-wide event to all windows. No-op before setup completes.
 pub(crate) fn emit_event(event: &str, payload: impl serde::Serialize + Clone) {
@@ -600,6 +606,9 @@ pub fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             geocoder::reverse_geocode,
             presence::discord_presence_set,
             presence::discord_presence_clear,
+            remote_api::remote_api_start,
+            remote_api::remote_api_stop,
+            remote_api::remote_api_respond,
             // --- Map lifecycle ---
             location_store::store_open_map,
             location_store::store_close_map,
@@ -630,6 +639,7 @@ pub fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             location_store::store_bounds,
             location_store::store_find_nearby,
             location_store::store_near_any,
+            location_store::store_pick,
             location_store::store_extra_field_values,
             // --- Tag CRUD ---
             location_store::store_create_tags,

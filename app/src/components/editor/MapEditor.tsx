@@ -1,12 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import type { Bounds } from "@/types";
+import { useCallback, useEffect, useEffectEvent, useRef, useState } from "react";
 import type { MutationResult } from "@/bindings.gen";
-import { createLocation } from "@/types";
 import {
 	useCurrentMap,
 	useWorkArea,
-	addLocations,
-	setActiveLocation,
 	getActiveLocation,
 	getCurrentMap,
 	getCurrentMapId,
@@ -14,7 +10,6 @@ import {
 	mutate,
 	removeLocations,
 	discardOpenMap,
-	createTags,
 	beginImportPaste,
 	beginImportFromPath,
 } from "@/store/useMapStore";
@@ -22,7 +17,8 @@ import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { listen } from "@tauri-apps/api/event";
 import { goToList } from "@/store/router";
 import { activatePlugins, deactivatePlugins } from "@/plugins/registry";
-import { getMapHost, waitForMapHost, fitMapToBounds } from "@/lib/map/mapState";
+import { getMapHost, waitForMapHost } from "@/lib/map/mapState";
+import { addParsedLocations } from "@/lib/map/mapClick";
 import { pluginsReady } from "@/plugins";
 import { MapEmbed } from "@/components/editor/map/MapEmbed";
 import { MapMetaBar } from "@/components/editor/map/MapMetaBar";
@@ -43,11 +39,14 @@ import {
 	parseCoordinates,
 	parseUrlList,
 	parsedLocationsToImportJson,
-	type ParsedLocation,
 } from "@/lib/data/importExport";
 import { Icon } from "@/components/primitives/Icon";
 import { Tooltip } from "@/components/primitives/Tooltip";
-import { mdiBackburger, mdiPencil } from "@mdi/js";
+import { mdiBackburger, mdiPencil, mdiFileDocumentOutline } from "@mdi/js";
+import { DoclinkPanel } from "@/components/editor/doclink/DoclinkPanel";
+import { DoclinkAssignDialog } from "@/components/editor/doclink/DoclinkAssignDialog";
+import { useDomEvent } from "@/lib/hooks/useDomEvent";
+import { doclinkedTags, prefetchDoclinks } from "@/lib/doclink";
 import { PluginSidebarHost } from "@/components/editor/PluginSidebarHost";
 import SameLocation from "@/components/editor/SameLocation";
 import { log } from "@/lib/util/log";
@@ -55,35 +54,6 @@ import { useCountrySelect } from "@/lib/map/useCountrySelect";
 import { useDeletePolygon } from "@/lib/map/useDeletePolygon";
 import { useMapKeyBindings } from "@/lib/map/mapKeyBindings";
 import { range, clamp } from "@/types/util";
-
-function zoomToPasted(bounds: Bounds | null, padding = 0) {
-	if (!getSettings().panToImported) return;
-	fitMapToBounds(bounds, padding, getSettings().pastePadding);
-}
-
-async function addParsedLocations(parsed: ParsedLocation[]) {
-	const tagNames = [...new Set(parsed.flatMap((p) => p.tags))];
-	const resolved = await createTags(tagNames);
-	const tagIdByName = new Map(resolved.map((t) => [t.name.toLowerCase(), t.id]));
-	const locs = parsed.map((p) =>
-		createLocation({
-			...p,
-			tags: p.tags
-				.map((n) => tagIdByName.get(n.toLowerCase()))
-				.filter((id): id is number => id !== undefined),
-		}),
-	);
-	await addLocations(locs);
-	setActiveLocation(locs[locs.length - 1].id);
-	const lats = locs.map((l) => l.lat);
-	const lngs = locs.map((l) => l.lng);
-	zoomToPasted({
-		west: Math.min(...lngs),
-		south: Math.min(...lats),
-		east: Math.max(...lngs),
-		north: Math.max(...lats),
-	});
-}
 
 function usePasteHandler() {
 	useEffect(() => {
@@ -235,9 +205,18 @@ function SplitHandle({ onSplitChange }: { onSplitChange: (v: number) => void }) 
 
 export function MapEditor() {
 	const map = useCurrentMap();
+	// Warm the doclink HTML cache once per map open, so the panel is instant.
+	const prefetchDocs = useEffectEvent(() => {
+		if (map) prefetchDoclinks(map.meta.tags);
+	});
+	useEffect(() => prefetchDocs(), [map?.meta.id]);
 	const workArea = useWorkArea();
 	const [settingsOpen, setSettingsOpen] = useState(false);
 	const [split, setSplit] = useLocalStorage("editorSplit", 50);
+	const [docPanelOpen, setDocPanelOpen] = useLocalStorage("doclinkPanelOpen", false);
+	const [docPanelWidth, setDocPanelWidth] = useLocalStorage("doclinkPanelWidth", 420);
+	const [docAssignOpen, setDocAssignOpen] = useState(false);
+	useDomEvent("open-doclink-assign", () => setDocAssignOpen(true));
 
 	useEffect(() => {
 		let cancelled = false;
@@ -332,66 +311,90 @@ export function MapEditor() {
 	if (!map) return null;
 
 	const editorClasses = `page-map-editor${appSettings.fullscreenMap ? " fullscreen-map" : ""}`;
+	const hasDoclinks = doclinkedTags(map.meta.tags).length > 0;
 
 	return (
-		<div
-			className={editorClasses}
-			style={{
-				gridTemplateColumns: appSettings.fullscreenMap
-					? undefined
-					: `minmax(0, ${split}fr) minmax(0, ${100 - split}fr)`,
-			}}
-		>
-			<SplitHandle onSplitChange={setSplit} />
-			<header>
-				<Tooltip content="Back to map list" side="bottom" align="start">
-					<a
-						href="#"
-						style={{ textDecoration: "none" }}
-						aria-label="Back to map list"
-						onClick={(e) => {
-							e.preventDefault();
-							goToList();
-						}}
-					>
-						<Icon path={mdiBackburger} />
-					</a>
-				</Tooltip>
-				<h1>{map.meta.name}</h1>
-				<Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
-					<Tooltip content="Edit map" side="bottom">
-						<DialogTrigger asChild>
-							<button className="icon-button" type="button" aria-label="Edit map">
-								<Icon path={mdiPencil} />
-							</button>
-						</DialogTrigger>
+		<div className="editor-shell">
+			<div
+				className={editorClasses}
+				style={{
+					gridTemplateColumns: appSettings.fullscreenMap
+						? undefined
+						: `minmax(0, ${split}fr) minmax(0, ${100 - split}fr)`,
+				}}
+			>
+				<SplitHandle onSplitChange={setSplit} />
+				<header>
+					<Tooltip content="Back to map list" side="bottom" align="start">
+						<a
+							href="#"
+							style={{ textDecoration: "none" }}
+							aria-label="Back to map list"
+							onClick={(e) => {
+								e.preventDefault();
+								goToList();
+							}}
+						>
+							<Icon path={mdiBackburger} />
+						</a>
 					</Tooltip>
-					<DialogContent title="Map settings" className="edit-map-modal">
-						<MapRenameForm mapId={map.meta.id} currentName={map.meta.name} />
-					</DialogContent>
-				</Dialog>
-				<EnrichmentButton />
-			</header>
-			<div className="side-header"></div>
-			<section className="map-embed" style={{ background: "var(--surface-0)" }}>
-				<MapEmbed onAddLocation={(p) => addParsedLocations([p])} />
-				{showMapCursor && <div className="map-cursor-crosshair" />}
-			</section>
-			<section className="map-meta">
-				<MapMetaBar />
-			</section>
-			<MapOverview hidden={workArea !== "overview"} />
-			{workArea === "location" && <LocationPreview />}
-			{workArea === "duplicates" && <SameLocation />}
-			{workArea === "import" && <ImportSidebar />}
-			{workArea === "diff" && <DiffSidebar />}
-			<PluginSidebarHost />
-			<CommandPalette />
-			{fileDragging && (
-				<div className="file-drop-overlay">
-					<div className="file-drop-overlay__content">Drop file to import</div>
+					<h1>{map.meta.name}</h1>
+					<Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
+						<Tooltip content="Edit map" side="bottom">
+							<DialogTrigger asChild>
+								<button className="icon-button" type="button" aria-label="Edit map">
+									<Icon path={mdiPencil} />
+								</button>
+							</DialogTrigger>
+						</Tooltip>
+						<DialogContent title="Map settings" className="edit-map-modal">
+							<MapRenameForm mapId={map.meta.id} currentName={map.meta.name} />
+						</DialogContent>
+					</Dialog>
+					<EnrichmentButton />
+				</header>
+				<div className="side-header">
+					{hasDoclinks && (
+						<Tooltip content="Doclinks" side="bottom">
+							<button
+								className="icon-button"
+								type="button"
+								aria-label="Toggle doclink panel"
+								onClick={() => setDocPanelOpen(!docPanelOpen)}
+							>
+								<Icon path={mdiFileDocumentOutline} />
+							</button>
+						</Tooltip>
+					)}
 				</div>
+				<section className="map-embed" style={{ background: "var(--surface-0)" }}>
+					<MapEmbed onAddLocation={(p) => addParsedLocations([p])} />
+					{showMapCursor && <div className="map-cursor-crosshair" />}
+				</section>
+				<section className="map-meta">
+					<MapMetaBar />
+				</section>
+				<MapOverview hidden={workArea !== "overview"} />
+				{workArea === "location" && <LocationPreview />}
+				{workArea === "duplicates" && <SameLocation />}
+				{workArea === "import" && <ImportSidebar />}
+				{workArea === "diff" && <DiffSidebar />}
+				<PluginSidebarHost />
+				<CommandPalette />
+				{fileDragging && (
+					<div className="file-drop-overlay">
+						<div className="file-drop-overlay__content">Drop file to import</div>
+					</div>
+				)}
+			</div>
+			{hasDoclinks && docPanelOpen && (
+				<DoclinkPanel
+					width={docPanelWidth}
+					onWidthChange={setDocPanelWidth}
+					onClose={() => setDocPanelOpen(false)}
+				/>
 			)}
+			<DoclinkAssignDialog open={docAssignOpen} onOpenChange={setDocAssignOpen} />
 		</div>
 	);
 }

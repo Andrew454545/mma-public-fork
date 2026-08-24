@@ -1,0 +1,62 @@
+{
+  "name": "Center of the square (82.7 km)",
+  "folder": "❤️CENTER OF THE SQUARE FINAL",
+  "customCoordinates": [
+    {
+      "lat": 0.3720242869449003,
+      "lng": 36.87011811425909,
+      "panoId": "3ji9VJgP6b81XXjCk3GmMQ",
+      "heading": 135.031,
+      "pitch": 0,
+      "zoom": 0,
+      "extra": {
+        "tags": [
+          "NW",
+          "82.7 km"
+        ]
+      }
+    },
+    {
+      "lat": 0.3719394890641753,
+      "lng": 37.61369556284563,
+      "panoId": "UaWMpZNZOPp7ynLuBSDSOg",
+      "heading": 225.002,
+      "pitch": 0,
+      "zoom": 0,
+      "extra": {
+        "tags": [
+          "NE",
+          "82.7 km"
+        ]
+      }
+    },
+    {
+      "lat": -0.3719383272665464,
+      "lng": 36.87003816010278,
+      "panoId": "IDs5rIP7dOm10VZbRRCQDw",
+      "heading": 44.982,
+      "pitch": 0,
+      "zoom": 0,
+      "extra": {
+        "tags": [
+          "SW",
+          "82.7 km"
+        ]
+      }
+    },
+    {
+      "lat": -0.3722622403430273,
+      "lng": 37.61308291669684,
+      "panoId": "ts1xnRxjl2jWb19CKJmKWg",
+      "heading": 315.07,
+      "pitch": 0,
+      "zoom": 0,
+      "extra": {
+        "tags": [
+          "SE",
+          "82.7 km"
+        ]
+      }
+    }
+  ]
+}

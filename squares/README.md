@@ -29,9 +29,23 @@ have the northern band, but they almost never share a meridian, and when they
 do (e.g. ~119.7°E near Taiwan / inland WA, or Easter Island / Baja at ~109.4°W)
 there is never a **second** dual-coverage meridian at the required spacing.
 
-Largest fully verified square: **230.4 km** in Kenya.
+Largest fully verified square: **235.9 km** in Kenya.
 
 ## Maps
+
+### 235.9 km — Kenya (Eldoret–Kitale west / Isiolo–Nairobi east)
+
+- file: `Center of the square (235.9 km).json`
+- mean side: **235.935 km**
+- sides (N, S, W, E): 235.969 km, 235.853 km, 235.959 km, 235.959 km
+- spread 115.3 m · |center lat| 42.2 m · H/V align 89.4 m
+- Mercator width/height 0.9999 (1 = look-square on the map)
+- centroid (0.000380, 36.058937)
+
+  - NW `1.0610044, 34.9975546` `xMZ0-t8jnk_KTkS895ToNg`
+  - NE `1.0617853, 37.1200347` `C1HHEoAvmlwHE0BDOZyHjw`
+  - SW `-1.0610228, 34.9983586` `te_99ggoXk02udgT58t5ug`
+  - SE `-1.0602472, 37.1198007` `H9FbT1wz23Fl4VO4ZY2oFg`
 
 ### 230.4 km — Kenya (A1 / C45 / B9 / A2)
 
@@ -93,8 +107,7 @@ Largest fully verified square: **230.4 km** in Kenya.
 
 These have four official corners but fail the 150 m budget:
 
-- Kenya ~236.2 km: spread 151.9 m, align 175.6 m (best tile swap: spread 151.5 m, align 150.2 m)
-- Kenya ~234.5 km: spread 70.8 m but align 287.7 m
-- Kenya ~241.8 km: spread ~900 m
-- Sumatra ~327 km sample hit: SE corner is water (0 panos)
+- Sumatra ~321.6 km (west coast ~100.62°E / Jambi ~103.52°E): center 2–13 m, but sides N/E ≈ 321.81 km vs S/W ≈ 321.44 km (**spread ~360–375 m**, align ~221 m). Sliding ±6 km along both meridians does not close the gap — the two roads are structurally that far from a square.
+- Kenya ~241 km (Kapenguria / 35.41°E vs 37.57°E): horizontal north pairs exist; south roads miss the same meridians by more than 450 m
+- Kenya ~234.7 km on the 235.9 km meridians: spread 253 m
 - 45° diamonds with equator vertices: no four-vertex official hit within budget
